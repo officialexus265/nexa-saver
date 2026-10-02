@@ -1,0 +1,73 @@
+import type { LoginPref } from "./constants";
+
+export type PublicProfile = {
+  userId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  username: string;
+  dateOfBirth: string;
+  role: "user" | "admin";
+  mustChangePassword: boolean;
+  loginIdentifierPref: LoginPref;
+  pinLockedUntil: string | null;
+  createdAt: string;
+};
+
+export type MeResponse =
+  | { ok: true; needsProfile: true; email: string | null; name: string | null }
+  | {
+      ok: true;
+      needsProfile: false;
+      profile: PublicProfile;
+      pinUnlocked: boolean;
+      demoPayments: boolean;
+    };
+
+export type BalanceResponse =
+  | { ok: true; locked: true }
+  | {
+      ok: true;
+      locked: false;
+      balanceTambala: number;
+      lifetimeDepositedTambala: number;
+      lifetimeWithdrawnTambala: number;
+    };
+
+export type TxKind = "deposit" | "withdrawal";
+export type TxStatus = "pending" | "success" | "failed";
+
+export type PublicTx = {
+  id: number;
+  kind: TxKind;
+  status: TxStatus;
+  grossTambala: number;
+  creditedTambala: number;
+  phone: string | null;
+  reference: string;
+  note: string | null;
+  createdAt: string;
+};
+
+export type DepositStart =
+  | { ok: true; mode: "live"; checkoutUrl: string; reference: string }
+  | { ok: true; mode: "demo"; reference: string; phone: string; amountTambala: number };
+
+export type AdminOverview = {
+  userCount: number;
+  totalDepositsTambala: number;
+  totalWithdrawalsTambala: number;
+  userBalancesTambala: number;
+  platformProfitTambala: number;
+  payoutReserveTambala: number;
+  pendingCount: number;
+  demoPayments: boolean;
+  series: Array<{ day: string; deposits: number; withdrawals: number; profit: number }>;
+};
+
+export type AdminUserRow = PublicProfile & {
+  balanceTambala: number;
+  lifetimeDepositedTambala: number;
+  lifetimeWithdrawnTambala: number;
+};

@@ -1,0 +1,240 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #07110e;
+  --color-surface: #0e1a16;
+  --color-surface-2: #15241e;
+  --color-fg: #e8f0ec;
+  --color-muted: #8aa396;
+  --color-faint: #5c7368;
+  --color-primary: #3dcf8e;
+  --color-primary-fg: #062016;
+  --color-border: #1e332b;
+  --color-danger: #e85d5d;
+  --color-warn: #c9845a;
+  --color-ring: #3dcf8e;
+  --font-sans: "Figtree", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Syne", "Figtree", ui-sans-serif, system-ui, sans-serif;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+  --shadow-soft: 0 18px 40px -24px rgb(0 0 0 / 0.55);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+
+  body {
+    min-height: 100dvh;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    text-wrap: balance;
+    letter-spacing: -0.03em;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display);
+  }
+
+  .tap {
+    transition-property: transform, opacity;
+    transition-duration: 150ms;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .tap:active:not(:disabled) {
+    transform: scale(0.96);
+  }
+}
+
+/* Mesh is a barely-there wash, not aurora. */
+.nexa-shell {
+  background:
+    radial-gradient(1200px 480px at 80% -10%, rgb(61 207 142 / 0.08), transparent 60%),
+    radial-gradient(900px 420px at -10% 110%, rgb(61 207 142 / 0.05), transparent 55%),
+    var(--color-bg);
+}
+
+.stagger-in > * {
+  opacity: 0;
+  transform: translateY(12px);
+  filter: blur(4px);
+  animation: fade-up 400ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+.stagger-in > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+.stagger-in > *:nth-child(2) {
+  animation-delay: 80ms;
+}
+.stagger-in > *:nth-child(3) {
+  animation-delay: 160ms;
+}
+.stagger-in > *:nth-child(4) {
+  animation-delay: 240ms;
+}
+.stagger-in > *:nth-child(5) {
+  animation-delay: 320ms;
+}
+.stagger-in > *:nth-child(6) {
+  animation-delay: 400ms;
+}
+
+@keyframes fade-up {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes shake-x {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-6px);
+  }
+  40% {
+    transform: translateX(6px);
+  }
+  60% {
+    transform: translateX(-4px);
+  }
+  80% {
+    transform: translateX(4px);
+  }
+}
+
+.shake {
+  animation: shake-x 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.45;
+  }
+  100% {
+    transform: scale(1.25);
+    opacity: 0;
+  }
+}
+
+.success-ring {
+  animation: pulse-ring 700ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes draw-check {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.check-stroke {
+  stroke-dasharray: 48;
+  stroke-dashoffset: 48;
+  animation: draw-check 500ms cubic-bezier(0.22, 1, 0.36, 1) 120ms forwards;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.shimmer {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgb(232 240 236 / 0.08) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@keyframes balance-reveal {
+  from {
+    filter: blur(12px);
+    opacity: 0.35;
+    transform: translateY(8px);
+  }
+  to {
+    filter: blur(0);
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.balance-reveal {
+  animation: balance-reveal 500ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes float-y {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.float-soft {
+  animation: float-y 5s ease-in-out infinite;
+}
+
+.step-enter {
+  animation: fade-up 350ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stagger-in > *,
+  .success-ring,
+  .check-stroke,
+  .shimmer,
+  .balance-reveal,
+  .float-soft,
+  .step-enter,
+  .shake {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+  }
+}
