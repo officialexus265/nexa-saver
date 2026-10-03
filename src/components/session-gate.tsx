@@ -26,7 +26,7 @@ export function SessionGate({
   const { user, isPending } = useCurrentUserState();
   const [me, setMe] = useState<MeResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [locked, setLocked] = useState(true); // PIN required until unlocked this visit
+  const [locked, setLocked] = useState<boolean | null>(null); // null = not hydrated from server yet
   const [pw, setPw] = useState({ current: "", next: "" });
   const [pwError, setPwError] = useState<string | null>(null);
   const [pwBusy, setPwBusy] = useState(false);
@@ -48,6 +48,19 @@ export function SessionGate({
     if (!user) return;
     void refresh();
   }, [isPending, user, refresh]);
+
+  // Hydrate lock from server PIN window once per mount. Idle/instant rules may lock later.
+  // Avoids forcing PIN on every navigation while the verify window is still open.
+  useEffect(() => {
+    if (!me || me.needsProfile) return;
+    setLocked((prev) => {
+      // First hydration from server only — don't undo a client-side idle lock with a stale refresh
+      // unless the server says the window is closed.
+      if (prev === null) return !me.pinUnlocked;
+      if (!me.pinUnlocked) return true;
+      return prev;
+    });
+  }, [me]);
 
   useEffect(() => {
     if (!me || me.needsProfile) return;
@@ -110,6 +123,7 @@ export function SessionGate({
   if (!me) return <Navigate to="/" />;
   if (me.needsProfile) return <Navigate to="/signup" />;
   if (admin && me.profile.role !== "admin") return <Navigate to="/dashboard" />;
+  if (locked === null) return <ShellSkeleton />;
 
   const profile = me.profile;
 
@@ -132,7 +146,7 @@ export function SessionGate({
       {children({
         profile,
         demoPayments: me.demoPayments,
-        pinUnlocked: !locked,
+        pinUnlocked: locked === false,
         emailVerified: Boolean(!me.needsProfile && me.emailVerified),
         lock: () => setLocked(true),
         unlock: () => setLocked(false),
@@ -165,7 +179,7 @@ export function SessionGate({
           </form>
         </div>
       ) : null}
-      {locked && !profile.mustChangePassword ? (
+      {locked === true && !profile.mustChangePassword ? (
         <PinGate
           subtitle={
             profile.lockMode === "instant"
