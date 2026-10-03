@@ -104,6 +104,11 @@ function LoginPage() {
           />
         </div>
         <PasswordField id="password" label="Password" value={password} onChange={setPassword} />
+        <p className="text-right text-sm">
+          <Link to="/forgot-password" className="text-muted hover:text-primary">
+            Forgot password?
+          </Link>
+        </p>
         {error ? <p className="text-sm text-danger">{error}</p> : null}
         <Button type="submit" className="w-full" disabled={busy}>
           {busy ? "Signing in…" : "Enter vault"}

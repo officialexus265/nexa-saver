@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import type { Sql } from "@/lib/db";
 import { getRequest } from "@tanstack/react-start/server";
-import { sendNewDeviceAlert } from "./mail.server";
+import { sendSecurityAlertEmail } from "./mail.server";
 import { writeAudit } from "./audit.server";
+import { issueSecurityToken } from "./security-tokens.server";
 
 function clientIp(headers: Headers): string {
   const xf = headers.get("x-forwarded-for");
@@ -11,7 +12,6 @@ function clientIp(headers: Headers): string {
 }
 
 function fingerprint(userAgent: string, ip: string): string {
-  // Coarse: UA family + /24 of IPv4 so small DHCP changes don't spam alerts.
   const ua = userAgent.slice(0, 180);
   let net = ip;
   const m = ip.match(/^(\d+\.\d+\.\d+)\.\d+$/);
@@ -19,10 +19,6 @@ function fingerprint(userAgent: string, ip: string): string {
   return createHash("sha256").update(`${ua}|${net}`).digest("hex").slice(0, 32);
 }
 
-/**
- * Record this request's device. On first sighting for the user, email them (if SMTP is set).
- * Safe to call on every heartbeat / getMe — updates last_seen only after the first alert.
- */
 export async function noteDeviceAccess(
   sql: Sql,
   opts: { userId: string; email: string; firstName: string },
@@ -49,7 +45,6 @@ export async function noteDeviceAccess(
       return { isNew: false };
     }
 
-    // First time this fingerprint is seen for this user.
     const prior = await sql<{ n: number }>`
       select count(*)::int as n from known_devices where user_id = ${opts.userId}
     `;
@@ -62,8 +57,12 @@ export async function noteDeviceAccess(
         set last_seen_at = now(), last_ip = excluded.last_ip, user_agent = excluded.user_agent
     `;
 
-    // Don't alert on the very first device (normal signup / first login).
     if (!isFirstEverDevice) {
+      const { url } = await issueSecurityToken(sql, {
+        userId: opts.userId,
+        action: "new_device",
+        payload: { ip, userAgent: userAgent.slice(0, 120) },
+      });
       await writeAudit(sql, {
         action: "new_device",
         userId: opts.userId,
@@ -71,12 +70,16 @@ export async function noteDeviceAccess(
         ip,
         userAgent,
       });
-      void sendNewDeviceAlert({
+      void sendSecurityAlertEmail({
         to: opts.email,
         firstName: opts.firstName,
-        userAgent,
-        ip,
-        when: new Date(),
+        kind: "new_device",
+        secureUrl: url,
+        detailLines: [
+          `When: ${new Date().toLocaleString("en-GB", { timeZone: "Africa/Blantyre" })} (Malawi time)`,
+          `IP: ${ip || "unknown"}`,
+          `Device: ${userAgent.slice(0, 140) || "unknown"}`,
+        ],
       });
     }
 

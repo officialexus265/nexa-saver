@@ -980,6 +980,25 @@ export const changePinFn = createServerFn({ method: "POST" })
     `;
     const { writeAudit } = await import("./audit.server");
     await writeAudit(sql, { action: "pin_change", userId: context.userId });
+    try {
+      const { issueSecurityToken } = await import("./security-tokens.server");
+      const { sendSecurityAlertEmail } = await import("./mail.server");
+      const { url } = await issueSecurityToken(sql, {
+        userId: context.userId,
+        action: "pin_change",
+      });
+      void sendSecurityAlertEmail({
+        to: profile.email,
+        firstName: profile.first_name,
+        kind: "pin_change",
+        secureUrl: url,
+        detailLines: [
+          `When: ${new Date().toLocaleString("en-GB", { timeZone: "Africa/Blantyre" })} (Malawi time)`,
+        ],
+      });
+    } catch (err) {
+      console.error("[pin_change] alert:", (err as Error).message);
+    }
     return { ok: true as const };
   });
 
@@ -1243,8 +1262,13 @@ export const changeRegisteredPhone = createServerFn({ method: "POST" })
     `;
     if (asInt(clash[0]?.n) > 0) throw new Error("That phone number is already registered");
 
+    const previousPhone = profile.phone;
     await sql`
-      update profiles set phone = ${phone}, updated_at = now() where user_id = ${context.userId}
+      update profiles
+      set phone = ${phone},
+          previous_phone = ${previousPhone},
+          updated_at = now()
+      where user_id = ${context.userId}
     `;
     const until = new Date(Date.now() + PHONE_CHANGE_WITHDRAW_HOLD_MS);
     await extendWithdrawHold(sql, context.userId, until);
@@ -1254,6 +1278,29 @@ export const changeRegisteredPhone = createServerFn({ method: "POST" })
       userId: context.userId,
       detail: `new phone; 72h hold until ${until.toISOString()}`,
     });
+    try {
+      const { issueSecurityToken } = await import("./security-tokens.server");
+      const { sendSecurityAlertEmail } = await import("./mail.server");
+      const { formatPhoneDisplay } = await import("./phone");
+      const { url } = await issueSecurityToken(sql, {
+        userId: context.userId,
+        action: "phone_change",
+        payload: { previousPhone },
+      });
+      void sendSecurityAlertEmail({
+        to: profile.email,
+        firstName: profile.first_name,
+        kind: "phone_change",
+        secureUrl: url,
+        detailLines: [
+          `Previous number: ${formatPhoneDisplay(previousPhone)}`,
+          `New number: ${formatPhoneDisplay(phone)}`,
+          `When: ${new Date().toLocaleString("en-GB", { timeZone: "Africa/Blantyre" })} (Malawi time)`,
+        ],
+      });
+    } catch (err) {
+      console.error("[phone_change] alert:", (err as Error).message);
+    }
     return {
       ok: true as const,
       phone,
@@ -1298,4 +1345,281 @@ export const runReconciliationFn = createServerFn({ method: "POST" })
     if (!profile || profile.role !== "admin") throw new Error("Admin only");
     const { runReconciliation } = await import("./reconcile.server");
     return runReconciliation();
+  });
+
+/** Public: inspect a secure-account email token (no login required). */
+export const inspectSecureToken = createServerFn({ method: "GET" })
+  .validator(z.object({ token: z.string().min(20) }))
+  .handler(async ({ data }) => {
+    const { getSql } = await import("@/lib/db");
+    const { loadValidToken } = await import("./security-tokens.server");
+    const sql = await getSql();
+    const row = await loadValidToken(sql, data.token);
+    if (!row) return { ok: false as const, reason: "invalid" as const };
+    const profiles = await sql<{ first_name: string; email: string; previous_phone: string | null; phone: string }>`
+      select first_name, email, previous_phone, phone from profiles
+      where user_id = ${row.user_id} and deleted_at is null limit 1
+    `;
+    const p = profiles[0];
+    if (!p) return { ok: false as const, reason: "invalid" as const };
+    return {
+      ok: true as const,
+      action: row.action,
+      firstName: p.first_name,
+      previousPhone: (row.payload?.previousPhone as string | undefined) ?? p.previous_phone,
+      currentPhone: p.phone,
+    };
+  });
+
+/**
+ * Secure account from email link: set a new password (proves identity),
+ * revoke all sessions, and for phone_change restore the previous number.
+ */
+export const secureAccountWithPassword = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      token: z.string().min(20),
+      currentPassword: z.string().min(1),
+      newPassword: z.string().min(8).max(128),
+      restorePhone: z.boolean().optional(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { loadValidToken, consumeToken } = await import("./security-tokens.server");
+    const { hashPassword, verifyPassword } = await import("better-auth/crypto");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const row = await loadValidToken(sql, data.token);
+    if (!row) throw new Error("This secure link is invalid or has expired. Request a new one by changing settings again, or contact support.");
+    if (row.action === "pin_change") {
+      throw new Error("Use the PIN form on this page for PIN alerts.");
+    }
+    if (row.action === "password_reset") {
+      throw new Error("Use the password reset page from your email link.");
+    }
+
+    const accounts = await sql<{ password: string | null }>`
+      select password from "account" where "userId" = ${row.user_id} and "providerId" = ${"credential"} limit 1
+    `;
+    const currentHash = accounts[0]?.password;
+    if (!currentHash) throw new Error("No password is set on this account");
+    const matches = await (verifyPassword as unknown as (hash: string, password: string) => Promise<boolean>)(
+      currentHash,
+      data.currentPassword,
+    );
+    if (!matches) throw new Error("Current password is incorrect");
+
+    const next = await hashPassword(data.newPassword);
+    const previousPhone =
+      (row.payload?.previousPhone as string | undefined) ||
+      (
+        await sql<{ previous_phone: string | null }>`
+          select previous_phone from profiles where user_id = ${row.user_id} limit 1
+        `
+      )[0]?.previous_phone;
+
+    await withTransaction(async (tx) => {
+      await tx`
+        update "account" set password = ${next}, "updatedAt" = now()
+        where "userId" = ${row.user_id} and "providerId" = ${"credential"}
+      `;
+      await tx`delete from "session" where "userId" = ${row.user_id}`;
+      if (row.action === "phone_change" && data.restorePhone !== false && previousPhone) {
+        await tx`
+          update profiles
+          set phone = ${previousPhone},
+              previous_phone = null,
+              updated_at = now()
+          where user_id = ${row.user_id}
+        `;
+      }
+      await consumeToken(tx as unknown as typeof sql, row.id);
+    });
+
+    await writeAudit(sql, {
+      action: "secure_account_password",
+      userId: row.user_id,
+      detail: `from ${row.action}; sessions revoked; restorePhone=${Boolean(row.action === "phone_change" && previousPhone)}`,
+    });
+
+    return {
+      ok: true as const,
+      phoneRestored: Boolean(row.action === "phone_change" && previousPhone && data.restorePhone !== false),
+      sessionsRevoked: true as const,
+    };
+  });
+
+/** Secure from PIN-change alert: password + new PIN, revoke all sessions. */
+export const secureAccountWithPin = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      token: z.string().min(20),
+      password: z.string().min(1),
+      newPin: pinSchema,
+    }),
+  )
+  .handler(async ({ data }) => {
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { loadValidToken, consumeToken } = await import("./security-tokens.server");
+    const { verifyPassword } = await import("better-auth/crypto");
+    const { hashSecret } = await import("./crypto");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const row = await loadValidToken(sql, data.token);
+    if (!row) throw new Error("This secure link is invalid or has expired.");
+    if (row.action !== "pin_change" && row.action !== "new_device") {
+      // allow new_device to set pin too? user asked pin_change specifically; keep pin_change only
+    }
+    if (row.action !== "pin_change") {
+      throw new Error("Use the password form on this page for this alert.");
+    }
+
+    const accounts = await sql<{ password: string | null }>`
+      select password from "account" where "userId" = ${row.user_id} and "providerId" = ${"credential"} limit 1
+    `;
+    const currentHash = accounts[0]?.password;
+    if (!currentHash) throw new Error("No password is set on this account");
+    const matches = await (verifyPassword as unknown as (hash: string, password: string) => Promise<boolean>)(
+      currentHash,
+      data.password,
+    );
+    if (!matches) throw new Error("Password is incorrect");
+
+    const pinHash = await hashSecret(data.newPin);
+    await withTransaction(async (tx) => {
+      await tx`
+        update profiles
+        set pin_hash = ${pinHash},
+            pin_verified_at = null,
+            failed_pin_attempts = 0,
+            updated_at = now()
+        where user_id = ${row.user_id}
+      `;
+      await tx`delete from "session" where "userId" = ${row.user_id}`;
+      await consumeToken(tx as unknown as typeof sql, row.id);
+    });
+
+    await writeAudit(sql, {
+      action: "secure_account_pin",
+      userId: row.user_id,
+      detail: "pin reset via secure link; sessions revoked",
+    });
+
+    return { ok: true as const, sessionsRevoked: true as const };
+  });
+
+
+/** Request a password-reset email. Always returns ok (no account enumeration). */
+export const requestPasswordReset = createServerFn({ method: "POST" })
+  .validator(z.object({ identifier: z.string().min(1).max(120) }))
+  .handler(async ({ data }) => {
+    const { getSql } = await import("@/lib/db");
+    const { assertRateLimit } = await import("./rate-limit.server");
+    const { normalizeMwPhone } = await import("./phone");
+    const { issueSecurityToken } = await import("./security-tokens.server");
+    const { sendMail } = await import("./mail.server");
+    const { APP_NAME } = await import("./constants");
+    const sql = await getSql();
+    const raw = data.identifier.trim();
+    await assertRateLimit(sql, {
+      bucket: `pw-reset:${raw.toLowerCase().slice(0, 64)}`,
+      limit: 5,
+      windowSeconds: 60 * 60,
+      message: "Too many reset attempts. Try again later.",
+    });
+
+    const phone = normalizeMwPhone(raw);
+    const rows = await sql<{ user_id: string; email: string; first_name: string }>`
+      select user_id, email, first_name from profiles
+      where deleted_at is null
+        and (
+          lower(email) = ${raw.toLowerCase()}
+          or lower(username) = ${raw.toLowerCase()}
+          or phone = ${phone ?? "__none__"}
+        )
+      limit 1
+    `;
+    const profile = rows[0];
+    if (profile) {
+      try {
+        const { url } = await issueSecurityToken(sql, {
+          userId: profile.user_id,
+          action: "password_reset",
+          ttlHours: 2,
+        });
+        const subject = `${APP_NAME}: reset your password`;
+        const text = [
+          `Hi ${profile.first_name},`,
+          ``,
+          `We received a request to reset your ${APP_NAME} password.`,
+          `Open this link within 2 hours:`,
+          url,
+          ``,
+          `If you did not ask for this, you can ignore this email. Your password will stay the same.`,
+          ``,
+          `— ${APP_NAME}`,
+        ].join("\n");
+        const html = `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;padding:24px">
+          <p>Hi ${profile.first_name},</p>
+          <p>We received a request to reset your ${APP_NAME} password.</p>
+          <p><a href="${url}" style="display:inline-block;background:#3dcf8e;color:#062016;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px">Reset password</a></p>
+          <p style="font-size:12px;color:#666;word-break:break-all">${url}</p>
+          <p style="font-size:12px;color:#666">This link expires in 2 hours. If you did not request it, ignore this email.</p>
+        </body></html>`;
+        void sendMail({ to: profile.email, subject, text, html });
+      } catch (err) {
+        console.error("[password-reset]", (err as Error).message);
+      }
+    }
+    return {
+      ok: true as const,
+      message: "If an account matches, we sent a reset link to the registered email.",
+    };
+  });
+
+export const inspectPasswordResetToken = createServerFn({ method: "GET" })
+  .validator(z.object({ token: z.string().min(20) }))
+  .handler(async ({ data }) => {
+    const { getSql } = await import("@/lib/db");
+    const { loadValidToken } = await import("./security-tokens.server");
+    const sql = await getSql();
+    const row = await loadValidToken(sql, data.token);
+    if (!row || row.action !== "password_reset") return { ok: false as const };
+    return { ok: true as const };
+  });
+
+/** Complete password reset from email link — no current password required. */
+export const completePasswordReset = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      token: z.string().min(20),
+      newPassword: z.string().min(8).max(128),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { loadValidToken, consumeToken } = await import("./security-tokens.server");
+    const { hashPassword } = await import("better-auth/crypto");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const row = await loadValidToken(sql, data.token);
+    if (!row || row.action !== "password_reset") {
+      throw new Error("This reset link is invalid or has expired. Request a new one from the sign-in page.");
+    }
+    const next = await hashPassword(data.newPassword);
+    await withTransaction(async (tx) => {
+      await tx`
+        update "account" set password = ${next}, "updatedAt" = now()
+        where "userId" = ${row.user_id} and "providerId" = ${"credential"}
+      `;
+      await tx`delete from "session" where "userId" = ${row.user_id}`;
+      await consumeToken(tx as unknown as typeof sql, row.id);
+    });
+    await writeAudit(sql, {
+      action: "password_reset",
+      userId: row.user_id,
+      detail: "password reset via email link; sessions revoked",
+    });
+    return { ok: true as const, sessionsRevoked: true as const };
   });
