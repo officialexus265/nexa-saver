@@ -19,6 +19,9 @@ import {
   signOutOtherDevices,
   resendVerificationEmailFn,
   changeLockPreference,
+  listActiveSessions,
+  revokeSessionById,
+  type PublicSession,
 } from "@/lib/nexa/fns";
 import { LOCK_MODE_OPTIONS, type LockMode } from "@/lib/nexa/constants";
 import { formatPhoneDisplay } from "@/lib/nexa/phone";
@@ -39,6 +42,14 @@ function Settings({ profile }: { profile: { firstName: string; lastName: string;
   const [error, setError] = useState<string | null>(null);
   const [lockMode, setLockMode] = useState<LockMode>(profile.lockMode === "instant" ? "instant" : "idle");
   const [lockMinutes, setLockMinutes] = useState(String(profile.lockIdleMinutes ?? 5));
+  const [sessions, setSessions] = useState<PublicSession[] | null>(null);
+  const [sessionBusy, setSessionBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    void listActiveSessions()
+      .then(setSessions)
+      .catch(() => setSessions([]));
+  }, []);
 
   async function savePref(next: LoginPref) {
     setPref(next);
@@ -276,12 +287,71 @@ function Settings({ profile }: { profile: { firstName: string; lastName: string;
 
       <Card className="space-y-3 p-4">
         <h2 className="font-display text-lg font-semibold">Sessions</h2>
-        <p className="text-sm text-muted">
-          Sign out every device using this account. You will need to sign in again on this device too.
-        </p>
+        <p className="text-sm text-muted">Active sign-ins on this account. Sign out any device you do not recognise.</p>
+        {sessions === null ? (
+          <p className="text-sm text-muted">Loading sessions…</p>
+        ) : sessions.length === 0 ? (
+          <p className="text-sm text-muted">No active sessions found.</p>
+        ) : (
+          <ul className="space-y-2">
+            {sessions.map((s) => (
+              <li
+                key={s.id}
+                className="flex flex-col gap-2 rounded-xl border border-border bg-surface-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">
+                    {s.isCurrent ? "This device" : "Other device"}
+                    {s.isCurrent ? (
+                      <span className="ml-2 text-xs font-normal text-primary">current</span>
+                    ) : null}
+                  </p>
+                  <p className="truncate text-xs text-muted">
+                    {s.userAgent ? s.userAgent.slice(0, 80) : "Unknown browser"}
+                  </p>
+                  <p className="text-xs text-faint">
+                    {s.ipAddress ? `IP ${s.ipAddress} · ` : null}
+                    Last active {new Date(s.updatedAt).toLocaleString()}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="shrink-0"
+                  loading={sessionBusy === s.id}
+                  disabled={Boolean(sessionBusy)}
+                  onClick={() => {
+                    void (async () => {
+                      setError(null);
+                      setSessionBusy(s.id);
+                      try {
+                        if (s.isCurrent) {
+                          await signOutOtherDevices();
+                          await signOut("/");
+                          return;
+                        }
+                        await revokeSessionById({ data: { sessionId: s.id } });
+                        setSessions((prev) => (prev ? prev.filter((x) => x.id !== s.id) : prev));
+                        setMessage("Device signed out.");
+                      } catch (err) {
+                        setError(errMessage(err));
+                      } finally {
+                        setSessionBusy(null);
+                      }
+                    })();
+                  }}
+                >
+                  {s.isCurrent ? "Sign out" : "Sign out"}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
         <Button
           type="button"
-          variant="secondary"
+          variant="outline"
+          className="w-full"
           onClick={() => {
             void (async () => {
               setError(null);
@@ -294,7 +364,7 @@ function Settings({ profile }: { profile: { firstName: string; lastName: string;
             })();
           }}
         >
-          Sign out other devices
+          Sign out all devices
         </Button>
       </Card>
 

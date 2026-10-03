@@ -37,9 +37,11 @@ function DashboardPage() {
 function Vault({
   profile,
   demoPayments,
+  emailVerified,
 }: {
-  profile: { firstName: string; phone: string };
+  profile: { firstName: string; phone: string; phoneVerified?: boolean };
   demoPayments: boolean;
+  emailVerified: boolean;
 }) {
   const [balance, setBalance] = useState<BalanceResponse | null>(null);
   const [txs, setTxs] = useState<PublicTx[] | null>(null);
@@ -47,8 +49,10 @@ function Vault({
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [success, setSuccess] = useState<{ title: string; body: string } | null>(null);
+  // Hidden until the user explicitly reveals with PIN (never auto-show on load).
+  const [balanceVisible, setBalanceVisible] = useState(false);
 
-  const revealed = balance && !balance.locked;
+  const revealed = Boolean(balanceVisible && balance && !balance.locked);
 
   const reloadMoney = useCallback(async () => {
     const [b, t] = await Promise.all([getBalance(), listTransactions().catch(() => [] as PublicTx[])]);
@@ -56,14 +60,11 @@ function Vault({
     setTxs(t);
   }, []);
 
-  // Activity loads without PIN; balance stays locked until PIN is entered.
+  // Activity loads without PIN; balance figure stays hidden until PIN reveal.
   useEffect(() => {
     void listTransactions()
       .then(setTxs)
       .catch(() => setTxs([]));
-    void getBalance()
-      .then(setBalance)
-      .catch(() => undefined);
   }, []);
 
   return (
@@ -72,6 +73,28 @@ function Vault({
         <p className="text-sm text-muted">Welcome back</p>
         <h1 className="font-display text-3xl font-semibold">{profile.firstName}</h1>
       </div>
+
+      {!emailVerified ? (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+          <p className="font-medium text-fg">Email not verified</p>
+          <p className="mt-1 text-muted">
+            Confirm your email before depositing or withdrawing. Open the link we sent, or resend it from Profile.
+          </p>
+        </div>
+      ) : null}
+
+      {emailVerified && !profile.phoneVerified ? (
+        <div className="rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 text-sm">
+          <p className="font-medium text-fg">Verify your withdrawal number</p>
+          <p className="mt-1 text-muted">
+            To unlock withdrawals, deposit once from your registered number{" "}
+            <span className="text-fg">{formatPhoneDisplay(profile.phone)}</span>. That proves the line is active and yours.
+          </p>
+          <Button className="mt-3" onClick={() => setDepositOpen(true)}>
+            Deposit to verify
+          </Button>
+        </div>
+      ) : null}
 
       <Card className="relative overflow-hidden p-6">
         <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Available to withdraw</p>
@@ -83,7 +106,7 @@ function Vault({
           ) : (
             <p className="font-display text-4xl font-semibold tracking-widest text-faint">••••••</p>
           )}
-          <Button variant="secondary" size="icon" onClick={() => (revealed ? setBalance({ ok: true, locked: true }) : setCheckOpen(true))} aria-label="Toggle balance">
+          <Button variant="secondary" size="icon" onClick={() => (revealed ? setBalanceVisible(false) : setCheckOpen(true))} aria-label="Toggle balance">
             <span className="relative block size-5">
               <Eye className={`absolute inset-0 size-5 transition-[opacity,transform,filter] duration-300 ${revealed ? "scale-[0.25] opacity-0 blur-[4px]" : "scale-100 opacity-100"}`} />
               <EyeOff className={`absolute inset-0 size-5 transition-[opacity,transform,filter] duration-300 ${revealed ? "scale-100 opacity-100" : "scale-[0.25] opacity-0 blur-[4px]"}`} />
@@ -139,6 +162,7 @@ function Vault({
         onClose={() => setCheckOpen(false)}
         onDone={async () => {
           setCheckOpen(false);
+          setBalanceVisible(true);
           await reloadMoney();
         }}
       />

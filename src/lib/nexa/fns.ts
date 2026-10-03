@@ -1718,3 +1718,79 @@ export const changeLockPreference = createServerFn({ method: "POST" })
     `;
     return { ok: true as const, mode: data.mode, idleMinutes: minutes };
   });
+
+
+export type PublicSession = {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  isCurrent: boolean;
+};
+
+/** List active sessions for the signed-in user. */
+export const listActiveSessions = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }): Promise<PublicSession[]> => {
+    const { getSql } = await import("@/lib/db");
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const { auth } = await import("@/lib/auth/server");
+    const sql = await getSql();
+    const request = getRequest();
+    let currentId: string | null = null;
+    try {
+      const sess = await auth.api.getSession({ headers: request.headers });
+      currentId = sess?.session?.id ?? null;
+    } catch {
+      currentId = null;
+    }
+
+    const rows = await sql<{
+      id: string;
+      createdAt: unknown;
+      updatedAt: unknown;
+      expiresAt: unknown;
+      ipAddress: string | null;
+      userAgent: string | null;
+    }>`
+      select id, "createdAt", "updatedAt", "expiresAt", "ipAddress", "userAgent"
+      from "session"
+      where "userId" = ${context.userId}
+        and "expiresAt" > now()
+      order by "updatedAt" desc
+      limit 40
+    `;
+    return rows.map((r) => ({
+      id: r.id,
+      createdAt: iso(r.createdAt) ?? new Date().toISOString(),
+      updatedAt: iso(r.updatedAt) ?? new Date().toISOString(),
+      expiresAt: iso(r.expiresAt) ?? new Date().toISOString(),
+      ipAddress: r.ipAddress,
+      userAgent: r.userAgent,
+      isCurrent: currentId === r.id,
+    }));
+  });
+
+/** Revoke one session by id (must belong to the caller). */
+export const revokeSessionById = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ sessionId: z.string().min(1) }))
+  .handler(async ({ context, data }) => {
+    const { getSql } = await import("@/lib/db");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const deleted = await sql<{ id: string }>`
+      delete from "session"
+      where id = ${data.sessionId} and "userId" = ${context.userId}
+      returning id
+    `;
+    if (!deleted.length) throw new Error("Session not found");
+    await writeAudit(sql, {
+      action: "session_revoke_one",
+      userId: context.userId,
+      detail: `session ${data.sessionId}`,
+    });
+    return { ok: true as const };
+  });

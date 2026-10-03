@@ -17,6 +17,7 @@ export function SessionGate({
     profile: PublicProfile;
     demoPayments: boolean;
     pinUnlocked: boolean;
+    emailVerified: boolean;
     lock: () => void;
     unlock: () => void;
   }) => React.ReactNode;
@@ -25,7 +26,7 @@ export function SessionGate({
   const { user, isPending } = useCurrentUserState();
   const [me, setMe] = useState<MeResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [locked, setLocked] = useState(false);
+  const [locked, setLocked] = useState(true); // PIN required until unlocked this visit
   const [pw, setPw] = useState({ current: "", next: "" });
   const [pwError, setPwError] = useState<string | null>(null);
   const [pwBusy, setPwBusy] = useState(false);
@@ -132,6 +133,7 @@ export function SessionGate({
         profile,
         demoPayments: me.demoPayments,
         pinUnlocked: !locked,
+        emailVerified: Boolean(!me.needsProfile && me.emailVerified),
         lock: () => setLocked(true),
         unlock: () => setLocked(false),
       })}
