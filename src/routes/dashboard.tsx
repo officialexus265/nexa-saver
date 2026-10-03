@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Eye, EyeOff, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { Modal } from "@/components/modal";
 import { PinPad } from "@/components/pin-pad";
 import { SessionGate } from "@/components/session-gate";
@@ -19,6 +19,7 @@ import {
   startDeposit,
   startWithdraw,
   verifyPin,
+  resendVerificationEmailFn,
 } from "@/lib/nexa/fns";
 import { formatKwacha, kwachaToTambala, parseKwachaInput, splitDeposit } from "@/lib/nexa/money";
 import { formatPhoneDisplay } from "@/lib/nexa/phone";
@@ -75,12 +76,7 @@ function Vault({
       </div>
 
       {!emailVerified ? (
-        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
-          <p className="font-medium text-fg">Email not verified</p>
-          <p className="mt-1 text-muted">
-            Confirm your email before depositing or withdrawing. Open the link we sent, or resend it from Profile.
-          </p>
-        </div>
+        <EmailVerifyBanner />
       ) : null}
 
       {emailVerified && !profile.phoneVerified ? (
@@ -193,6 +189,52 @@ function Vault({
         }}
       />
       {success ? <SuccessBurst title={success.title} body={success.body} onDone={() => setSuccess(null)} /> : null}
+    </div>
+  );
+}
+
+
+function EmailVerifyBanner() {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function resend() {
+    setBusy(true);
+    setMsg(null);
+    setErr(null);
+    try {
+      const res = await resendVerificationEmailFn();
+      setMsg(
+        res.alreadyVerified
+          ? "Your email is already verified. Refresh the page."
+          : "Verification email sent. Check your inbox and spam folder.",
+      );
+    } catch (e) {
+      setErr(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+      <Link to="/profile" className="block rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <p className="font-medium text-fg">Email not verified</p>
+        <p className="mt-1 text-muted">
+          Confirm your email before depositing or withdrawing. Tap here to open Profile, or resend the link below.
+        </p>
+      </Link>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button type="button" size="sm" loading={busy} onClick={() => void resend()}>
+          {busy ? "Sending…" : "Resend verification email"}
+        </Button>
+        <Link to="/profile" className="text-sm text-primary underline-offset-2 hover:underline">
+          Open Profile
+        </Link>
+      </div>
+      {msg ? <p className="mt-2 text-xs text-primary">{msg}</p> : null}
+      {err ? <p className="mt-2 text-xs text-danger">{err}</p> : null}
     </div>
   );
 }
