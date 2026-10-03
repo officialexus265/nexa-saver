@@ -1,4 +1,4 @@
-import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
+import { createRootRoute, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router";
 import { PwaPrompt } from "@/components/pwa-prompt";
 import { PwaRegister } from "@/components/pwa-register";
 import { APP_NAME } from "@/lib/nexa/constants";
@@ -10,6 +10,17 @@ const DESCRIPTION = "NEXA-SAVER — a quiet Malawi kwacha vault with PIN-locked 
 const SITE_URL = (import.meta.env.VITE_SITE_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
 
 export const Route = createRootRoute({
+  notFoundComponent: () => (
+    <div className="nexa-shell grid min-h-dvh place-items-center px-4 text-center">
+      <div>
+        <h1 className="font-display text-2xl font-semibold">Page not found</h1>
+        <p className="mt-2 text-sm text-muted">This link is missing or expired.</p>
+        <Link to="/" className="mt-6 inline-block text-sm text-primary">
+          Back to NEXA-SAVER
+        </Link>
+      </div>
+    </div>
+  ),
   head: () => ({
     meta: [
       { charSet: "utf-8" },

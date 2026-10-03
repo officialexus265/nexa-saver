@@ -630,7 +630,7 @@ export const startDeposit = createServerFn({ method: "POST" })
           lastName: profile.last_name,
           txRef: reference,
           callbackUrl: `${site}/api/paychangu/webhook`,
-          returnUrl: `${site}/deposit/return?ref=${encodeURIComponent(reference)}`,
+          returnUrl: `${site}/deposit-return?ref=${encodeURIComponent(reference)}`,
           description: `NEXA-SAVER deposit of ${formatKwacha(split.gross)}`,
         });
         result = { ok: true, mode: "live", checkoutUrl, reference };
@@ -667,19 +667,36 @@ export const verifyDeposit = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
-    const owned = await sql<{ id: number; status: string; gross_tambala: number }>`
-      select id, status, gross_tambala from transactions
+    const owned = await sql<{
+      id: number;
+      status: string;
+      gross_tambala: number;
+      credited_tambala: number;
+      platform_profit_tambala: number;
+    }>`
+      select id, status, gross_tambala, credited_tambala, platform_profit_tambala
+      from transactions
       where reference = ${data.reference} and user_id = ${context.userId} limit 1
     `;
     if (!owned.length) throw new Error("Deposit not found");
+    const row = owned[0];
+    if (row.status === "success") {
+      const gross = asInt(row.gross_tambala);
+      const credited = asInt(row.credited_tambala);
+      return {
+        already: true as const,
+        grossTambala: gross,
+        creditedTambala: credited,
+        feeTambala: gross - credited,
+      };
+    }
     const { paychanguConfigured, demoPaymentsEnabled, verifyPayment } = await import("./paychangu.server");
     if (!demoPaymentsEnabled()) {
       if (!paychanguConfigured()) throw new Error("Payments are not available right now");
       const result = await verifyPayment(data.reference);
-      if (!result.ok) throw new Error("Payment is not confirmed yet");
-      // Match amount (PayChangu returns kwacha).
+      if (!result.ok) throw new Error("Payment is not confirmed yet. If money left your mobile wallet, contact support with this reference: " + data.reference);
       const verifiedTambala = kwachaToTambala(result.amount);
-      if (verifiedTambala > 0 && verifiedTambala !== asInt(owned[0].gross_tambala)) {
+      if (verifiedTambala > 0 && verifiedTambala !== asInt(row.gross_tambala)) {
         throw new Error("Payment amount does not match this deposit");
       }
     }
@@ -957,10 +974,7 @@ export const changePasswordFn = createServerFn({ method: "POST" })
     `;
     const currentHash = accounts[0]?.password;
     if (!currentHash) throw new Error("No password is set on this account");
-    const matches = await (verifyPassword as unknown as (hash: string, password: string) => Promise<boolean>)(
-      currentHash,
-      data.currentPassword,
-    );
+    const matches = await verifyPassword({ hash: currentHash, password: data.currentPassword, });
     if (!matches) throw new Error("Current password is incorrect");
     const next = await hashPassword(data.newPassword);
     await sql`
@@ -994,10 +1008,7 @@ export const changePinFn = createServerFn({ method: "POST" })
     `;
     const currentHash = accounts[0]?.password;
     if (!currentHash) throw new Error("No password is set on this account");
-    const pwOk = await (verifyPassword as unknown as (hash: string, password: string) => Promise<boolean>)(
-      currentHash,
-      data.password,
-    );
+    const pwOk = await verifyPassword({ hash: currentHash, password: data.password, });
     if (!pwOk) throw new Error("Password is incorrect");
     const ok = await verifySecret(profile.pin_hash, data.currentPin);
     if (!ok) throw new Error("Current PIN is incorrect");
@@ -1292,10 +1303,7 @@ export const changeRegisteredPhone = createServerFn({ method: "POST" })
     `;
     const currentHash = accounts[0]?.password;
     if (!currentHash) throw new Error("No password is set on this account");
-    const matches = await (verifyPassword as unknown as (hash: string, password: string) => Promise<boolean>)(
-      currentHash,
-      data.password,
-    );
+    const matches = await verifyPassword({ hash: currentHash, password: data.password, });
     if (!matches) throw new Error("Password is incorrect");
 
     const clash = await sql<{ n: number }>`
@@ -1446,10 +1454,7 @@ export const secureAccountWithPassword = createServerFn({ method: "POST" })
     `;
     const currentHash = accounts[0]?.password;
     if (!currentHash) throw new Error("No password is set on this account");
-    const matches = await (verifyPassword as unknown as (hash: string, password: string) => Promise<boolean>)(
-      currentHash,
-      data.currentPassword,
-    );
+    const matches = await verifyPassword({ hash: currentHash, password: data.currentPassword, });
     if (!matches) throw new Error("Current password is incorrect");
 
     const next = await hashPassword(data.newPassword);
@@ -1523,10 +1528,7 @@ export const secureAccountWithPin = createServerFn({ method: "POST" })
     `;
     const currentHash = accounts[0]?.password;
     if (!currentHash) throw new Error("No password is set on this account");
-    const matches = await (verifyPassword as unknown as (hash: string, password: string) => Promise<boolean>)(
-      currentHash,
-      data.password,
-    );
+    const matches = await verifyPassword({ hash: currentHash, password: data.password, });
     if (!matches) throw new Error("Password is incorrect");
 
     const pinHash = await hashSecret(data.newPin);
@@ -1572,14 +1574,23 @@ export const requestPasswordReset = createServerFn({ method: "POST" })
       message: "Too many reset attempts. Try again later.",
     });
 
+    // Only email or Malawi phone — not username (usernames are easy to guess).
+    const looksEmail = raw.includes("@") && raw.includes(".");
     const phone = normalizeMwPhone(raw);
+    if (!looksEmail && !phone) {
+      // Same generic response — do not reveal why.
+      return {
+        ok: true as const,
+        message: "If an account matches, we sent a reset link to the registered email.",
+      };
+    }
+
     const rows = await sql<{ user_id: string; email: string; first_name: string }>`
       select user_id, email, first_name from profiles
       where deleted_at is null
         and (
-          lower(email) = ${raw.toLowerCase()}
-          or lower(username) = ${raw.toLowerCase()}
-          or phone = ${phone ?? "__none__"}
+          (${looksEmail} and lower(email) = ${raw.toLowerCase()})
+          or (${Boolean(phone)} and phone = ${phone ?? "__none__"})
         )
       limit 1
     `;
@@ -1796,6 +1807,156 @@ export const revokeSessionById = createServerFn({ method: "POST" })
       action: "session_revoke_one",
       userId: context.userId,
       detail: `session ${data.sessionId}`,
+    });
+    return { ok: true as const };
+  });
+
+
+/** Admin: look up any transaction by reference (support desk). */
+export const adminLookupReference = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ reference: z.string().min(4).max(80) }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{
+      id: number;
+      user_id: string;
+      kind: string;
+      status: string;
+      gross_tambala: number;
+      credited_tambala: number;
+      phone: string | null;
+      reference: string;
+      note: string | null;
+      created_at: unknown;
+      completed_at: unknown;
+      username: string;
+      email: string;
+      first_name: string;
+      last_name: string;
+    }>`
+      select t.id, t.user_id, t.kind, t.status, t.gross_tambala, t.credited_tambala, t.phone,
+             t.reference, t.note, t.created_at, t.completed_at,
+             p.username, p.email, p.first_name, p.last_name
+      from transactions t
+      join profiles p on p.user_id = t.user_id
+      where t.reference = ${data.reference.trim()}
+      limit 1
+    `;
+    if (!rows.length) return { found: false as const };
+    const r = rows[0];
+    let paychangu: { ok: boolean; status: string; amount: number } | null = null;
+    if (r.kind === "deposit") {
+      try {
+        const { paychanguConfigured, verifyPayment } = await import("./paychangu.server");
+        if (paychanguConfigured()) {
+          const v = await verifyPayment(r.reference);
+          paychangu = { ok: v.ok, status: v.status, amount: v.amount };
+        }
+      } catch (err) {
+        paychangu = { ok: false, status: (err as Error).message, amount: 0 };
+      }
+    }
+    return {
+      found: true as const,
+      tx: {
+        id: asInt(r.id),
+        userId: r.user_id,
+        kind: r.kind,
+        status: r.status,
+        grossTambala: asInt(r.gross_tambala),
+        creditedTambala: asInt(r.credited_tambala),
+        phone: r.phone,
+        reference: r.reference,
+        note: r.note,
+        createdAt: iso(r.created_at),
+        completedAt: iso(r.completed_at),
+        username: r.username,
+        email: r.email,
+        name: `${r.first_name} ${r.last_name}`,
+      },
+      paychangu,
+    };
+  });
+
+/**
+ * Admin: credit a pending deposit after confirming payment with PayChangu (or support evidence).
+ * Safe/idempotent — creditDeposit claims pending only once.
+ */
+export const adminForceCreditDeposit = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      reference: z.string().min(4),
+      reason: z.string().min(8).max(500),
+      skipPaychanguCheck: z.boolean().optional(),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const rows = await sql<{ id: number; kind: string; status: string; user_id: string; gross_tambala: number }>`
+      select id, kind, status, user_id, gross_tambala from transactions
+      where reference = ${data.reference.trim()} limit 1
+    `;
+    if (!rows.length) throw new Error("No transaction with that reference");
+    const row = rows[0];
+    if (row.kind !== "deposit") throw new Error("Reference is not a deposit");
+    if (row.status === "success") {
+      return { ok: true as const, already: true as const, message: "Already credited" };
+    }
+    if (row.status !== "pending") {
+      throw new Error(`Cannot credit deposit in status "${row.status}"`);
+    }
+    if (!data.skipPaychanguCheck) {
+      const { paychanguConfigured, verifyPayment } = await import("./paychangu.server");
+      if (paychanguConfigured()) {
+        const v = await verifyPayment(row.reference ? data.reference.trim() : data.reference);
+        if (!v.ok) {
+          throw new Error(
+            `PayChangu does not show success for this reference (status: ${v.status}). ` +
+              "Confirm in the PayChangu dashboard first, or set skip check only with written proof.",
+          );
+        }
+      }
+    }
+    const { creditDeposit } = await import("./ledger.server");
+    const result = await creditDeposit(data.reference.trim());
+    await writeAudit(sql, {
+      action: "admin_force_credit",
+      userId: context.userId,
+      detail: `ref=${data.reference.trim()} target=${row.user_id} reason=${data.reason.slice(0, 200)}`,
+    });
+    return { ok: true as const, already: result.already, ...result };
+  });
+
+/** Admin: attach a support note to a transaction (does not move money). */
+export const adminAnnotateTransaction = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ reference: z.string().min(4), note: z.string().min(4).max(500) }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const updated = await sql<{ id: number }>`
+      update transactions
+      set note = case
+            when note is null or note = '' then ${data.note}
+            else note || ${" | " + data.note}
+          end
+      where reference = ${data.reference.trim()}
+      returning id
+    `;
+    if (!updated.length) throw new Error("Transaction not found");
+    await writeAudit(sql, {
+      action: "admin_annotate_tx",
+      userId: context.userId,
+      detail: `ref=${data.reference.trim()} note=${data.note.slice(0, 120)}`,
     });
     return { ok: true as const };
   });

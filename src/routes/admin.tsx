@@ -10,6 +10,9 @@ import {
   adminOverview,
   adminTransactions,
   adminUsers,
+  adminLookupReference,
+  adminForceCreditDeposit,
+  adminAnnotateTransaction,
   getPlatformSupportPhone,
   setPlatformSupportPhone,
 } from "@/lib/nexa/fns";
@@ -233,7 +236,136 @@ function Console() {
           ))}
         </ul>
       </section>
+
+      <SupportDesk />
     </div>
+  );
+}
+
+function SupportDesk() {
+  const [ref, setRef] = useState("");
+  const [reason, setReason] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<Awaited<ReturnType<typeof adminLookupReference>> | null>(null);
+
+  async function lookup(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      const res = await adminLookupReference({ data: { reference: ref } });
+      setResult(res);
+      if (!res.found) setErr("No transaction with that reference.");
+    } catch (e) {
+      setErr(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function forceCredit() {
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      const res = await adminForceCreditDeposit({
+        data: { reference: ref, reason: reason || "Support credit after PayChangu confirmation" },
+      });
+      setMsg(res.already ? "Already credited." : "Deposit credited to the user wallet.");
+      const again = await adminLookupReference({ data: { reference: ref } });
+      setResult(again);
+    } catch (e) {
+      setErr(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveNote() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await adminAnnotateTransaction({ data: { reference: ref, note } });
+      setMsg("Note saved on transaction.");
+      setNote("");
+    } catch (e) {
+      setErr(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <h2 className="font-display text-lg font-semibold">Support desk</h2>
+      <p className="text-sm text-muted">
+        Look up a deposit or withdrawal by reference. For stuck deposits, confirm success in PayChangu, then
+        credit. For missing withdrawals, check status here and in PayChangu payouts before refunding.
+      </p>
+      <form onSubmit={(e) => void lookup(e)} className="flex flex-col gap-2 sm:flex-row">
+        <Input
+          value={ref}
+          onChange={(e) => setRef(e.target.value)}
+          placeholder="Reference e.g. DEP-…"
+          className="flex-1"
+        />
+        <Button type="submit" loading={busy}>
+          Look up
+        </Button>
+      </form>
+      {err ? <p className="text-sm text-danger">{err}</p> : null}
+      {msg ? <p className="text-sm text-primary">{msg}</p> : null}
+      {result?.found ? (
+        <Card className="space-y-2 p-4 text-sm">
+          <p>
+            <span className="text-muted">User</span> {result.tx.name} (@{result.tx.username}) · {result.tx.email}
+          </p>
+          <p>
+            <span className="text-muted">Type</span> {result.tx.kind} · <span className="text-muted">Status</span>{" "}
+            {result.tx.status}
+          </p>
+          <p>
+            <span className="text-muted">Amount</span> {formatKwacha(result.tx.grossTambala)} ·{" "}
+            <span className="text-muted">Phone</span> {result.tx.phone ?? "—"}
+          </p>
+          <p className="text-xs text-muted">
+            Created {result.tx.createdAt ? new Date(result.tx.createdAt).toLocaleString() : "—"}
+            {result.tx.note ? ` · Note: ${result.tx.note}` : null}
+          </p>
+          {result.paychangu ? (
+            <p>
+              <span className="text-muted">PayChangu</span> {result.paychangu.status}
+              {result.paychangu.ok ? " (success)" : " (not success)"} · amount {result.paychangu.amount}
+            </p>
+          ) : null}
+          {result.tx.kind === "deposit" && result.tx.status === "pending" ? (
+            <div className="space-y-2 border-t border-border pt-3">
+              <Label htmlFor="credit-reason">Credit reason (audit log)</Label>
+              <Input
+                id="credit-reason"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Confirmed success in PayChangu dashboard"
+              />
+              <Button type="button" loading={busy} onClick={() => void forceCredit()}>
+                Credit deposit to wallet
+              </Button>
+            </div>
+          ) : null}
+          <div className="space-y-2 border-t border-border pt-3">
+            <Label htmlFor="support-note">Add support note</Label>
+            <Input id="support-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Called user, ticket #…" />
+            <Button type="button" variant="secondary" loading={busy} onClick={() => void saveNote()}>
+              Save note
+            </Button>
+          </div>
+        </Card>
+      ) : null}
+    </section>
   );
 }
 

@@ -36,26 +36,32 @@ function ForgotPasswordPage() {
     <AuthFrame>
       <h1 className="font-display text-2xl font-semibold">Forgot password</h1>
       <p className="mt-2 text-sm text-muted">
-        Enter the username, email, or phone on your account. If we find a match, we email a reset link to the
-        registered address.
+        Enter the <strong className="font-medium text-fg">email</strong> or{" "}
+        <strong className="font-medium text-fg">Malawi mobile number</strong> on your account. If we find a
+        match, we send a reset link to the registered email (even if you typed the phone).
       </p>
       <form onSubmit={(e) => void submit(e)} className="mt-6 space-y-4">
         <div className="space-y-1.5">
-          <Label htmlFor="id">Username, email, or phone</Label>
+          <Label htmlFor="id">Email or phone</Label>
           <Input
             id="id"
             value={identifier}
             onChange={(e) => setIdentifier(e.target.value)}
             required
             autoComplete="username"
+            inputMode="email"
+            placeholder="you@email.com or 0881 234 567"
           />
         </div>
         {error ? <p className="text-sm text-danger">{error}</p> : null}
         {message ? <p className="text-sm text-primary">{message}</p> : null}
-        <Button type="submit" className="w-full" loading={busy} disabled={busy || identifier.trim().length < 2}>
+        <Button type="submit" className="w-full" loading={busy} disabled={busy || identifier.trim().length < 3}>
           {busy ? "Sending reset link…" : "Send reset link"}
         </Button>
       </form>
+      <p className="mt-4 text-xs text-muted">
+        PIN reset is done after you sign in: use &quot;Forgot PIN? Use security question&quot; on the PIN screen.
+      </p>
       <p className="mt-6 text-center text-sm text-muted">
         <Link to="/" className="text-primary">
           Back to sign in

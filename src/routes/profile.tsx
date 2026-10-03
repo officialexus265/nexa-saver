@@ -33,7 +33,7 @@ function ProfilePage() {
   return <SessionGate>{(ctx) => <Settings {...ctx} />}</SessionGate>;
 }
 
-function Settings({ profile }: { profile: { firstName: string; lastName: string; email: string; phone: string; username: string; loginIdentifierPref: LoginPref; role: string; phoneVerified?: boolean; lockMode?: LockMode; lockIdleMinutes?: number } }) {
+function Settings({ profile, emailVerified }: { profile: { firstName: string; lastName: string; email: string; phone: string; username: string; loginIdentifierPref: LoginPref; role: string; phoneVerified?: boolean; lockMode?: LockMode; lockIdleMinutes?: number }; emailVerified?: boolean }) {
   const [pref, setPref] = useState<LoginPref>(profile.loginIdentifierPref);
   const [pw, setPw] = useState({ current: "", next: "" });
   const [pins, setPins] = useState({ current: "", next: "", password: "" });
@@ -202,29 +202,41 @@ function Settings({ profile }: { profile: { firstName: string; lastName: string;
       <Card className="space-y-3 p-4">
         <h2 className="font-display text-lg font-semibold">Email</h2>
         <p className="text-sm text-muted">
-          {profile.email}. Deposits and withdrawals need a verified email. Check your inbox for a link, or resend.
+          {profile.email}
+          {emailVerified ? (
+            <span className="ml-2 text-primary">· Verified</span>
+          ) : (
+            <span className="ml-2 text-amber-400">· Not verified</span>
+          )}
         </p>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => {
-            void (async () => {
-              setError(null);
-              try {
-                const res = await resendVerificationEmailFn();
-                setMessage(
-                  res.alreadyVerified
-                    ? "Your email is already verified."
-                    : "Verification email sent. Check your inbox (and spam).",
-                );
-              } catch (err) {
-                setError(errMessage(err));
-              }
-            })();
-          }}
-        >
-          Resend verification email
-        </Button>
+        {!emailVerified ? (
+          <>
+            <p className="text-sm text-muted">
+              Deposits and withdrawals need a verified email. Check your inbox for a link, or resend.
+            </p>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                void (async () => {
+                  setError(null);
+                  try {
+                    const res = await resendVerificationEmailFn();
+                    setMessage(
+                      res.alreadyVerified
+                        ? "Your email is already verified. Pull to refresh or reopen Profile."
+                        : "Verification email sent. Check your inbox (and spam).",
+                    );
+                  } catch (err) {
+                    setError(errMessage(err));
+                  }
+                })();
+              }}
+            >
+              Resend verification email
+            </Button>
+          </>
+        ) : null}
       </Card>
 
       

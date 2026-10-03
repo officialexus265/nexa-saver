@@ -27,6 +27,7 @@ export function SessionGate({
   const [me, setMe] = useState<MeResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [locked, setLocked] = useState<boolean | null>(null); // null = not hydrated from server yet
+
   const [pw, setPw] = useState({ current: "", next: "" });
   const [pwError, setPwError] = useState<string | null>(null);
   const [pwBusy, setPwBusy] = useState(false);
@@ -45,21 +46,19 @@ export function SessionGate({
 
   useEffect(() => {
     if (isPending) return;
-    if (!user) return;
+    if (!user) {
+      setLocked(null);
+      setMe(null);
+      return;
+    }
     void refresh();
   }, [isPending, user, refresh]);
 
-  // Hydrate lock from server PIN window once per mount. Idle/instant rules may lock later.
-  // Avoids forcing PIN on every navigation while the verify window is still open.
+  // After sign-in / page load: no PIN gate. Password session is enough to use the app.
+  // PIN appears only when idle/instant lock rules fire (or user locks). Balance still needs PIN to reveal.
   useEffect(() => {
     if (!me || me.needsProfile) return;
-    setLocked((prev) => {
-      // First hydration from server only — don't undo a client-side idle lock with a stale refresh
-      // unless the server says the window is closed.
-      if (prev === null) return !me.pinUnlocked;
-      if (!me.pinUnlocked) return true;
-      return prev;
-    });
+    setLocked((prev) => (prev === null ? false : prev));
   }, [me]);
 
   useEffect(() => {
@@ -133,7 +132,9 @@ export function SessionGate({
     setPwError(null);
     try {
       await changePasswordFn({ data: { currentPassword: pw.current, newPassword: pw.next } });
-      await refresh();
+      // All sessions revoked — send them to sign in with the new password.
+      window.location.href = "/";
+      return;
     } catch (err) {
       setPwError(errMessage(err));
     } finally {
