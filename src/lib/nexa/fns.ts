@@ -49,6 +49,21 @@ function asInt(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Canonical public origin for PayChangu return/callback URLs (no trailing slash). */
+async function publicSiteOrigin(clientOrigin?: string): Promise<string> {
+  const { env } = await import("@/lib/env.server");
+  const configured = env("BETTER_AUTH_URL") || env("SITE_URL") || env("VITE_SITE_URL");
+  const raw = (configured || clientOrigin || "").trim().replace(/\/+$/, "");
+  if (!raw) throw new Error("Site URL is not configured");
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error("bad protocol");
+    return u.origin;
+  } catch {
+    throw new Error("Invalid site URL");
+  }
+}
+
 function isAdult(dob: string): boolean {
   const born = new Date(`${dob}T00:00:00`);
   if (Number.isNaN(born.getTime())) return false;
@@ -561,14 +576,15 @@ export const startDeposit = createServerFn({ method: "POST" })
       if (demoPaymentsEnabled()) {
         result = { ok: true, mode: "demo", reference, phone, amountTambala: split.gross };
       } else {
+        const site = await publicSiteOrigin(data.origin);
         const { checkoutUrl } = await initiateHostedCheckout({
           amountKwacha: tambalaToKwacha(split.gross),
           email: profile.email,
           firstName: profile.first_name,
           lastName: profile.last_name,
           txRef: reference,
-          callbackUrl: `${data.origin}/api/paychangu/webhook`,
-          returnUrl: `${data.origin}/deposit/return?ref=${encodeURIComponent(reference)}`,
+          callbackUrl: `${site}/api/paychangu/webhook`,
+          returnUrl: `${site}/deposit/return?ref=${encodeURIComponent(reference)}`,
           description: `NEXA-SAVER deposit of ${formatKwacha(split.gross)}`,
         });
         result = { ok: true, mode: "live", checkoutUrl, reference };
