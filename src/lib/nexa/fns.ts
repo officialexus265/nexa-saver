@@ -413,12 +413,8 @@ export const verifyPin = createServerFn({ method: "POST" })
     const profile = await loadProfile(context.userId);
     if (!profile) throw new Error("Complete your profile first");
 
-    await assertRateLimit(sql, {
-      bucket: `pin:${context.userId}`,
-      limit: 20,
-      windowSeconds: 60 * 60,
-      message: "Too many PIN attempts. Try again later.",
-    });
+    // Do NOT rate-limit successful unlocks — only failed guesses (below).
+    // Counting successes was locking users out after normal unlocks.
 
     const lockedMs = profile.pin_locked_until
       ? profile.pin_locked_until instanceof Date
@@ -431,6 +427,13 @@ export const verifyPin = createServerFn({ method: "POST" })
 
     const ok = await verifySecret(profile.pin_hash, data.pin);
     if (!ok) {
+      // Soft global cap on wrong guesses only (abuse protection).
+      await assertRateLimit(sql, {
+        bucket: `pin-fail:${context.userId}`,
+        limit: 30,
+        windowSeconds: 60 * 60,
+        message: "Too many incorrect PIN attempts. Try again later.",
+      });
       const attempts = asInt(profile.failed_pin_attempts) + 1;
       if (attempts >= PIN_MAX_ATTEMPTS && attempts % PIN_MAX_ATTEMPTS === 0) {
         // Escalate: 5m → 1h → 24h based on how many full attempt cycles failed.
@@ -478,6 +481,8 @@ export const verifyPin = createServerFn({ method: "POST" })
       set failed_pin_attempts = 0, pin_locked_until = null, pin_verified_at = now(), updated_at = now()
       where user_id = ${context.userId}
     `;
+    // Clear legacy rate-limit buckets so a correct PIN always recovers access.
+    await sql`delete from rate_limits where bucket in (${`pin:${context.userId}`}, ${`pin-fail:${context.userId}`})`;
     const { writeAudit } = await import("./audit.server");
     await writeAudit(sql, { action: "pin_ok", userId: context.userId });
     const wallets = await sql<{ balance_tambala: number }>`
