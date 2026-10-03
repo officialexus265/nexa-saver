@@ -5,6 +5,7 @@ import { errMessage } from "@/lib/nexa/errors";
 import { verifyDeposit } from "@/lib/nexa/fns";
 import { formatKwacha } from "@/lib/nexa/money";
 import { cn } from "@/lib/utils";
+import { LoadingStatus } from "@/components/ui/spinner";
 
 export const Route = createFileRoute("/deposit/return")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -48,7 +49,7 @@ function DepositReturnPage() {
         <h1 className="font-display text-2xl font-semibold">
           {state === "ok" ? "Deposit received" : state === "err" ? "Almost there" : "Checking payment"}
         </h1>
-        <p className="mt-3 text-sm text-muted">{body}</p>
+        {state === "pending" ? <LoadingStatus label={body} /> : <p className="mt-3 text-sm text-muted">{body}</p>}
         <Link to="/dashboard" className={cn(buttonVariants(), "mt-6 w-full")}>
           Back to vault
         </Link>

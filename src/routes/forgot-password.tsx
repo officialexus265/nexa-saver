@@ -52,8 +52,8 @@ function ForgotPasswordPage() {
         </div>
         {error ? <p className="text-sm text-danger">{error}</p> : null}
         {message ? <p className="text-sm text-primary">{message}</p> : null}
-        <Button type="submit" className="w-full" disabled={busy || identifier.trim().length < 2}>
-          {busy ? "Sending…" : "Send reset link"}
+        <Button type="submit" className="w-full" loading={busy} disabled={busy || identifier.trim().length < 2}>
+          {busy ? "Sending reset link…" : "Send reset link"}
         </Button>
       </form>
       <p className="mt-6 text-center text-sm text-muted">

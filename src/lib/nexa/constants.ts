@@ -69,3 +69,13 @@ export const GENDER_OPTIONS = [
   { value: "prefer_not_to_say", label: "Prefer not to say" },
 ] as const;
 export type Gender = (typeof GENDER_OPTIONS)[number]["value"];
+
+
+export const LOCK_MODE_OPTIONS = [
+  { value: "idle", label: "After idle time" },
+  { value: "instant", label: "When I leave the app" },
+] as const;
+export type LockMode = (typeof LOCK_MODE_OPTIONS)[number]["value"];
+export const DEFAULT_LOCK_IDLE_MINUTES = 5;
+export const MIN_LOCK_IDLE_MINUTES = 1;
+export const MAX_LOCK_IDLE_MINUTES = 60;

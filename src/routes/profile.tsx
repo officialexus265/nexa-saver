@@ -18,7 +18,9 @@ import {
   deleteAccountFn,
   signOutOtherDevices,
   resendVerificationEmailFn,
+  changeLockPreference,
 } from "@/lib/nexa/fns";
+import { LOCK_MODE_OPTIONS, type LockMode } from "@/lib/nexa/constants";
 import { formatPhoneDisplay } from "@/lib/nexa/phone";
 import { cn } from "@/lib/utils";
 
@@ -28,13 +30,15 @@ function ProfilePage() {
   return <SessionGate>{(ctx) => <Settings {...ctx} />}</SessionGate>;
 }
 
-function Settings({ profile }: { profile: { firstName: string; lastName: string; email: string; phone: string; username: string; loginIdentifierPref: LoginPref; role: string; phoneVerified?: boolean } }) {
+function Settings({ profile }: { profile: { firstName: string; lastName: string; email: string; phone: string; username: string; loginIdentifierPref: LoginPref; role: string; phoneVerified?: boolean; lockMode?: LockMode; lockIdleMinutes?: number } }) {
   const [pref, setPref] = useState<LoginPref>(profile.loginIdentifierPref);
   const [pw, setPw] = useState({ current: "", next: "" });
   const [pins, setPins] = useState({ current: "", next: "", password: "" });
   const [phoneForm, setPhoneForm] = useState({ phone: "", password: "" });
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lockMode, setLockMode] = useState<LockMode>(profile.lockMode === "instant" ? "instant" : "idle");
+  const [lockMinutes, setLockMinutes] = useState(String(profile.lockIdleMinutes ?? 5));
 
   async function savePref(next: LoginPref) {
     setPref(next);
@@ -209,6 +213,64 @@ function Settings({ profile }: { profile: { firstName: string; lastName: string;
           }}
         >
           Resend verification email
+        </Button>
+      </Card>
+
+      
+      <Card className="space-y-3 p-4">
+        <h2 className="font-display text-lg font-semibold">Vault lock</h2>
+        <p className="text-sm text-muted">
+          Choose when the PIN screen appears again after you unlock. Instant is safest on a shared phone.
+        </p>
+        <div className="space-y-2">
+          {LOCK_MODE_OPTIONS.map((opt) => (
+            <label key={opt.value} className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="lock-mode"
+                checked={lockMode === opt.value}
+                onChange={() => setLockMode(opt.value)}
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+        {lockMode === "idle" ? (
+          <div className="space-y-1.5">
+            <Label htmlFor="lock-mins">Lock after (minutes)</Label>
+            <Input
+              id="lock-mins"
+              inputMode="numeric"
+              value={lockMinutes}
+              onChange={(e) => setLockMinutes(e.target.value.replace(/\D/g, "").slice(0, 2))}
+              placeholder="5"
+            />
+            <p className="text-xs text-muted">Between 1 and 60 minutes. Default is 5.</p>
+          </div>
+        ) : null}
+        <Button
+          type="button"
+          onClick={() => {
+            void (async () => {
+              setError(null);
+              try {
+                const mins = Math.min(60, Math.max(1, Number(lockMinutes) || 5));
+                const res = await changeLockPreference({
+                  data: { mode: lockMode, idleMinutes: mins },
+                });
+                setLockMinutes(String(res.idleMinutes));
+                setMessage(
+                  res.mode === "instant"
+                    ? "Vault will lock when you leave the app."
+                    : `Vault will lock after ${res.idleMinutes} minute${res.idleMinutes === 1 ? "" : "s"} of inactivity.`,
+                );
+              } catch (err) {
+                setError(errMessage(err));
+              }
+            })();
+          }}
+        >
+          Save lock setting
         </Button>
       </Card>
 

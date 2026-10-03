@@ -110,7 +110,7 @@ function LoginPage() {
           </Link>
         </p>
         {error ? <p className="text-sm text-danger">{error}</p> : null}
-        <Button type="submit" className="w-full" disabled={busy}>
+        <Button type="submit" className="w-full" loading={busy}>
           {busy ? "Signing in…" : "Enter vault"}
         </Button>
         <p className="text-center text-sm text-muted">

@@ -318,8 +318,8 @@ function SignupPage() {
               Continue
             </Button>
           ) : (
-            <Button type="submit" className="flex-1" disabled={busy}>
-              {busy ? "Opening vault…" : "Create account"}
+            <Button type="submit" className="flex-1" loading={busy} disabled={busy}>
+              {busy ? "Creating vault…" : "Create account"}
             </Button>
           )}
         </div>

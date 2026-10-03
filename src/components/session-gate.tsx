@@ -5,7 +5,6 @@ import { PinGate } from "@/components/pin-gate";
 import { Button } from "@/components/ui/button";
 import { PasswordField } from "@/components/password-field";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
-import { IDLE_LOCK_MS } from "@/lib/nexa/constants";
 import { errMessage } from "@/lib/nexa/errors";
 import { changePasswordFn, getMe, heartbeat } from "@/lib/nexa/fns";
 import type { MeResponse, PublicProfile } from "@/lib/nexa/types";
@@ -51,30 +50,41 @@ export function SessionGate({
 
   useEffect(() => {
     if (!me || me.needsProfile) return;
+    const lockMode = me.profile.lockMode === "instant" ? "instant" : "idle";
+    const idleMs = Math.max(1, me.profile.lockIdleMinutes ?? 5) * 60 * 1000;
     let last = Date.now();
     const bump = () => {
       last = Date.now();
     };
     const events = ["pointerdown", "keydown", "touchstart", "scroll"] as const;
     events.forEach((e) => window.addEventListener(e, bump, { passive: true }));
+
+    // Idle timer always runs when mode is "idle".
     const idle = window.setInterval(() => {
-      if (Date.now() - last >= IDLE_LOCK_MS) setLocked(true);
+      if (lockMode === "idle" && Date.now() - last >= idleMs) setLocked(true);
     }, 1000);
+
     const beat = window.setInterval(() => {
       if (document.visibilityState === "visible") void heartbeat().catch(() => undefined);
     }, 120_000);
+
     const vis = () => {
-      // iOS Safari standalone often suspends without reliable idle timers.
-      // Lock as soon as the app is backgrounded so the PIN gate is required on return.
       if (document.visibilityState === "hidden") {
-        setLocked(true);
+        // Instant mode: lock as soon as the app is backgrounded.
+        // Idle mode: only lock if the idle window already elapsed while hidden.
+        if (lockMode === "instant") setLocked(true);
+        else if (Date.now() - last >= idleMs) setLocked(true);
         return;
       }
-      if (Date.now() - last >= IDLE_LOCK_MS) setLocked(true);
+      if (lockMode === "idle" && Date.now() - last >= idleMs) setLocked(true);
     };
     document.addEventListener("visibilitychange", vis);
-    const onPageHide = () => setLocked(true);
+
+    const onPageHide = () => {
+      if (lockMode === "instant") setLocked(true);
+    };
     window.addEventListener("pagehide", onPageHide);
+
     return () => {
       events.forEach((e) => window.removeEventListener(e, bump));
       window.clearInterval(idle);
@@ -147,14 +157,19 @@ export function SessionGate({
               autoComplete="new-password"
             />
             {pwError ? <p className="text-sm text-danger">{pwError}</p> : null}
-            <Button type="submit" className="w-full" disabled={pwBusy || pw.next.length < 8}>
-              Save password
+            <Button type="submit" className="w-full" loading={pwBusy} disabled={pwBusy || pw.next.length < 8}>
+              {pwBusy ? "Saving password…" : "Save password"}
             </Button>
           </form>
         </div>
       ) : null}
       {locked && !profile.mustChangePassword ? (
         <PinGate
+          subtitle={
+            profile.lockMode === "instant"
+              ? "The vault locks when you leave the app."
+              : `After ${profile.lockIdleMinutes ?? 5} minute${(profile.lockIdleMinutes ?? 5) === 1 ? "" : "s"} of quiet, NEXA locks the vault.`
+          }
           onUnlocked={() => {
             setLocked(false);
             void refresh();

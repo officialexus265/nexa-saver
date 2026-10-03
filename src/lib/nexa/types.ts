@@ -7,6 +7,8 @@ export type PublicProfile = {
   email: string;
   phone: string;
   phoneVerified?: boolean;
+  lockMode?: "instant" | "idle";
+  lockIdleMinutes?: number;
   username: string;
   dateOfBirth: string;
   gender?: "female" | "male" | "other" | "prefer_not_to_say" | null;
@@ -67,6 +69,8 @@ export type WithdrawResult = {
   amountTambala: number;
   phone: string;
   phoneVerified?: boolean;
+  lockMode?: "instant" | "idle";
+  lockIdleMinutes?: number;
   remainingTambala: number;
 };
 

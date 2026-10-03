@@ -254,3 +254,19 @@
     border-color: var(--color-primary);
   }
 }
+
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.animate-spin {
+  animation: spin 0.7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin {
+    animation: none;
+    border-color: var(--color-primary, #3dcf8e);
+  }
+}

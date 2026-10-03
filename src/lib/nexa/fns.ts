@@ -79,6 +79,8 @@ type ProfileRow = {
   email: string;
   phone: string;
   phone_verified_at: unknown;
+  lock_mode: string;
+  lock_idle_minutes: number;
   username: string;
   date_of_birth: string;
   role: string;
@@ -105,6 +107,8 @@ function toPublic(row: ProfileRow): PublicProfile {
     email: row.email,
     phone: row.phone,
     phoneVerified: Boolean(row.phone_verified_at),
+    lockMode: row.lock_mode === "instant" ? "instant" : "idle",
+    lockIdleMinutes: Math.min(60, Math.max(1, asInt(row.lock_idle_minutes) || 5)),
     username: row.username,
     dateOfBirth: String(row.date_of_birth).slice(0, 10),
     gender: (row.gender as PublicProfile["gender"]) ?? null,
@@ -1690,4 +1694,27 @@ export const resendVerificationEmailFn = createServerFn({ method: "POST" })
       throw new Error("Could not send verification email. Check SMTP settings or try again later.");
     }
     return { ok: true as const, alreadyVerified: false as const };
+  });
+
+
+export const changeLockPreference = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      mode: z.enum(["instant", "idle"]),
+      idleMinutes: z.number().int().min(1).max(60).optional(),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const minutes = data.mode === "idle" ? (data.idleMinutes ?? 5) : 5;
+    await sql`
+      update profiles
+      set lock_mode = ${data.mode},
+          lock_idle_minutes = ${minutes},
+          updated_at = now()
+      where user_id = ${context.userId}
+    `;
+    return { ok: true as const, mode: data.mode, idleMinutes: minutes };
   });

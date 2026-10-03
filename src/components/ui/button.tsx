@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
+import { Spinner } from "@/components/ui/spinner";
 
 export const buttonVariants = cva(
   "tap inline-flex items-center justify-center gap-2 rounded-md font-medium transition-[opacity,background-color,color,border-color,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40 min-h-11 px-4 text-sm",
@@ -29,7 +30,23 @@ export function Button({
   variant,
   size,
   type = "button",
+  loading,
+  children,
+  disabled,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & VariantProps<typeof buttonVariants>) {
-  return <button type={type} className={cn(buttonVariants({ variant, size }), className)} {...props} />;
+}: ButtonHTMLAttributes<HTMLButtonElement> &
+  VariantProps<typeof buttonVariants> & {
+    loading?: boolean;
+  }) {
+  return (
+    <button
+      type={type}
+      disabled={disabled || loading}
+      className={cn(buttonVariants({ variant, size }), className)}
+      {...props}
+    >
+      {loading ? <Spinner size="sm" className="border-t-current" /> : null}
+      {children}
+    </button>
+  );
 }

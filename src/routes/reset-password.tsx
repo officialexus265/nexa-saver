@@ -109,8 +109,8 @@ function ResetPasswordPage() {
           autoComplete="new-password"
         />
         {error ? <p className="text-sm text-danger">{error}</p> : null}
-        <Button type="submit" className="w-full" disabled={busy || password.length < 8}>
-          {busy ? "Saving…" : "Update password"}
+        <Button type="submit" className="w-full" loading={busy} disabled={busy || password.length < 8}>
+          {busy ? "Updating password…" : "Update password"}
         </Button>
       </form>
     </AuthFrame>

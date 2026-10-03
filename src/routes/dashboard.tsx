@@ -6,6 +6,7 @@ import { PinPad } from "@/components/pin-pad";
 import { SessionGate } from "@/components/session-gate";
 import { SuccessBurst } from "@/components/success-burst";
 import { Button } from "@/components/ui/button";
+import { LoadingStatus } from "@/components/ui/spinner";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -208,12 +209,7 @@ function CheckBalanceModal({ open, onClose, onDone }: { open: boolean; onClose: 
         />
       </div>
       {error ? <p className="mt-3 text-center text-sm text-danger">{error}</p> : null}
-      {busy ? (
-        <div className="mt-5 flex flex-col items-center gap-3" role="status" aria-live="polite">
-          <span className="pin-check-spinner size-9 rounded-full border-2 border-border border-t-primary" />
-          <p className="text-sm text-muted">Checking balance…</p>
-        </div>
-      ) : null}
+{busy ? <LoadingStatus label="Checking balance…" /> : null}
     </Modal>
   );
 }
@@ -328,8 +324,8 @@ function DepositModal({
             <Button variant="secondary" className="flex-1" onClick={() => setStage("form")}>
               Back
             </Button>
-            <Button className="flex-1" disabled={busy} onClick={() => void start()}>
-              {busy ? "Starting…" : "I understand"}
+            <Button className="flex-1" loading={busy} disabled={busy} onClick={() => void start()}>
+              {busy ? "Starting deposit…" : "I understand"}
             </Button>
           </div>
         </div>
@@ -342,8 +338,8 @@ function DepositModal({
               : "Approve the PayChangu prompt on your phone."}
           </p>
           {error ? <p className="text-sm text-danger">{error}</p> : null}
-          <Button className="w-full" disabled={busy} onClick={() => void approve()}>
-            {busy ? "Confirming…" : "I've approved the payment"}
+          <Button className="w-full" loading={busy} disabled={busy} onClick={() => void approve()}>
+            {busy ? "Crediting vault…" : "I've approved the payment"}
           </Button>
         </div>
       ) : null}
@@ -452,8 +448,8 @@ function WithdrawModal({
             </div>
           </div>
           {error ? <p className="text-sm text-danger">{error}</p> : null}
-          <Button className="w-full" disabled={!kwacha || pin.length !== 4 || busy} onClick={() => void send()}>
-            {busy ? "Sending…" : "Withdraw"}
+          <Button className="w-full" loading={busy} disabled={!kwacha || pin.length !== 4 || busy} onClick={() => void send()}>
+            {busy ? "Sending withdrawal…" : "Withdraw"}
           </Button>
         </div>
       )}

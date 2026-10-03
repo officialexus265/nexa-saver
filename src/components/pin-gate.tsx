@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { PinPad } from "@/components/pin-pad";
 import { Button } from "@/components/ui/button";
+import { LoadingStatus } from "@/components/ui/spinner";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { errMessage } from "@/lib/nexa/errors";
@@ -96,7 +97,7 @@ export function PinGate({
             </div>
             {error ? <p className="text-sm text-danger">{error}</p> : null}
             <Button type="submit" className="w-full" disabled={busy || newPin.length !== 4}>
-              Save new PIN
+              {busy ? "Saving…" : "Save new PIN"}
             </Button>
             <Button type="button" variant="ghost" className="w-full" onClick={() => setForgot(false)}>
               Back to PIN
@@ -104,11 +105,16 @@ export function PinGate({
           </form>
         ) : (
           <div className="mt-6">
-            <PinPad value={pin} onChange={setPin} disabled={busy} error={Boolean(error)} />
+            <div className={busy ? "pointer-events-none opacity-50" : undefined}>
+              <PinPad value={pin} onChange={setPin} disabled={busy} error={Boolean(error)} />
+            </div>
             {error ? <p className="mt-3 text-center text-sm text-danger">{error}</p> : null}
-            <button type="button" onClick={loadQuestion} className="mt-4 w-full text-center text-sm text-muted">
-              Forgot PIN? Use security question
-            </button>
+            {busy ? <LoadingStatus label="Unlocking vault…" /> : null}
+            {!busy ? (
+              <button type="button" onClick={loadQuestion} className="mt-4 w-full text-center text-sm text-muted">
+                Forgot PIN? Use security question
+              </button>
+            ) : null}
           </div>
         )}
       </div>

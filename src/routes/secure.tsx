@@ -160,8 +160,8 @@ function SecureAccountPage() {
             Recommendation: this will sign out all devices. You will need to sign in again.
           </p>
           {error ? <p className="text-sm text-danger">{error}</p> : null}
-          <Button type="submit" className="w-full" disabled={busy || password.length < 1 || newPin.length !== 4}>
-            {busy ? "Saving…" : "Update PIN & sign out all devices"}
+          <Button type="submit" className="w-full" loading={busy} disabled={busy || password.length < 1 || newPin.length !== 4}>
+            {busy ? "Securing account…" : "Update PIN & sign out all devices"}
           </Button>
         </form>
       ) : (
@@ -200,9 +200,9 @@ function SecureAccountPage() {
           <Button
             type="submit"
             className="w-full"
-            disabled={busy || currentPassword.length < 1 || newPassword.length < 8}
+            loading={busy} disabled={busy || currentPassword.length < 1 || newPassword.length < 8}
           >
-            {busy ? "Saving…" : "Change password & sign out all devices"}
+            {busy ? "Securing account…" : "Change password & sign out all devices"}
           </Button>
         </form>
       )}
