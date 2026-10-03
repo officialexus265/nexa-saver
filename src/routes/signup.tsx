@@ -10,6 +10,7 @@ import { authClient } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { SECURITY_QUESTIONS } from "@/lib/nexa/constants";
 import { errMessage } from "@/lib/nexa/errors";
+import { GENDER_OPTIONS, type Gender } from "@/lib/nexa/constants";
 import { checkHandle, completeProfile, getMe } from "@/lib/nexa/fns";
 import { cn } from "@/lib/utils";
 
@@ -34,6 +35,7 @@ const empty: FormState = {
   firstName: "",
   lastName: "",
   dateOfBirth: "",
+  gender: "" as Gender | "",
   email: "",
   phone: "",
   username: "",
@@ -74,7 +76,7 @@ function SignupPage() {
   async function nextStep() {
     setError(null);
     if (step === 0) {
-      if (!form.firstName || !form.lastName || !form.dateOfBirth) {
+      if (!form.firstName || !form.lastName || !form.dateOfBirth || !form.gender) {
         setError("All identity fields are required");
         return;
       }
@@ -135,6 +137,7 @@ function SignupPage() {
           phone: form.phone,
           username: form.username,
           dateOfBirth: form.dateOfBirth,
+          gender: form.gender as Gender,
           pin: form.pin,
           securityQuestion: form.securityQuestion,
           securityAnswer: form.securityAnswer,
@@ -176,6 +179,24 @@ function SignupPage() {
               </Field>
               <Field label="Date of birth" id="dob">
                 <Input id="dob" type="date" value={form.dateOfBirth} onChange={(e) => patch("dateOfBirth", e.target.value)} required />
+              </Field>
+              <Field label="Gender" id="gender">
+                <select
+                  id="gender"
+                  className="flex h-11 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  value={form.gender}
+                  onChange={(e) => patch("gender", e.target.value as Gender)}
+                  required
+                >
+                  <option value="" disabled>
+                    Select…
+                  </option>
+                  {GENDER_OPTIONS.map((g) => (
+                    <option key={g.value} value={g.value}>
+                      {g.label}
+                    </option>
+                  ))}
+                </select>
               </Field>
             </>
           ) : null}

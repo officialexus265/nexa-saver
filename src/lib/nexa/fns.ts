@@ -105,6 +105,7 @@ function toPublic(row: ProfileRow): PublicProfile {
     phone: row.phone,
     username: row.username,
     dateOfBirth: String(row.date_of_birth).slice(0, 10),
+    gender: (row.gender as PublicProfile["gender"]) ?? null,
     role: row.role === "admin" ? "admin" : "user",
     mustChangePassword: Boolean(row.must_change_password),
     loginIdentifierPref: (row.login_identifier_pref in LOGIN_PREF_LABEL
@@ -240,6 +241,7 @@ const completeSchema = z.object({
   phone: z.string().min(8),
   username: usernameSchema,
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  gender: z.enum(["female", "male", "other", "prefer_not_to_say"]),
   pin: pinSchema,
   securityQuestion: z.enum(SECURITY_QUESTIONS),
   securityAnswer: z.string().trim().min(2).max(80),
@@ -295,11 +297,11 @@ export const completeProfile = createServerFn({ method: "POST" })
 
     await sql`
       insert into profiles (
-        user_id, first_name, last_name, email, phone, username, date_of_birth,
+        user_id, first_name, last_name, email, phone, username, date_of_birth, gender,
         pin_hash, security_question, security_answer_hash, role, login_identifier_pref
       ) values (
         ${context.userId}, ${data.firstName}, ${data.lastName}, ${email}, ${phone},
-        ${data.username}, ${data.dateOfBirth}, ${pinHash}, ${data.securityQuestion},
+        ${data.username}, ${data.dateOfBirth}, ${data.gender}, ${pinHash}, ${data.securityQuestion},
         ${answerHash}, ${"user"}, ${data.loginIdentifierPref ?? "username"}
       )
     `;
@@ -345,6 +347,18 @@ export const getMe = createServerFn({ method: "GET" })
     await touchSession(context.userId);
     const fresh = await loadProfile(context.userId);
     if (!fresh) throw new Error("Profile missing");
+    try {
+      const { getSql } = await import("@/lib/db");
+      const { noteDeviceAccess } = await import("./devices.server");
+      const sql = await getSql();
+      await noteDeviceAccess(sql, {
+        userId: context.userId,
+        email: fresh.email,
+        firstName: fresh.first_name,
+      });
+    } catch (err) {
+      console.error("[getMe] device note:", (err as Error).message);
+    }
     return {
       ok: true,
       needsProfile: false,
@@ -358,6 +372,20 @@ export const heartbeat = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
     await touchSession(context.userId);
+    try {
+      const profile = await loadProfile(context.userId);
+      if (profile) {
+        const { getSql } = await import("@/lib/db");
+        const { noteDeviceAccess } = await import("./devices.server");
+        await noteDeviceAccess(await getSql(), {
+          userId: context.userId,
+          email: profile.email,
+          firstName: profile.first_name,
+        });
+      }
+    } catch {
+      /* ignore */
+    }
     return { ok: true as const };
   });
 

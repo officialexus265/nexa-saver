@@ -60,3 +60,12 @@ export const LOGIN_PREF_LABEL: Record<LoginPref, string> = {
   email: "Email",
   phone: "Phone",
 };
+
+
+export const GENDER_OPTIONS = [
+  { value: "female", label: "Female" },
+  { value: "male", label: "Male" },
+  { value: "other", label: "Other" },
+  { value: "prefer_not_to_say", label: "Prefer not to say" },
+] as const;
+export type Gender = (typeof GENDER_OPTIONS)[number]["value"];

@@ -8,6 +8,7 @@ export type PublicProfile = {
   phone: string;
   username: string;
   dateOfBirth: string;
+  gender?: "female" | "male" | "other" | "prefer_not_to_say" | null;
   role: "user" | "admin";
   mustChangePassword: boolean;
   loginIdentifierPref: LoginPref;
