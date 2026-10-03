@@ -64,15 +64,23 @@ export function SessionGate({
       if (document.visibilityState === "visible") void heartbeat().catch(() => undefined);
     }, 120_000);
     const vis = () => {
-      if (document.visibilityState === "hidden") return;
+      // iOS Safari standalone often suspends without reliable idle timers.
+      // Lock as soon as the app is backgrounded so the PIN gate is required on return.
+      if (document.visibilityState === "hidden") {
+        setLocked(true);
+        return;
+      }
       if (Date.now() - last >= IDLE_LOCK_MS) setLocked(true);
     };
     document.addEventListener("visibilitychange", vis);
+    const onPageHide = () => setLocked(true);
+    window.addEventListener("pagehide", onPageHide);
     return () => {
       events.forEach((e) => window.removeEventListener(e, bump));
       window.clearInterval(idle);
       window.clearInterval(beat);
       document.removeEventListener("visibilitychange", vis);
+      window.removeEventListener("pagehide", onPageHide);
     };
   }, [me]);
 

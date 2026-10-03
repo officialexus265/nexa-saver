@@ -10,7 +10,14 @@ import { Label } from "@/components/ui/label";
 import { signOut } from "@/lib/auth/client";
 import { DELETE_LAYER_WAIT_MS, LOGIN_PREF_LABEL, type LoginPref } from "@/lib/nexa/constants";
 import { errMessage } from "@/lib/nexa/errors";
-import { changeLoginPref, changePasswordFn, changePinFn, deleteAccountFn } from "@/lib/nexa/fns";
+import {
+  changeLoginPref,
+  changePasswordFn,
+  changePinFn,
+  changeRegisteredPhone,
+  deleteAccountFn,
+  signOutOtherDevices,
+} from "@/lib/nexa/fns";
 import { formatPhoneDisplay } from "@/lib/nexa/phone";
 import { cn } from "@/lib/utils";
 
@@ -23,7 +30,8 @@ function ProfilePage() {
 function Settings({ profile }: { profile: { firstName: string; lastName: string; email: string; phone: string; username: string; loginIdentifierPref: LoginPref; role: string } }) {
   const [pref, setPref] = useState<LoginPref>(profile.loginIdentifierPref);
   const [pw, setPw] = useState({ current: "", next: "" });
-  const [pins, setPins] = useState({ current: "", next: "" });
+  const [pins, setPins] = useState({ current: "", next: "", password: "" });
+  const [phoneForm, setPhoneForm] = useState({ phone: "", password: "" });
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,7 +47,9 @@ function Settings({ profile }: { profile: { firstName: string; lastName: string;
     try {
       await changePasswordFn({ data: { currentPassword: pw.current, newPassword: pw.next } });
       setPw({ current: "", next: "" });
-      setMessage("Password updated");
+      setMessage("Password updated. All devices were signed out — sign in again with the new password.");
+      await signOut("/");
+      return;
     } catch (err) {
       setError(errMessage(err));
     }
@@ -49,9 +59,23 @@ function Settings({ profile }: { profile: { firstName: string; lastName: string;
     e.preventDefault();
     setError(null);
     try {
-      await changePinFn({ data: { currentPin: pins.current, newPin: pins.next } });
-      setPins({ current: "", next: "" });
+      await changePinFn({ data: { currentPin: pins.current, newPin: pins.next, password: pins.password } });
+      setPins({ current: "", next: "", password: "" });
       setMessage("Withdraw PIN updated");
+    } catch (err) {
+      setError(errMessage(err));
+    }
+  }
+
+  async function savePhone(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      const res = await changeRegisteredPhone({
+        data: { newPhone: phoneForm.phone, password: phoneForm.password },
+      });
+      setPhoneForm({ phone: "", password: "" });
+      setMessage(res.message);
     } catch (err) {
       setError(errMessage(err));
     }
@@ -114,10 +138,73 @@ function Settings({ profile }: { profile: { firstName: string; lastName: string;
               <PinPad value={pins.next} onChange={(v) => setPins((p) => ({ ...p, next: v }))} />
             </div>
           </div>
-          <Button type="submit" disabled={pins.current.length !== 4 || pins.next.length !== 4}>
+          <PasswordField
+            id="pin-pw"
+            label="Confirm with password"
+            value={pins.password}
+            onChange={(v) => setPins((p) => ({ ...p, password: v }))}
+          />
+          <Button
+            type="submit"
+            disabled={pins.current.length !== 4 || pins.next.length !== 4 || pins.password.length < 1}
+          >
             Update PIN
           </Button>
         </form>
+      </Card>
+
+      <Card>
+        <form onSubmit={savePhone} className="space-y-3">
+          <h2 className="font-display text-lg font-semibold">Registered withdrawal number</h2>
+          <p className="text-sm text-muted">
+            Money is only paid to this number. Changing it requires your password and places a 72-hour hold on
+            withdrawals. Your balance stays safe.
+          </p>
+          <p className="text-sm">Current: {formatPhoneDisplay(profile.phone)}</p>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-phone">New Malawi mobile</Label>
+            <Input
+              id="new-phone"
+              inputMode="tel"
+              value={phoneForm.phone}
+              onChange={(e) => setPhoneForm((p) => ({ ...p, phone: e.target.value }))}
+              placeholder="09… or 08…"
+            />
+          </div>
+          <PasswordField
+            id="phone-pw"
+            label="Confirm with password"
+            value={phoneForm.password}
+            onChange={(v) => setPhoneForm((p) => ({ ...p, password: v }))}
+          />
+          <Button type="submit" disabled={phoneForm.phone.length < 8 || phoneForm.password.length < 1}>
+            Update number
+          </Button>
+        </form>
+      </Card>
+
+      <Card className="space-y-3 p-4">
+        <h2 className="font-display text-lg font-semibold">Sessions</h2>
+        <p className="text-sm text-muted">
+          Sign out every device using this account. You will need to sign in again on this device too.
+        </p>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => {
+            void (async () => {
+              setError(null);
+              try {
+                await signOutOtherDevices();
+                await signOut("/");
+              } catch (err) {
+                setError(errMessage(err));
+              }
+            })();
+          }}
+        >
+          Sign out other devices
+        </Button>
       </Card>
 
       {profile.role !== "admin" ? <DeleteAccount /> : null}
@@ -157,7 +244,7 @@ function DeleteAccount() {
     },
     {
       title: "Funds will be lost",
-      body: "Any remaining balance is forfeited. NEXA-SAVER cannot reverse a deleted vault. Make sure you have withdrawn.",
+      body: "Withdraw your balance to zero first. Pending deposits or withdrawals must finish. After deletion you cannot sign in again.",
     },
     {
       title: "Final warning",
@@ -170,7 +257,7 @@ function DeleteAccount() {
       <h2 className="font-display text-lg font-semibold text-danger">Delete account</h2>
       {layer === 0 ? (
         <>
-          <p className="mt-2 text-sm text-muted">Three confirmations. Each waits five seconds. Deleted vaults are gone for good.</p>
+          <p className="mt-2 text-sm text-muted">Three confirmations. Each waits five seconds. Balance must be zero and no payment may be in progress. Personal details are removed; transaction records are kept for audits.</p>
           <Button variant="danger" className="mt-4" onClick={() => setLayer(1)}>
             Start deletion
           </Button>

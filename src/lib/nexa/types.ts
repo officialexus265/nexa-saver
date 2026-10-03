@@ -33,10 +33,14 @@ export type BalanceResponse =
       balanceTambala: number;
       lifetimeDepositedTambala: number;
       lifetimeWithdrawnTambala: number;
+      withdrawHoldUntil: string | null;
+      withdrawHoldMessage: string | null;
+      dailyWithdrawCapTambala: number;
+      dailyWithdrawRemainingTambala: number;
     };
 
 export type TxKind = "deposit" | "withdrawal";
-export type TxStatus = "pending" | "success" | "failed";
+export type TxStatus = "pending" | "processing" | "success" | "failed";
 
 export type PublicTx = {
   id: number;
@@ -53,6 +57,14 @@ export type PublicTx = {
 export type DepositStart =
   | { ok: true; mode: "live"; checkoutUrl: string; reference: string }
   | { ok: true; mode: "demo"; reference: string; phone: string; amountTambala: number };
+
+export type WithdrawResult = {
+  ok: true;
+  reference: string;
+  amountTambala: number;
+  phone: string;
+  remainingTambala: number;
+};
 
 export type AdminOverview = {
   userCount: number;

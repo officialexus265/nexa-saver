@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { parseWebhookPayload } from "@/lib/nexa/paychangu.server";
-import { creditDeposit } from "@/lib/nexa/ledger.server";
+import { parseWebhookPayload, verifyPayment } from "@/lib/nexa/paychangu.server";
+import { creditDeposit, getDepositByReference } from "@/lib/nexa/ledger.server";
 import { env, isProduction } from "@/lib/env.server";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { kwachaToTambala } from "@/lib/nexa/money";
 
 export const Route = createFileRoute("/api/paychangu/webhook")({
   server: {
@@ -33,9 +34,41 @@ export const Route = createFileRoute("/api/paychangu/webhook")({
         const ref = payload.txRef ?? payload.chargeId;
         if (ref && (payload.status === "success" || payload.status === "successful")) {
           try {
+            // Do not trust the webhook body alone — re-verify with PayChangu.
+            const verified = await verifyPayment(ref);
+            if (!verified.ok) {
+              return new Response(JSON.stringify({ ok: true, skipped: "not_confirmed" }), {
+                status: 200,
+                headers: { "content-type": "application/json" },
+              });
+            }
+
+            const stored = await getDepositByReference(ref);
+            if (!stored || stored.kind !== "deposit") {
+              // Unknown or non-deposit ref — still 200 so provider does not retry forever.
+              return new Response(JSON.stringify({ ok: true, skipped: "unknown_ref" }), {
+                status: 200,
+                headers: { "content-type": "application/json" },
+              });
+            }
+
+            // Amount from PayChangu is in kwacha; stored gross is tambala.
+            const verifiedTambala = kwachaToTambala(verified.amount);
+            if (verifiedTambala > 0 && verifiedTambala !== Number(stored.gross_tambala)) {
+              console.error(
+                `[webhook] amount mismatch ref=${ref} stored=${stored.gross_tambala} verified=${verifiedTambala}`,
+              );
+              return new Response(JSON.stringify({ ok: false, error: "amount_mismatch" }), {
+                status: 200,
+                headers: { "content-type": "application/json" },
+              });
+            }
+
             await creditDeposit(ref);
-          } catch {
-            /* unknown or already posted — still 200 so PayChangu does not retry forever */
+          } catch (err) {
+            // unknown, already posted, or transient — still 200 so PayChangu does not retry forever
+            const { reportError } = await import("@/lib/nexa/monitoring.server");
+            await reportError(err, { where: "webhook.credit", ref });
           }
         }
         return new Response(JSON.stringify({ ok: true }), {

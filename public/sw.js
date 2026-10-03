@@ -5,7 +5,7 @@
  *   - never caches HTML pages or user data
  *   - caches only versioned static build assets + a tiny offline fallback page
  */
-const VERSION = "nexa-v1";
+const VERSION = "nexa-v2";
 const SHELL = ["/offline.html", "/icon-192.png", "/icon-512.png", "/favicon.svg", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
@@ -55,5 +55,12 @@ self.addEventListener("fetch", (event) => {
   // Icons / manifest: serve from cache when present, otherwise the network.
   if (SHELL.includes(url.pathname)) {
     event.respondWith(caches.match(req).then((hit) => hit || fetch(req)));
+  }
+});
+
+
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
   }
 });

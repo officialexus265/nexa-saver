@@ -145,6 +145,8 @@ function Vault({
         open={withdrawOpen}
         phone={profile.phone}
         maxTambala={revealed ? balance.balanceTambala : 0}
+        dailyRemainingTambala={revealed ? balance.dailyWithdrawRemainingTambala : 0}
+        holdMessage={revealed ? balance.withdrawHoldMessage : null}
         revealed={Boolean(revealed)}
         onClose={() => setWithdrawOpen(false)}
         onNeedPin={() => setCheckOpen(true)}
@@ -224,7 +226,12 @@ function DepositModal({
     setError(null);
     try {
       const res = await startDeposit({
-        data: { amountKwacha: kwacha, phone, origin: window.location.origin },
+        data: {
+          amountKwacha: kwacha,
+          phone,
+          origin: window.location.origin,
+          idempotencyKey: crypto.randomUUID(),
+        },
       });
       if (res.mode === "live") {
         window.location.href = res.checkoutUrl;
@@ -320,6 +327,8 @@ function WithdrawModal({
   open,
   phone,
   maxTambala,
+  dailyRemainingTambala,
+  holdMessage,
   revealed,
   onClose,
   onNeedPin,
@@ -328,6 +337,8 @@ function WithdrawModal({
   open: boolean;
   phone: string;
   maxTambala: number;
+  dailyRemainingTambala: number;
+  holdMessage: string | null;
   revealed: boolean;
   onClose: () => void;
   onNeedPin: () => void;
@@ -338,13 +349,17 @@ function WithdrawModal({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const kwacha = parseKwachaInput(amount);
+  const effectiveMax = Math.min(maxTambala, dailyRemainingTambala);
+  const onHold = Boolean(holdMessage);
 
   async function send() {
-    if (!kwacha) return;
+    if (!kwacha || onHold) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await startWithdraw({ data: { amountKwacha: kwacha, pin } });
+      const res = await startWithdraw({
+        data: { amountKwacha: kwacha, pin, idempotencyKey: crypto.randomUUID() },
+      });
       onSuccess(
         "Withdrawal sent",
         `${formatKwacha(res.amountTambala)} is on the way to ${formatPhoneDisplay(res.phone)}. This confirmation stays for three seconds.`,
@@ -367,11 +382,22 @@ function WithdrawModal({
             Check balance first
           </Button>
         </div>
+      ) : onHold ? (
+        <div className="space-y-4">
+          <p className="text-sm text-muted">{holdMessage}</p>
+          <Button className="w-full" variant="secondary" onClick={onClose}>
+            Close
+          </Button>
+        </div>
       ) : (
         <div className="space-y-4">
           <p className="text-sm text-muted">
-            Funds only leave to your registered number {formatPhoneDisplay(phone)}. You can send at most{" "}
-            {formatKwacha(maxTambala)}.
+            Funds only leave to your registered number {formatPhoneDisplay(phone)}. Available now:{" "}
+            {formatKwacha(effectiveMax)}
+            {dailyRemainingTambala < maxTambala
+              ? ` (daily limit remaining ${formatKwacha(dailyRemainingTambala)}; resets at midnight Malawi time)`
+              : null}
+            .
           </p>
           <div className="space-y-1.5">
             <Label htmlFor="w-amt">Amount (kwacha)</Label>

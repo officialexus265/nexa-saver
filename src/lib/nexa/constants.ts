@@ -5,7 +5,9 @@ export const IDLE_LOCK_MS = 5 * 60 * 1000;
 export const SESSION_INACTIVITY_MS = 30 * 24 * 60 * 60 * 1000;
 export const PIN_VERIFY_WINDOW_MS = 5 * 60 * 1000;
 export const PIN_MAX_ATTEMPTS = 5;
+/** Base lock after first trip of max attempts; escalates 5m → 1h → 24h. */
 export const PIN_LOCK_MS = 5 * 60 * 1000;
+export const PIN_LOCK_ESCALATION_MS = [5 * 60 * 1000, 60 * 60 * 1000, 24 * 60 * 60 * 1000] as const;
 export const SUCCESS_TOAST_MS = 3000;
 export const DELETE_LAYER_WAIT_MS = 5000;
 
@@ -14,6 +16,30 @@ export const MIN_WITHDRAW_KWACHA = 50;
 export const DEPOSIT_FEE_RATE = 0.06;
 export const PLATFORM_PROFIT_RATE = 0.03;
 export const PAYOUT_FEE_RATE = 0.03;
+
+/**
+ * Daily withdrawal limits (calendar day, Africa/Blantyre).
+ *
+ *   Start:                 100,000 MWK
+ *   After 14 days (auto):  250,000 MWK
+ *   Then only if the user withdraws close to the current limit (≥ NEAR_LIMIT_RATIO)
+ *   and has been on that tier for at least TIER_HOLD_DAYS:
+ *     250k → 350k → 500k → 800k → 1,000,000 (final automatic)
+ *   Above the final tier in a single day → contact platform support phone.
+ */
+export const WITHDRAW_CAP_LADDER_KWACHA = [100_000, 250_000, 350_000, 500_000, 800_000, 1_000_000] as const;
+export const STARTING_DAILY_WITHDRAW_CAP_KWACHA = WITHDRAW_CAP_LADDER_KWACHA[0];
+export const AUTO_RAISE_AFTER_DAYS = 14;
+export const AUTO_RAISE_CAP_KWACHA = WITHDRAW_CAP_LADDER_KWACHA[1]; // 250k
+export const TIER_HOLD_DAYS = 31;
+/** Fraction of current daily cap that counts as a "near-limit" withdrawal (e.g. 0.9 = 90%). */
+export const NEAR_LIMIT_RATIO = 0.9;
+export const FINAL_DAILY_WITHDRAW_CAP_KWACHA = WITHDRAW_CAP_LADDER_KWACHA[WITHDRAW_CAP_LADDER_KWACHA.length - 1];
+export const NEW_ACCOUNT_WITHDRAW_HOLD_MS = 24 * 60 * 60 * 1000;
+export const PIN_RESET_WITHDRAW_HOLD_MS = 24 * 60 * 60 * 1000;
+export const PHONE_CHANGE_WITHDRAW_HOLD_MS = 72 * 60 * 60 * 1000;
+export const BUSINESS_TZ = "Africa/Blantyre";
+export const PLATFORM_SUPPORT_PHONE_KEY = "support_phone";
 
 export const ADMIN_USERNAME = "admin";
 export const ADMIN_EMAIL = "admin@nexa-saver.app";

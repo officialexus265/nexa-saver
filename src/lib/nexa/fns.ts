@@ -5,6 +5,7 @@ import {
   ADMIN_EMAIL,
   LOGIN_PREF_LABEL,
   PIN_MAX_ATTEMPTS,
+  PIN_LOCK_MS,
   PIN_VERIFY_WINDOW_MS,
   SECURITY_QUESTIONS,
   SESSION_INACTIVITY_MS,
@@ -74,6 +75,9 @@ type ProfileRow = {
   pin_hash: string;
   security_question: string;
   security_answer_hash: string;
+  withdrawals_held_until: unknown;
+  daily_withdraw_cap_kwacha: number;
+  withdraw_cap_updated_at: unknown;
   created_at: unknown;
 };
 
@@ -105,7 +109,11 @@ function pinWindowOpen(verifiedAt: unknown): boolean {
 async function loadProfile(userId: string): Promise<ProfileRow | null> {
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
-  const rows = await sql<ProfileRow>`select * from profiles where user_id = ${userId} limit 1`;
+  const rows = await sql<ProfileRow>`
+    select * from profiles
+    where user_id = ${userId} and deleted_at is null
+    limit 1
+  `;
   return rows[0] ?? null;
 }
 
@@ -157,7 +165,14 @@ export const checkHandle = createServerFn({ method: "POST" })
     const { ensureAdmin } = await import("./seed-admin.server");
     await ensureAdmin();
     const { getSql } = await import("@/lib/db");
+    const { assertRateLimit } = await import("./rate-limit.server");
     const sql = await getSql();
+    await assertRateLimit(sql, {
+      bucket: "signup-check:global",
+      limit: 60,
+      windowSeconds: 60 * 60,
+      message: "Too many checks. Try again later.",
+    });
     const username = data.username?.trim();
     const email = data.email?.trim().toLowerCase();
     const phone = data.phone ? normalizeMwPhone(data.phone) : null;
@@ -182,8 +197,17 @@ export const resolveSignInEmail = createServerFn({ method: "POST" })
     const { ensureAdmin } = await import("./seed-admin.server");
     await ensureAdmin();
     const { getSql } = await import("@/lib/db");
+    const { assertRateLimit } = await import("./rate-limit.server");
     const sql = await getSql();
     const raw = data.identifier.trim();
+    // Constant-ish work + rate limit; always return an email-shaped string so
+    // callers cannot enumerate accounts from timing or response shape alone.
+    await assertRateLimit(sql, {
+      bucket: `signin-resolve:${raw.toLowerCase().slice(0, 64)}`,
+      limit: 30,
+      windowSeconds: 60 * 60,
+      message: "Too many sign-in attempts. Try again later.",
+    });
     const phone = normalizeMwPhone(raw);
     const rows = await sql<{ email: string }>`
       select email from profiles
@@ -217,7 +241,15 @@ export const completeProfile = createServerFn({ method: "POST" })
     const { getSql } = await import("@/lib/db");
     const { hashSecret, normalizeAnswer } = await import("./crypto");
     const { hashPassword } = await import("better-auth/crypto");
+    const { assertRateLimit } = await import("./rate-limit.server");
     const sql = await getSql();
+
+    await assertRateLimit(sql, {
+      bucket: `profile:${context.userId}`,
+      limit: 10,
+      windowSeconds: 60 * 60,
+      message: "Too many profile attempts. Try again later.",
+    });
 
     const existing = await loadProfile(context.userId);
     if (existing) return toPublic(existing);
@@ -320,9 +352,18 @@ export const verifyPin = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const { getSql } = await import("@/lib/db");
     const { verifySecret } = await import("./crypto");
+    const { assertRateLimit } = await import("./rate-limit.server");
+    const { PIN_LOCK_ESCALATION_MS } = await import("./constants");
     const sql = await getSql();
     const profile = await loadProfile(context.userId);
     if (!profile) throw new Error("Complete your profile first");
+
+    await assertRateLimit(sql, {
+      bucket: `pin:${context.userId}`,
+      limit: 20,
+      windowSeconds: 60 * 60,
+      message: "Too many PIN attempts. Try again later.",
+    });
 
     const lockedMs = profile.pin_locked_until
       ? profile.pin_locked_until instanceof Date
@@ -330,28 +371,51 @@ export const verifyPin = createServerFn({ method: "POST" })
         : Date.parse(String(profile.pin_locked_until))
       : 0;
     if (lockedMs && lockedMs > Date.now()) {
-      throw new Error("PIN is locked. Try again in a few minutes or reset it with your security question.");
+      throw new Error("PIN is locked. Try again later or reset it with your security question.");
     }
 
     const ok = await verifySecret(profile.pin_hash, data.pin);
     if (!ok) {
       const attempts = asInt(profile.failed_pin_attempts) + 1;
-      if (attempts >= PIN_MAX_ATTEMPTS) {
+      if (attempts >= PIN_MAX_ATTEMPTS && attempts % PIN_MAX_ATTEMPTS === 0) {
+        // Escalate: 5m → 1h → 24h based on how many full attempt cycles failed.
+        const cycle = Math.min(Math.floor(attempts / PIN_MAX_ATTEMPTS) - 1, PIN_LOCK_ESCALATION_MS.length - 1);
+        const lockMs = PIN_LOCK_ESCALATION_MS[cycle] ?? PIN_LOCK_MS;
+        const lockMinutes = Math.round(lockMs / 60_000);
         await sql`
           update profiles
           set failed_pin_attempts = ${attempts},
-              pin_locked_until = now() + interval '5 minutes',
+              pin_locked_until = now() + make_interval(secs => ${Math.round(lockMs / 1000)}),
               updated_at = now()
           where user_id = ${context.userId}
         `;
-        throw new Error("Too many incorrect PINs. Locked for 5 minutes.");
+        const label =
+          lockMinutes >= 60 * 24
+            ? "24 hours"
+            : lockMinutes >= 60
+              ? "1 hour"
+              : `${lockMinutes} minutes`;
+        const { writeAudit } = await import("./audit.server");
+        await writeAudit(sql, {
+          action: "pin_locked",
+          userId: context.userId,
+          detail: `locked ${label}; attempts=${attempts}`,
+        });
+        throw new Error(`Too many incorrect PINs. Locked for ${label}.`);
       }
       await sql`
         update profiles
         set failed_pin_attempts = ${attempts}, updated_at = now()
         where user_id = ${context.userId}
       `;
-      throw new Error(`Incorrect PIN. ${PIN_MAX_ATTEMPTS - attempts} attempts left.`);
+      const { writeAudit } = await import("./audit.server");
+      await writeAudit(sql, {
+        action: "pin_failed",
+        userId: context.userId,
+        detail: `attempts=${attempts}`,
+      });
+      const leftInCycle = PIN_MAX_ATTEMPTS - (attempts % PIN_MAX_ATTEMPTS);
+      throw new Error(`Incorrect PIN. ${leftInCycle} attempts left.`);
     }
 
     await sql`
@@ -359,6 +423,8 @@ export const verifyPin = createServerFn({ method: "POST" })
       set failed_pin_attempts = 0, pin_locked_until = null, pin_verified_at = now(), updated_at = now()
       where user_id = ${context.userId}
     `;
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, { action: "pin_ok", userId: context.userId });
     const wallets = await sql<{ balance_tambala: number }>`
       select balance_tambala from wallets where user_id = ${context.userId} limit 1
     `;
@@ -379,12 +445,18 @@ export const getBalance = createServerFn({ method: "GET" })
       lifetime_withdrawn_tambala: number;
     }>`select balance_tambala, lifetime_deposited_tambala, lifetime_withdrawn_tambala from wallets where user_id = ${context.userId}`;
     const w = wallets[0];
+    const { withdrawRoomTambala, holdMessage } = await import("./withdraw-limits.server");
+    const room = await withdrawRoomTambala(sql, context.userId, profile);
     return {
       ok: true,
       locked: false,
       balanceTambala: asInt(w?.balance_tambala),
       lifetimeDepositedTambala: asInt(w?.lifetime_deposited_tambala),
       lifetimeWithdrawnTambala: asInt(w?.lifetime_withdrawn_tambala),
+      withdrawHoldUntil: room.holdUntilMs > 0 ? new Date(room.holdUntilMs).toISOString() : null,
+      withdrawHoldMessage: room.holdUntilMs > 0 ? holdMessage(room.holdUntilMs) : null,
+      dailyWithdrawCapTambala: room.capTambala,
+      dailyWithdrawRemainingTambala: room.remainingTambala,
     };
   });
 
@@ -414,7 +486,14 @@ export const listTransactions = createServerFn({ method: "GET" })
     return rows.map((r) => ({
       id: asInt(r.id),
       kind: r.kind === "withdrawal" ? "withdrawal" : "deposit",
-      status: r.status === "success" ? "success" : r.status === "failed" ? "failed" : "pending",
+      status:
+        r.status === "success"
+          ? "success"
+          : r.status === "failed"
+            ? "failed"
+            : r.status === "processing"
+              ? "processing"
+              : "pending",
       grossTambala: asInt(r.gross_tambala),
       creditedTambala: asInt(r.credited_tambala),
       phone: r.phone,
@@ -431,6 +510,7 @@ export const startDeposit = createServerFn({ method: "POST" })
       amountKwacha: z.number().positive(),
       phone: z.string().min(8),
       origin: z.string().url(),
+      idempotencyKey: z.string().min(8).max(128),
     }),
   )
   .handler(async ({ context, data }): Promise<DepositStart> => {
@@ -444,40 +524,61 @@ export const startDeposit = createServerFn({ method: "POST" })
     const { getSql } = await import("@/lib/db");
     const { newReference } = await import("./crypto");
     const { paychanguConfigured, demoPaymentsEnabled, initiateHostedCheckout } = await import("./paychangu.server");
+    const { claimIdempotencyKey, storeIdempotencyResponse } = await import("./idempotency.server");
     if (!paychanguConfigured() && !demoPaymentsEnabled()) {
       throw new Error("Deposits are not available right now. Please try again later.");
     }
+    const { assertDepositsAllowed } = await import("./kill-switch.server");
+    assertDepositsAllowed();
     const sql = await getSql();
-    const gross = kwachaToTambala(data.amountKwacha);
-    const split = splitDeposit(gross);
-    const reference = newReference("DEP");
 
-    await sql`
-      insert into transactions (
-        user_id, kind, status, gross_tambala, credited_tambala,
-        platform_profit_tambala, payout_reserve_tambala, phone, reference, note
-      ) values (
-        ${context.userId}, ${"deposit"}, ${"pending"}, ${split.gross}, ${split.credited},
-        ${split.profit}, ${split.reserve}, ${phone}, ${reference},
-        ${`Deposit ${formatKwacha(split.gross)} from ${phone}`}
-      )
-    `;
-
-    if (demoPaymentsEnabled()) {
-      return { ok: true, mode: "demo", reference, phone, amountTambala: split.gross };
-    }
-
-    const { checkoutUrl } = await initiateHostedCheckout({
-      amountKwacha: tambalaToKwacha(split.gross),
-      email: profile.email,
-      firstName: profile.first_name,
-      lastName: profile.last_name,
-      txRef: reference,
-      callbackUrl: `${data.origin}/api/paychangu/webhook`,
-      returnUrl: `${data.origin}/deposit/return?ref=${encodeURIComponent(reference)}`,
-      description: `NEXA-SAVER deposit of ${formatKwacha(split.gross)}`,
+    const claim = await claimIdempotencyKey(sql, {
+      key: data.idempotencyKey,
+      userId: context.userId,
+      action: "deposit",
     });
-    return { ok: true, mode: "live", checkoutUrl, reference };
+    if (claim.hit) return claim.response as DepositStart;
+
+    try {
+      const gross = kwachaToTambala(data.amountKwacha);
+      const split = splitDeposit(gross);
+      const reference = newReference("DEP");
+
+      await sql`
+        insert into transactions (
+          user_id, kind, status, gross_tambala, credited_tambala,
+          platform_profit_tambala, payout_reserve_tambala, phone, reference, note
+        ) values (
+          ${context.userId}, ${"deposit"}, ${"pending"}, ${split.gross}, ${split.credited},
+          ${split.profit}, ${split.reserve}, ${phone}, ${reference},
+          ${`Deposit ${formatKwacha(split.gross)} from ${phone}`}
+        )
+      `;
+
+      let result: DepositStart;
+      if (demoPaymentsEnabled()) {
+        result = { ok: true, mode: "demo", reference, phone, amountTambala: split.gross };
+      } else {
+        const { checkoutUrl } = await initiateHostedCheckout({
+          amountKwacha: tambalaToKwacha(split.gross),
+          email: profile.email,
+          firstName: profile.first_name,
+          lastName: profile.last_name,
+          txRef: reference,
+          callbackUrl: `${data.origin}/api/paychangu/webhook`,
+          returnUrl: `${data.origin}/deposit/return?ref=${encodeURIComponent(reference)}`,
+          description: `NEXA-SAVER deposit of ${formatKwacha(split.gross)}`,
+        });
+        result = { ok: true, mode: "live", checkoutUrl, reference };
+      }
+
+      await storeIdempotencyResponse(sql, data.idempotencyKey, result);
+      return result;
+    } catch (err) {
+      // Release the key so the client can retry with the same or a new key.
+      await sql`delete from idempotency_keys where key = ${data.idempotencyKey} and response_json is null`;
+      throw err;
+    }
   });
 
 export const confirmDemoDeposit = createServerFn({ method: "POST" })
@@ -502,8 +603,9 @@ export const verifyDeposit = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
-    const owned = await sql<{ id: number; status: string }>`
-      select id, status from transactions where reference = ${data.reference} and user_id = ${context.userId} limit 1
+    const owned = await sql<{ id: number; status: string; gross_tambala: number }>`
+      select id, status, gross_tambala from transactions
+      where reference = ${data.reference} and user_id = ${context.userId} limit 1
     `;
     if (!owned.length) throw new Error("Deposit not found");
     const { paychanguConfigured, demoPaymentsEnabled, verifyPayment } = await import("./paychangu.server");
@@ -511,6 +613,11 @@ export const verifyDeposit = createServerFn({ method: "POST" })
       if (!paychanguConfigured()) throw new Error("Payments are not available right now");
       const result = await verifyPayment(data.reference);
       if (!result.ok) throw new Error("Payment is not confirmed yet");
+      // Match amount (PayChangu returns kwacha).
+      const verifiedTambala = kwachaToTambala(result.amount);
+      if (verifiedTambala > 0 && verifiedTambala !== asInt(owned[0].gross_tambala)) {
+        throw new Error("Payment amount does not match this deposit");
+      }
     }
     const { creditDeposit } = await import("./ledger.server");
     return creditDeposit(data.reference);
@@ -518,59 +625,124 @@ export const verifyDeposit = createServerFn({ method: "POST" })
 
 export const startWithdraw = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator(z.object({ amountKwacha: z.number().positive(), pin: pinSchema }))
+  .validator(
+    z.object({
+      amountKwacha: z.number().positive(),
+      pin: pinSchema,
+      idempotencyKey: z.string().min(8).max(128),
+    }),
+  )
   .handler(async ({ context, data }) => {
-    const { getSql } = await import("@/lib/db");
+    const { getSql, withTransaction } = await import("@/lib/db");
     const { verifySecret, newReference } = await import("./crypto");
     const { paychanguConfigured, demoPaymentsEnabled, initiateMomoPayout } = await import("./paychangu.server");
+    const { claimIdempotencyKey, storeIdempotencyResponse } = await import("./idempotency.server");
+    const { finalizeWithdrawalSuccess, finalizeWithdrawalFailure } = await import("./ledger.server");
     if (!paychanguConfigured() && !demoPaymentsEnabled()) {
       throw new Error("Withdrawals are not available right now. Your balance was not touched.");
     }
+    const { assertWithdrawalsAllowed } = await import("./kill-switch.server");
+    assertWithdrawalsAllowed();
+
     const sql = await getSql();
-    const profile = await loadProfile(context.userId);
-    if (!profile) throw new Error("Complete your profile first");
 
-    const pinOk = await verifySecret(profile.pin_hash, data.pin);
-    if (!pinOk) throw new Error("Incorrect withdrawal PIN");
-    await sql`update profiles set pin_verified_at = now(), failed_pin_attempts = 0, pin_locked_until = null where user_id = ${context.userId}`;
+    const claim = await claimIdempotencyKey(sql, {
+      key: data.idempotencyKey,
+      userId: context.userId,
+      action: "withdraw",
+    });
+    if (claim.hit) return claim.response as {
+      ok: true;
+      reference: string;
+      amountTambala: number;
+      phone: string;
+      remainingTambala: number;
+    };
 
-    const wallets = await sql<{ balance_tambala: number; payout_reserve_tambala: number }>`
-      select balance_tambala, payout_reserve_tambala from wallets where user_id = ${context.userId}
-    `;
-    const balance = asInt(wallets[0]?.balance_tambala);
-    const amountErr = validateWithdrawAmount(data.amountKwacha, balance);
-    if (amountErr) throw new Error(amountErr);
+    const releaseKey = async () => {
+      await sql`delete from idempotency_keys where key = ${data.idempotencyKey} and response_json is null`;
+    };
+
+    let profile;
+    try {
+      profile = await loadProfile(context.userId);
+      if (!profile) throw new Error("Complete your profile first");
+
+      const pinOk = await verifySecret(profile.pin_hash, data.pin);
+      if (!pinOk) throw new Error("Incorrect withdrawal PIN");
+      await sql`update profiles set pin_verified_at = now(), failed_pin_attempts = 0, pin_locked_until = null where user_id = ${context.userId}`;
+
+      const amountTambala = kwachaToTambala(data.amountKwacha);
+      const { assertWithdrawAllowed } = await import("./withdraw-limits.server");
+      await assertWithdrawAllowed(sql, {
+        userId: context.userId,
+        profile,
+        amountTambala,
+      });
+    } catch (err) {
+      await releaseKey();
+      throw err;
+    }
+
     const amount = kwachaToTambala(data.amountKwacha);
-    const reserveShare = Math.min(asInt(wallets[0]?.payout_reserve_tambala), Math.round(amount * (0.03 / 0.94)));
     const reference = newReference("WTH");
 
-    const updated = await sql<{ balance_tambala: number }>`
-      update wallets
-      set balance_tambala = balance_tambala - ${amount},
-          lifetime_withdrawn_tambala = lifetime_withdrawn_tambala + ${amount},
-          payout_reserve_tambala = greatest(payout_reserve_tambala - ${reserveShare}, 0),
-          updated_at = now()
-      where user_id = ${context.userId} and balance_tambala >= ${amount}
-      returning balance_tambala
-    `;
-    if (!updated.length) throw new Error("You can only withdraw the amount shown in your account");
+    // Atomic: lock wallet row, debit, insert processing transaction.
+    let prepared;
+    try {
+      prepared = await withTransaction(async (tx) => {
+      const wallets = await tx<{ balance_tambala: number; payout_reserve_tambala: number }>`
+        select balance_tambala, payout_reserve_tambala
+        from wallets
+        where user_id = ${context.userId}
+        for update
+      `;
+      const balance = asInt(wallets[0]?.balance_tambala);
+      const amountErr = validateWithdrawAmount(data.amountKwacha, balance);
+      if (amountErr) throw new Error(amountErr);
 
-    const inserted = await sql<{ id: number }>`
-      insert into transactions (
-        user_id, kind, status, gross_tambala, credited_tambala,
-        platform_profit_tambala, payout_reserve_tambala, phone, reference, note
-      ) values (
-        ${context.userId}, ${"withdrawal"}, ${"pending"}, ${amount}, ${amount},
-        ${0}, ${reserveShare}, ${profile.phone}, ${reference},
-        ${`Withdraw ${formatKwacha(amount)} to registered number ${profile.phone}`}
-      )
-      returning id
-    `;
-    const txId = inserted[0]?.id;
+      const reserveShare = Math.min(
+        asInt(wallets[0]?.payout_reserve_tambala),
+        Math.round(amount * (0.03 / 0.94)),
+      );
 
+      const updated = await tx<{ balance_tambala: number }>`
+        update wallets
+        set balance_tambala = balance_tambala - ${amount},
+            lifetime_withdrawn_tambala = lifetime_withdrawn_tambala + ${amount},
+            payout_reserve_tambala = greatest(payout_reserve_tambala - ${reserveShare}, 0),
+            updated_at = now()
+        where user_id = ${context.userId} and balance_tambala >= ${amount}
+        returning balance_tambala
+      `;
+      if (!updated.length) throw new Error("You can only withdraw the amount shown in your account");
+
+      const inserted = await tx<{ id: number }>`
+        insert into transactions (
+          user_id, kind, status, gross_tambala, credited_tambala,
+          platform_profit_tambala, payout_reserve_tambala, phone, reference, note
+        ) values (
+          ${context.userId}, ${"withdrawal"}, ${"processing"}, ${amount}, ${amount},
+          ${0}, ${reserveShare}, ${profile.phone}, ${reference},
+          ${`Withdraw ${formatKwacha(amount)} to registered number ${profile.phone}`}
+        )
+        returning id
+      `;
+      return {
+        txId: inserted[0]!.id,
+        remaining: asInt(updated[0]?.balance_tambala),
+        reserveShare,
+      };
+      });
+    } catch (err) {
+      await releaseKey();
+      throw err;
+    }
+
+    // Outside the DB transaction: talk to PayChangu (or demo).
     try {
       if (paychanguConfigured()) {
-        await initiateMomoPayout({
+        const payout = await initiateMomoPayout({
           phone: profile.phone,
           amountKwacha: tambalaToKwacha(amount),
           chargeId: reference,
@@ -578,34 +750,62 @@ export const startWithdraw = createServerFn({ method: "POST" })
           firstName: profile.first_name,
           lastName: profile.last_name,
         });
+        const status = String(payout.status ?? "").toLowerCase();
+        // Provider accepted the request. Terminal success statuses vary by operator;
+        // treat explicit failure as failure, everything else as success for now
+        // (async payout confirmation can be added when a payout webhook is available).
+        if (status === "failed" || status === "failure" || status === "rejected") {
+          throw new Error(`Payout rejected by provider (${status})`);
+        }
       }
-      await sql`update transactions set status = ${"success"}, completed_at = now() where id = ${txId}`;
-      await sql`
-        insert into platform_ledger (transaction_id, entry_type, amount_tambala)
-        values
-          (${txId}, ${"withdrawal"}, ${amount}),
-          (${txId}, ${"payout_fee_used"}, ${reserveShare})
-      `;
+
+      await withTransaction(async (tx) => {
+        await finalizeWithdrawalSuccess(tx, {
+          txId: prepared.txId,
+          amount,
+          reserveShare: prepared.reserveShare,
+        });
+      });
+      // Near-limit withdrawal may unlock the next daily-cap tier (after 31 days on current tier).
+      try {
+        const { maybeRaiseCapAfterNearLimitWithdraw } = await import("./withdraw-limits.server");
+        await maybeRaiseCapAfterNearLimitWithdraw(sql, {
+          userId: context.userId,
+          amountTambala: amount,
+          profile,
+        });
+      } catch (capErr) {
+        console.error("[withdraw-cap] raise failed:", (capErr as Error).message);
+      }
     } catch (err) {
-      await sql`
-        update wallets
-        set balance_tambala = balance_tambala + ${amount},
-            lifetime_withdrawn_tambala = greatest(lifetime_withdrawn_tambala - ${amount}, 0),
-            payout_reserve_tambala = payout_reserve_tambala + ${reserveShare},
-            updated_at = now()
-        where user_id = ${context.userId}
-      `;
-      await sql`update transactions set status = ${"failed"}, note = ${String((err as Error).message)} where id = ${txId}`;
+      await withTransaction(async (tx) => {
+        await finalizeWithdrawalFailure(tx, {
+          txId: prepared.txId,
+          userId: context.userId,
+          amount,
+          reserveShare: prepared.reserveShare,
+          note: String((err as Error).message ?? "payout failed"),
+        });
+      });
+      await releaseKey();
       throw new Error("Withdrawal could not be sent. Your balance was not taken.");
     }
 
-    return {
+    const result = {
       ok: true as const,
       reference,
       amountTambala: amount,
       phone: profile.phone,
-      remainingTambala: asInt(updated[0]?.balance_tambala),
+      remainingTambala: prepared.remaining,
     };
+    await storeIdempotencyResponse(sql, data.idempotencyKey, result);
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      action: "withdraw_success",
+      userId: context.userId,
+      detail: `ref=${reference} amount=${amount}`,
+    });
+    return result;
   });
 
 export const resetPinWithQuestion = createServerFn({ method: "POST" })
@@ -614,12 +814,21 @@ export const resetPinWithQuestion = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const { getSql } = await import("@/lib/db");
     const { verifySecret, hashSecret, normalizeAnswer } = await import("./crypto");
+    const { assertRateLimit } = await import("./rate-limit.server");
     const sql = await getSql();
+    await assertRateLimit(sql, {
+      bucket: `pin-reset:${context.userId}`,
+      limit: 5,
+      windowSeconds: 60 * 60,
+      message: "Too many PIN reset attempts. Try again in an hour.",
+    });
     const profile = await loadProfile(context.userId);
     if (!profile) throw new Error("Complete your profile first");
     const ok = await verifySecret(profile.security_answer_hash, normalizeAnswer(data.answer));
     if (!ok) throw new Error("That answer does not match");
     const pinHash = await hashSecret(data.newPin);
+    const { PIN_RESET_WITHDRAW_HOLD_MS } = await import("./constants");
+    const { extendWithdrawHold } = await import("./withdraw-limits.server");
     await sql`
       update profiles
       set pin_hash = ${pinHash},
@@ -629,7 +838,19 @@ export const resetPinWithQuestion = createServerFn({ method: "POST" })
           updated_at = now()
       where user_id = ${context.userId}
     `;
-    return { ok: true as const, question: profile.security_question };
+    await extendWithdrawHold(
+      sql,
+      context.userId,
+      new Date(Date.now() + PIN_RESET_WITHDRAW_HOLD_MS),
+    );
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, { action: "pin_reset", userId: context.userId, detail: "security question reset; 24h withdraw hold" });
+    return {
+      ok: true as const,
+      question: profile.security_question,
+      withdrawHoldMessage:
+        "Withdrawals are on a short hold for 24 hours after a PIN reset. Your balance is safe.",
+    };
   });
 
 export const getSecurityQuestion = createServerFn({ method: "GET" })
@@ -673,18 +894,37 @@ export const changePasswordFn = createServerFn({ method: "POST" })
       where "userId" = ${context.userId} and "providerId" = ${"credential"}
     `;
     await sql`update profiles set must_change_password = false, updated_at = now() where user_id = ${context.userId}`;
-    return { ok: true as const };
+    // Revoke every session so other devices must sign in again with the new password.
+    await sql`delete from "session" where "userId" = ${context.userId}`;
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      action: "password_change",
+      userId: context.userId,
+      detail: "password updated; all sessions revoked",
+    });
+    return { ok: true as const, sessionsRevoked: true as const };
   });
 
 export const changePinFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator(z.object({ currentPin: pinSchema, newPin: pinSchema }))
+  .validator(z.object({ currentPin: pinSchema, newPin: pinSchema, password: z.string().min(1) }))
   .handler(async ({ context, data }) => {
     const { getSql } = await import("@/lib/db");
     const { verifySecret, hashSecret } = await import("./crypto");
+    const { verifyPassword } = await import("better-auth/crypto");
     const sql = await getSql();
     const profile = await loadProfile(context.userId);
     if (!profile) throw new Error("Complete your profile first");
+    const accounts = await sql<{ password: string | null }>`
+      select password from "account" where "userId" = ${context.userId} and "providerId" = ${"credential"} limit 1
+    `;
+    const currentHash = accounts[0]?.password;
+    if (!currentHash) throw new Error("No password is set on this account");
+    const pwOk = await (verifyPassword as unknown as (hash: string, password: string) => Promise<boolean>)(
+      currentHash,
+      data.password,
+    );
+    if (!pwOk) throw new Error("Password is incorrect");
     const ok = await verifySecret(profile.pin_hash, data.currentPin);
     if (!ok) throw new Error("Current PIN is incorrect");
     const pinHash = await hashSecret(data.newPin);
@@ -692,6 +932,27 @@ export const changePinFn = createServerFn({ method: "POST" })
       update profiles set pin_hash = ${pinHash}, pin_verified_at = now(), failed_pin_attempts = 0, updated_at = now()
       where user_id = ${context.userId}
     `;
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, { action: "pin_change", userId: context.userId });
+    return { ok: true as const };
+  });
+
+
+export const signOutOtherDevices = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { getSql } = await import("@/lib/db");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    // Better Auth session token is in the cookie; we cannot easily keep "this" session
+    // without the token id, so revoke all — the client should sign in again or the
+    // current request already completed. Prefer: delete all sessions (user signs in again).
+    await sql`delete from "session" where "userId" = ${context.userId}`;
+    await writeAudit(sql, {
+      action: "session_revoke_others",
+      userId: context.userId,
+      detail: "all sessions revoked",
+    });
     return { ok: true as const };
   });
 
@@ -699,18 +960,67 @@ export const deleteAccountFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator(z.object({ pin: pinSchema, confirm: z.literal("DELETE") }))
   .handler(async ({ context, data }) => {
-    const { getSql } = await import("@/lib/db");
+    const { getSql, withTransaction } = await import("@/lib/db");
     const { verifySecret } = await import("./crypto");
+    const { writeAudit } = await import("./audit.server");
     const sql = await getSql();
     const profile = await loadProfile(context.userId);
     if (!profile) throw new Error("Complete your profile first");
     if (profile.role === "admin") throw new Error("The platform admin account cannot be deleted");
     const ok = await verifySecret(profile.pin_hash, data.pin);
     if (!ok) throw new Error("Incorrect PIN");
-    await sql`delete from profiles where user_id = ${context.userId}`;
-    await sql`delete from "session" where "userId" = ${context.userId}`;
-    await sql`delete from "account" where "userId" = ${context.userId}`;
-    await sql`delete from "user" where "id" = ${context.userId}`;
+
+    const wallets = await sql<{ balance_tambala: number }>`
+      select balance_tambala from wallets where user_id = ${context.userId} limit 1
+    `;
+    if (asInt(wallets[0]?.balance_tambala) > 0) {
+      throw new Error(
+        "Withdraw your balance to zero before deleting this account. A vault with money cannot be closed.",
+      );
+    }
+    const pending = await sql<{ n: number }>`
+      select count(*)::int as n from transactions
+      where user_id = ${context.userId} and status in (${"pending"}, ${"processing"})
+    `;
+    if (asInt(pending[0]?.n) > 0) {
+      throw new Error(
+        "You still have a deposit or withdrawal in progress. Wait for it to finish before deleting.",
+      );
+    }
+
+    const tombstone = `deleted_${context.userId.slice(0, 12)}`;
+    await withTransaction(async (tx) => {
+      // Keep profile + transactions for audit; strip personal data and block login.
+      await tx`
+        update profiles
+        set first_name = ${"Deleted"},
+            last_name = ${"User"},
+            email = ${`${tombstone}@deleted.local`},
+            phone = ${tombstone},
+            username = ${tombstone},
+            pin_hash = ${"deleted"},
+            security_answer_hash = ${"deleted"},
+            deleted_at = now(),
+            pin_verified_at = null,
+            updated_at = now()
+        where user_id = ${context.userId}
+      `;
+      await tx`delete from "session" where "userId" = ${context.userId}`;
+      await tx`delete from "account" where "userId" = ${context.userId}`;
+      // Free the Better Auth email unique slot without losing the user id link.
+      await tx`
+        update "user"
+        set email = ${`${tombstone}@deleted.local`},
+            name = ${"Deleted User"},
+            "updatedAt" = now()
+        where "id" = ${context.userId}
+      `;
+    });
+    await writeAudit(sql, {
+      action: "account_delete",
+      userId: context.userId,
+      detail: "soft-delete; ledger retained",
+    });
     return { ok: true as const };
   });
 
@@ -744,7 +1054,7 @@ export const adminOverview = createServerFn({ method: "GET" })
         coalesce(sum(case when kind = 'deposit' and status = 'success' then gross_tambala else 0 end), 0)::bigint as deposits,
         coalesce(sum(case when kind = 'withdrawal' and status = 'success' then gross_tambala else 0 end), 0)::bigint as withdrawals,
         coalesce(sum(case when kind = 'deposit' and status = 'success' then platform_profit_tambala else 0 end), 0)::bigint as profit,
-        coalesce(sum(case when status = 'pending' then 1 else 0 end), 0)::int as pending
+        coalesce(sum(case when status in ('pending', 'processing') then 1 else 0 end), 0)::int as pending
       from transactions
     `;
     const seriesRows = await sql<{ day: string; deposits: number; withdrawals: number; profit: number }>`
@@ -791,6 +1101,7 @@ export const adminUsers = createServerFn({ method: "GET" })
              coalesce(w.lifetime_withdrawn_tambala,0) as lifetime_withdrawn_tambala
       from profiles p
       left join wallets w on w.user_id = p.user_id
+      where p.deleted_at is null
       order by p.created_at desc
     `;
     return rows.map((r) => ({
@@ -828,7 +1139,14 @@ export const adminTransactions = createServerFn({ method: "GET" })
     return rows.map((r) => ({
       id: asInt(r.id),
       kind: r.kind === "withdrawal" ? "withdrawal" : "deposit",
-      status: r.status === "success" ? "success" : r.status === "failed" ? "failed" : "pending",
+      status:
+        r.status === "success"
+          ? "success"
+          : r.status === "failed"
+            ? "failed"
+            : r.status === "processing"
+              ? "processing"
+              : "pending",
       grossTambala: asInt(r.gross_tambala),
       creditedTambala: asInt(r.credited_tambala),
       phone: r.phone,
@@ -837,4 +1155,101 @@ export const adminTransactions = createServerFn({ method: "GET" })
       createdAt: iso(r.created_at) ?? new Date().toISOString(),
       username: r.username,
     }));
+  });
+
+
+export const changeRegisteredPhone = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      newPhone: z.string().min(8),
+      password: z.string().min(1),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    const { getSql } = await import("@/lib/db");
+    const { normalizeMwPhone } = await import("./phone");
+    const { verifyPassword } = await import("better-auth/crypto");
+    const { PHONE_CHANGE_WITHDRAW_HOLD_MS } = await import("./constants");
+    const { extendWithdrawHold, formatHoldUntil } = await import("./withdraw-limits.server");
+    const sql = await getSql();
+
+    const phone = normalizeMwPhone(data.newPhone);
+    if (!phone) throw new Error("Enter a valid Malawi mobile number (Airtel 09x or TNM 08x)");
+
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Complete your profile first");
+    if (profile.phone === phone) throw new Error("That is already your registered number");
+
+    const accounts = await sql<{ password: string | null }>`
+      select password from "account" where "userId" = ${context.userId} and "providerId" = ${"credential"} limit 1
+    `;
+    const currentHash = accounts[0]?.password;
+    if (!currentHash) throw new Error("No password is set on this account");
+    const matches = await (verifyPassword as unknown as (hash: string, password: string) => Promise<boolean>)(
+      currentHash,
+      data.password,
+    );
+    if (!matches) throw new Error("Password is incorrect");
+
+    const clash = await sql<{ n: number }>`
+      select count(*)::int as n from profiles where phone = ${phone} and user_id <> ${context.userId}
+    `;
+    if (asInt(clash[0]?.n) > 0) throw new Error("That phone number is already registered");
+
+    await sql`
+      update profiles set phone = ${phone}, updated_at = now() where user_id = ${context.userId}
+    `;
+    const until = new Date(Date.now() + PHONE_CHANGE_WITHDRAW_HOLD_MS);
+    await extendWithdrawHold(sql, context.userId, until);
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      action: "phone_change",
+      userId: context.userId,
+      detail: `new phone; 72h hold until ${until.toISOString()}`,
+    });
+    return {
+      ok: true as const,
+      phone,
+      withdrawHoldUntil: until.toISOString(),
+      message:
+        `Registered number updated. Withdrawals are on a short hold until ${formatHoldUntil(until)}. Your balance is safe.`,
+    };
+  });
+
+
+export const getPlatformSupportPhone = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const profile = await loadProfile(context.userId);
+    if (!profile || profile.role !== "admin") throw new Error("Admin only");
+    const { getSql } = await import("@/lib/db");
+    const { getSupportPhone } = await import("./withdraw-limits.server");
+    const sql = await getSql();
+    return { phone: await getSupportPhone(sql) };
+  });
+
+export const setPlatformSupportPhone = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ phone: z.string().min(8).max(20) }))
+  .handler(async ({ context, data }) => {
+    const profile = await loadProfile(context.userId);
+    if (!profile || profile.role !== "admin") throw new Error("Admin only");
+    const { getSql } = await import("@/lib/db");
+    const { normalizeMwPhone } = await import("./phone");
+    const { setSupportPhone } = await import("./withdraw-limits.server");
+    const phone = normalizeMwPhone(data.phone);
+    if (!phone) throw new Error("Enter a valid Malawi mobile number");
+    const sql = await getSql();
+    await setSupportPhone(sql, phone);
+    return { ok: true as const, phone };
+  });
+
+export const runReconciliationFn = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const profile = await loadProfile(context.userId);
+    if (!profile || profile.role !== "admin") throw new Error("Admin only");
+    const { runReconciliation } = await import("./reconcile.server");
+    return runReconciliation();
   });
