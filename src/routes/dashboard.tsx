@@ -154,6 +154,7 @@ function Vault({
       <WithdrawModal
         open={withdrawOpen}
         phone={profile.phone}
+        phoneVerified={Boolean(profile.phoneVerified)}
         maxTambala={revealed ? balance.balanceTambala : 0}
         dailyRemainingTambala={revealed ? balance.dailyWithdrawRemainingTambala : 0}
         holdMessage={revealed ? balance.withdrawHoldMessage : null}
@@ -301,6 +302,9 @@ function DepositModal({
           <div className="space-y-1.5">
             <Label htmlFor="dep-phone">Paying number</Label>
             <Input id="dep-phone" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Any Airtel or TNM number" />
+            <p className="text-xs text-muted">
+              To unlock withdrawals, deposit at least once from your registered number (the one on your profile).
+            </p>
           </div>
           {error ? <p className="text-sm text-danger">{error}</p> : null}
           <Button className="w-full" disabled={!kwacha || !phone} onClick={() => setStage("confirm")}>
@@ -350,6 +354,7 @@ function DepositModal({
 function WithdrawModal({
   open,
   phone,
+  phoneVerified,
   maxTambala,
   dailyRemainingTambala,
   holdMessage,
@@ -360,6 +365,7 @@ function WithdrawModal({
 }: {
   open: boolean;
   phone: string;
+  phoneVerified: boolean;
   maxTambala: number;
   dailyRemainingTambala: number;
   holdMessage: string | null;
@@ -409,6 +415,17 @@ function WithdrawModal({
       ) : onHold ? (
         <div className="space-y-4">
           <p className="text-sm text-muted">{holdMessage}</p>
+          <Button className="w-full" variant="secondary" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      ) : !phoneVerified ? (
+        <div className="space-y-4">
+          <p className="text-sm text-muted">
+            Withdrawals unlock after you deposit from your registered number{" "}
+            <span className="text-fg">{formatPhoneDisplay(phone)}</span>. That proves the line is active and
+            yours. Use that number on the deposit screen, then try again when the deposit succeeds.
+          </p>
           <Button className="w-full" variant="secondary" onClick={onClose}>
             Close
           </Button>

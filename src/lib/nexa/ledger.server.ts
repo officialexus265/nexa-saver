@@ -30,6 +30,7 @@ export async function creditDeposit(reference: string): Promise<CreditResult> {
       credited_tambala: number;
       platform_profit_tambala: number;
       payout_reserve_tambala: number;
+      phone: string | null;
     }>`
       update transactions
       set status = ${"success"}, completed_at = now()
@@ -37,7 +38,7 @@ export async function creditDeposit(reference: string): Promise<CreditResult> {
         and kind = ${"deposit"}
         and status = ${"pending"}
       returning id, user_id, status, gross_tambala, credited_tambala,
-                platform_profit_tambala, payout_reserve_tambala
+                platform_profit_tambala, payout_reserve_tambala, phone
     `;
 
     if (claimed.length) {
@@ -64,6 +65,18 @@ export async function creditDeposit(reference: string): Promise<CreditResult> {
           (${txRow.id}, ${"platform_profit"}, ${profit}),
           (${txRow.id}, ${"payout_reserve"}, ${reserve})
       `;
+
+      // If the payer number matches the registered withdraw number, mark it verified.
+      if (txRow.phone) {
+        await tx`
+          update profiles
+          set phone_verified_at = coalesce(phone_verified_at, now()),
+              updated_at = now()
+          where user_id = ${txRow.user_id}
+            and phone = ${txRow.phone}
+            and phone_verified_at is null
+        `;
+      }
 
       return {
         already: false as const,

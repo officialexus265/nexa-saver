@@ -123,12 +123,14 @@ function SignupPage() {
     setError(null);
     try {
       if (!authed) {
+        // requireEmailVerification: user must confirm email before full sign-in works.
         const signed = await authClient.signUp.email({
           email: form.email,
           password: form.password,
           name: `${form.firstName} ${form.lastName}`,
         });
         if (signed.error) throw new Error(signed.error.message ?? "Could not create account");
+        // Verification email is sent by Better Auth (SMTP). User should confirm before moving money.
       }
       await completeProfile({
         data: {
@@ -146,6 +148,7 @@ function SignupPage() {
           password: authed ? form.password || undefined : undefined,
         },
       });
+      // Email verification sent on sign-up when SMTP is configured.
       navigate({ to: "/dashboard" });
     } catch (err) {
       setError(errMessage(err, "Could not finish sign up"));

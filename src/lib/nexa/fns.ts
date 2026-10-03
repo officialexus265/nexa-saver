@@ -78,6 +78,7 @@ type ProfileRow = {
   last_name: string;
   email: string;
   phone: string;
+  phone_verified_at: unknown;
   username: string;
   date_of_birth: string;
   role: string;
@@ -103,6 +104,7 @@ function toPublic(row: ProfileRow): PublicProfile {
     lastName: row.last_name,
     email: row.email,
     phone: row.phone,
+    phoneVerified: Boolean(row.phone_verified_at),
     username: row.username,
     dateOfBirth: String(row.date_of_birth).slice(0, 10),
     gender: (row.gender as PublicProfile["gender"]) ?? null,
@@ -359,9 +361,15 @@ export const getMe = createServerFn({ method: "GET" })
     } catch (err) {
       console.error("[getMe] device note:", (err as Error).message);
     }
+    const { getSql } = await import("@/lib/db");
+    const sqlUser = await getSql();
+    const ev = await sqlUser<{ emailVerified: boolean }>`
+      select "emailVerified" from "user" where id = ${context.userId} limit 1
+    `;
     return {
       ok: true,
       needsProfile: false,
+      emailVerified: Boolean(ev[0]?.emailVerified),
       profile: toPublic(fresh),
       pinUnlocked: pinWindowOpen(fresh.pin_verified_at),
       demoPayments: demoPaymentsEnabled(),
@@ -561,6 +569,7 @@ export const startDeposit = createServerFn({ method: "POST" })
   .handler(async ({ context, data }): Promise<DepositStart> => {
     const profile = await loadProfile(context.userId);
     if (!profile) throw new Error("Complete your profile first");
+    await requireVerifiedEmail(context.userId);
     const amountErr = validateDepositAmount(data.amountKwacha);
     if (amountErr) throw new Error(amountErr);
     const phone = normalizeMwPhone(data.phone);
@@ -671,6 +680,8 @@ export const verifyDeposit = createServerFn({ method: "POST" })
 
 export const startWithdraw = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
+  // email verified checked inside handler
+
   .validator(
     z.object({
       amountKwacha: z.number().positive(),
@@ -715,10 +726,18 @@ export const startWithdraw = createServerFn({ method: "POST" })
       if (!profile) throw new Error("Complete your profile first");
 
       const pinOk = await verifySecret(profile.pin_hash, data.pin);
+      await requireVerifiedEmail(context.userId);
       if (!pinOk) throw new Error("Incorrect withdrawal PIN");
       await sql`update profiles set pin_verified_at = now(), failed_pin_attempts = 0, pin_locked_until = null where user_id = ${context.userId}`;
 
       const amountTambala = kwachaToTambala(data.amountKwacha);
+      if (!profile.phone_verified_at) {
+        throw new Error(
+          "Verify your registered number first: make a successful deposit from " +
+            profile.phone +
+            ". Once that deposit lands, withdrawals unlock.",
+        );
+      }
       const { assertWithdrawAllowed } = await import("./withdraw-limits.server");
       await assertWithdrawAllowed(sql, {
         userId: context.userId,
@@ -1089,6 +1108,19 @@ export const deleteAccountFn = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+async function requireVerifiedEmail(userId: string) {
+  const { getSql } = await import("@/lib/db");
+  const sql = await getSql();
+  const rows = await sql<{ emailVerified: boolean }>`
+    select "emailVerified" from "user" where id = ${userId} limit 1
+  `;
+  if (!rows[0]?.emailVerified) {
+    throw new Error(
+      "Verify your email before moving money. Open the link we sent, or resend it from Profile.",
+    );
+  }
+}
+
 async function requireAdmin(userId: string) {
   const profile = await loadProfile(userId);
   if (!profile || profile.role !== "admin") throw new Error("Admin only");
@@ -1267,6 +1299,7 @@ export const changeRegisteredPhone = createServerFn({ method: "POST" })
       update profiles
       set phone = ${phone},
           previous_phone = ${previousPhone},
+          phone_verified_at = null,
           updated_at = now()
       where user_id = ${context.userId}
     `;
@@ -1430,6 +1463,7 @@ export const secureAccountWithPassword = createServerFn({ method: "POST" })
           update profiles
           set phone = ${previousPhone},
               previous_phone = null,
+              phone_verified_at = null,
               updated_at = now()
           where user_id = ${row.user_id}
         `;
@@ -1622,4 +1656,38 @@ export const completePasswordReset = createServerFn({ method: "POST" })
       detail: "password reset via email link; sessions revoked",
     });
     return { ok: true as const, sessionsRevoked: true as const };
+  });
+
+
+export const resendVerificationEmailFn = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { getSql } = await import("@/lib/db");
+    const { assertRateLimit } = await import("./rate-limit.server");
+    const sql = await getSql();
+    await assertRateLimit(sql, {
+      bucket: `email-verify:${context.userId}`,
+      limit: 5,
+      windowSeconds: 60 * 60,
+      message: "Too many verification emails. Try again later.",
+    });
+    const rows = await sql<{ email: string; emailVerified: boolean }>`
+      select email, "emailVerified" from "user" where id = ${context.userId} limit 1
+    `;
+    const u = rows[0];
+    if (!u) throw new Error("Account not found");
+    if (u.emailVerified) return { ok: true as const, alreadyVerified: true as const };
+    // Better Auth client-side resend is preferred; server triggers via API if available.
+    const { auth } = await import("@/lib/auth/server");
+    try {
+      // Internal helper: send verification for this email
+      await auth.api.sendVerificationEmail({
+        body: { email: u.email, callbackURL: "/" },
+        headers: new Headers(),
+      });
+    } catch (err) {
+      console.error("[resend-verify]", (err as Error).message);
+      throw new Error("Could not send verification email. Check SMTP settings or try again later.");
+    }
+    return { ok: true as const, alreadyVerified: false as const };
   });

@@ -56,7 +56,40 @@ export const auth = betterAuth({
   secret: resolveSecret(),
   database: new Pool({ connectionString: env("DATABASE_URL"), max: 3, idleTimeoutMillis: 10_000 }),
   trustedOrigins: [...trustedOrigins],
-  emailAndPassword: { enabled: true, minPasswordLength: 8, maxPasswordLength: 128 },
+  emailAndPassword: {
+    enabled: true,
+    minPasswordLength: 8,
+    maxPasswordLength: 128,
+    requireEmailVerification: false, // session allowed; money ops check emailVerified
+  },
+  emailVerification: {
+    sendOnSignUp: true,
+    autoSignInAfterVerification: true,
+    sendVerificationEmail: async ({ user, url }: { user: { name?: string | null; email: string }; url: string }) => {
+      const { sendMail } = await import("../nexa/mail.server");
+      const { APP_NAME } = await import("../nexa/constants");
+      const subject = `${APP_NAME}: verify your email`;
+      const lines = [
+        `Hi ${user.name || "there"},`,
+        "",
+        `Confirm your email for ${APP_NAME} by opening this link:`,
+        url,
+        "",
+        "If you did not create an account, ignore this email.",
+        "",
+        `— ${APP_NAME}`,
+      ];
+      const text = lines.join(String.fromCharCode(10));
+      const html =
+        '<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;padding:24px">' +
+        `<p>Hi ${user.name || "there"},</p>` +
+        `<p>Confirm your email for ${APP_NAME}.</p>` +
+        `<p><a href="${url}" style="display:inline-block;background:#3dcf8e;color:#062016;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px">Verify email</a></p>` +
+        `<p style="font-size:12px;color:#666;word-break:break-all">${url}</p>` +
+        "</body></html>";
+      await sendMail({ to: user.email, subject, text, html });
+    },
+  },
   // The session cookie lasts longer than the 30-day inactivity rule so that rule
   // (enforced server-side in `touchSession`) is what actually ends a session.
   // The expiry is pushed forward at most once a day while the user is active.

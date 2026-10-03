@@ -6,6 +6,7 @@ export type PublicProfile = {
   lastName: string;
   email: string;
   phone: string;
+  phoneVerified?: boolean;
   username: string;
   dateOfBirth: string;
   gender?: "female" | "male" | "other" | "prefer_not_to_say" | null;
@@ -21,6 +22,7 @@ export type MeResponse =
   | {
       ok: true;
       needsProfile: false;
+      emailVerified?: boolean;
       profile: PublicProfile;
       pinUnlocked: boolean;
       demoPayments: boolean;
@@ -64,6 +66,7 @@ export type WithdrawResult = {
   reference: string;
   amountTambala: number;
   phone: string;
+  phoneVerified?: boolean;
   remainingTambala: number;
 };
 
