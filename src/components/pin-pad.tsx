@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Delete } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -8,23 +9,65 @@ export function PinPad({
   onChange,
   disabled,
   error,
+  onComplete,
 }: {
   value: string;
   onChange: (next: string) => void;
   disabled?: boolean;
   error?: boolean;
+  /** Called once when the 4th digit is entered (pad or keyboard). */
+  onComplete?: (pin: string) => void;
 }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const completedFor = useRef<string | null>(null);
+
   function press(key: string) {
     if (disabled) return;
     if (key === "del") {
+      completedFor.current = null;
       onChange(value.slice(0, -1));
       return;
     }
-    if (key && value.length < 4) onChange(value + key);
+    if (key && value.length < 4) {
+      const next = value + key;
+      onChange(next);
+    }
   }
 
+  // Keyboard: digits and Backspace while this pad is mounted.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (disabled) return;
+      // Don't steal typing from text fields (forgot-PIN form, amount inputs, etc.).
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if ((e.target as HTMLElement | null)?.isContentEditable) return;
+
+      if (e.key === "Backspace" || e.key === "Delete") {
+        e.preventDefault();
+        completedFor.current = null;
+        onChange(value.slice(0, -1));
+        return;
+      }
+      if (/^[0-9]$/.test(e.key) && value.length < 4) {
+        e.preventDefault();
+        onChange(value + e.key);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [value, disabled, onChange]);
+
+  // Fire onComplete when we reach 4 digits (once per full pin).
+  useEffect(() => {
+    if (value.length !== 4 || !onComplete || disabled) return;
+    if (completedFor.current === value) return;
+    completedFor.current = value;
+    onComplete(value);
+  }, [value, onComplete, disabled]);
+
   return (
-    <div className="space-y-5">
+    <div ref={rootRef} className="space-y-5" tabIndex={-1}>
       <div className={cn("flex justify-center gap-3", error && "shake")}>
         {Array.from({ length: 4 }).map((_, i) => (
           <span

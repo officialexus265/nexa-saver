@@ -238,3 +238,19 @@
     filter: none !important;
   }
 }
+
+
+@keyframes pin-check-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.pin-check-spinner {
+  animation: pin-check-spin 0.7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pin-check-spinner {
+    animation: none;
+    border-color: var(--color-primary);
+  }
+}

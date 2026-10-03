@@ -463,7 +463,9 @@ export const getBalance = createServerFn({ method: "GET" })
 export const listTransactions = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }): Promise<PublicTx[]> => {
-    await requirePinWindow(context.userId);
+    // Activity is visible without PIN; only the balance figure stays locked.
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Complete your profile first");
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     const rows = await sql<{

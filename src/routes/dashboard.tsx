@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Eye, EyeOff, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Modal } from "@/components/modal";
@@ -52,7 +52,17 @@ function Vault({
   const reloadMoney = useCallback(async () => {
     const [b, t] = await Promise.all([getBalance(), listTransactions().catch(() => [] as PublicTx[])]);
     setBalance(b);
-    if (!b.locked) setTxs(t);
+    setTxs(t);
+  }, []);
+
+  // Activity loads without PIN; balance stays locked until PIN is entered.
+  useEffect(() => {
+    void listTransactions()
+      .then(setTxs)
+      .catch(() => setTxs([]));
+    void getBalance()
+      .then(setBalance)
+      .catch(() => undefined);
   }, []);
 
   return (
@@ -101,9 +111,9 @@ function Vault({
 
       <section>
         <h2 className="mb-3 font-display text-lg font-semibold">Activity</h2>
-        {!revealed ? (
-          <p className="text-sm text-muted">Confirm your PIN to see the ledger.</p>
-        ) : !txs?.length ? (
+        {txs === null ? (
+          <p className="text-sm text-muted">Loading activity…</p>
+        ) : !txs.length ? (
           <p className="text-sm text-muted">No movements yet. Make a deposit to open the vault.</p>
         ) : (
           <ul className="space-y-2">
@@ -166,11 +176,12 @@ function CheckBalanceModal({ open, onClose, onDone }: { open: boolean; onClose: 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function confirm() {
+  async function confirm(nextPin: string) {
+    if (busy || nextPin.length !== 4) return;
     setBusy(true);
     setError(null);
     try {
-      await verifyPin({ data: { pin } });
+      await verifyPin({ data: { pin: nextPin } });
       setPin("");
       onDone();
     } catch (err) {
@@ -183,12 +194,25 @@ function CheckBalanceModal({ open, onClose, onDone }: { open: boolean; onClose: 
 
   return (
     <Modal open={open} title="Check balance" onClose={onClose}>
-      <p className="mb-4 text-sm text-muted">Enter the 4-digit withdraw PIN to reveal your available kwacha.</p>
-      <PinPad value={pin} onChange={setPin} disabled={busy} error={Boolean(error)} />
-      {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
-      <Button className="mt-4 w-full" disabled={pin.length !== 4 || busy} onClick={() => void confirm()}>
-        Reveal balance
-      </Button>
+      <p className="mb-4 text-sm text-muted">
+        Enter the 4-digit withdraw PIN to reveal your available kwacha. You can use the pad or your keyboard.
+      </p>
+      <div className={busy ? "pointer-events-none opacity-50" : undefined}>
+        <PinPad
+          value={pin}
+          onChange={setPin}
+          disabled={busy}
+          error={Boolean(error)}
+          onComplete={(p) => void confirm(p)}
+        />
+      </div>
+      {error ? <p className="mt-3 text-center text-sm text-danger">{error}</p> : null}
+      {busy ? (
+        <div className="mt-5 flex flex-col items-center gap-3" role="status" aria-live="polite">
+          <span className="pin-check-spinner size-9 rounded-full border-2 border-border border-t-primary" />
+          <p className="text-sm text-muted">Checking balance…</p>
+        </div>
+      ) : null}
     </Modal>
   );
 }
