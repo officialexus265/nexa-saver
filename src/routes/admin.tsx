@@ -18,6 +18,9 @@ import {
   adminSecuritySurveyStatus,
   adminStartSecuritySurvey,
   adminStopSecuritySurvey,
+  adminDeleteHelpLine,
+  adminUpsertHelpLine,
+  adminListHelpLines,
 } from "@/lib/nexa/fns";
 import { formatKwacha, tambalaToKwacha } from "@/lib/nexa/money";
 import type { AdminOverview, AdminUserRow, PublicTx } from "@/lib/nexa/types";
@@ -82,7 +85,20 @@ function Console() {
   const [supportPhone, setSupportPhone] = useState("");
   const [supportMsg, setSupportMsg] = useState<string | null>(null);
   const [supportBusy, setSupportBusy] = useState(false);
-  const [surveyStatus, setSurveyStatus] = useState<{ active: boolean; campaignId: string | null; completed: number; totalUsers: number } | null>(null);
+  const [surveyStatus, setSurveyStatus] = useState<{
+    active: boolean;
+    campaignId: string | null;
+    completed: number;
+    totalUsers: number;
+    pending: number;
+    unchanged: number;
+    emailReverted: number;
+    phoneReverted: number;
+    bothReverted: number;
+    emailConfirmed: number;
+    phoneConfirmed: number;
+    completionRate: number;
+  } | null>(null);
   const [surveyBusy, setSurveyBusy] = useState(false);
   const [surveyMsg, setSurveyMsg] = useState<string | null>(null);
 
@@ -186,14 +202,26 @@ function Console() {
           everyone is asked again.
         </p>
         {surveyStatus ? (
-          <p className="text-sm text-muted">
-            Status:{" "}
-            <span className="font-medium text-fg">{surveyStatus.active ? "Active" : "Off"}</span>
-            {surveyStatus.campaignId ? ` · campaign ${surveyStatus.campaignId}` : ""}
-            {surveyStatus.active
-              ? ` · ${surveyStatus.completed} of ${surveyStatus.totalUsers} users finished`
-              : ""}
-          </p>
+          <div className="space-y-3">
+            <p className="text-sm text-muted">
+              Status:{" "}
+              <span className="font-medium text-fg">{surveyStatus.active ? "Active" : "Off"}</span>
+              {surveyStatus.campaignId ? (
+                <span className="text-faint"> · {surveyStatus.campaignId}</span>
+              ) : null}
+            </p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <SurveyStat label="Finished" value={String(surveyStatus.completed)} />
+              <SurveyStat label="Pending" value={String(surveyStatus.pending)} />
+              <SurveyStat label="Completion" value={`${surveyStatus.completionRate}%`} />
+              <SurveyStat label="No changes" value={String(surveyStatus.unchanged)} />
+              <SurveyStat label="Email restored" value={String(surveyStatus.emailReverted)} />
+              <SurveyStat label="Phone restored" value={String(surveyStatus.phoneReverted)} />
+              <SurveyStat label="Both restored" value={String(surveyStatus.bothReverted)} />
+              <SurveyStat label="Email OK" value={String(surveyStatus.emailConfirmed)} />
+              <SurveyStat label="Phone OK" value={String(surveyStatus.phoneConfirmed)} />
+            </div>
+          </div>
         ) : null}
         {surveyMsg ? <p className="text-sm text-primary">{surveyMsg}</p> : null}
         <div className="flex flex-wrap gap-2">
@@ -303,6 +331,8 @@ function Console() {
           ))}
         </ul>
       </section>
+
+      <HelpLinesManager />
 
       <SupportDesk />
     </div>
@@ -441,6 +471,138 @@ function Stat({ label, value }: { label: string; value: string }) {
     <Card className="p-4">
       <p className="text-xs uppercase tracking-[0.14em] text-muted">{label}</p>
       <p className="mt-2 font-display text-xl font-semibold tabular-nums">{value}</p>
+    </Card>
+  );
+}
+
+
+function SurveyStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-border bg-surface-2 px-3 py-2">
+      <p className="text-xs text-muted">{label}</p>
+      <p className="font-display text-lg font-semibold tabular-nums">{value}</p>
+    </div>
+  );
+}
+
+function HelpLinesManager() {
+  const [lines, setLines] = useState<
+    Array<{
+      id: number;
+      channel: "whatsapp" | "call" | "sms" | "facebook" | "other";
+      label: string;
+      value: string;
+      sortOrder: number;
+      active: boolean;
+    }>
+  >([]);
+  const [channel, setChannel] = useState<"whatsapp" | "call" | "sms" | "facebook" | "other">("whatsapp");
+  const [label, setLabel] = useState("");
+  const [value, setValue] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function reload() {
+    const rows = await adminListHelpLines();
+    setLines(rows);
+  }
+
+  useEffect(() => {
+    void reload().catch(() => setLines([]));
+  }, []);
+
+  async function addLine(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setMsg(null);
+    try {
+      await adminUpsertHelpLine({
+        data: { channel, label, value, sortOrder: lines.length, active: true },
+      });
+      setLabel("");
+      setValue("");
+      setMsg("Help line saved. It appears on the user dashboard + button.");
+      await reload();
+    } catch (err) {
+      setMsg(errMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(id: number) {
+    setBusy(true);
+    try {
+      await adminDeleteHelpLine({ data: { id } });
+      await reload();
+    } catch (err) {
+      setMsg(errMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="space-y-3 p-4">
+      <h2 className="font-display text-lg font-semibold">Help lines</h2>
+      <p className="text-sm text-muted">
+        These appear when a user taps the floating <strong className="text-fg">+</strong> on the dashboard
+        (WhatsApp, call, SMS, Facebook). Leave empty to hide the button.
+      </p>
+      <ul className="space-y-2">
+        {lines.map((l) => (
+          <li
+            key={l.id}
+            className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2 text-sm"
+          >
+            <div>
+              <p className="font-medium capitalize">
+                {l.channel} · {l.label}
+              </p>
+              <p className="text-xs text-muted break-all">{l.value}</p>
+            </div>
+            <Button type="button" variant="secondary" disabled={busy} onClick={() => void remove(l.id)}>
+              Remove
+            </Button>
+          </li>
+        ))}
+        {!lines.length ? <p className="text-sm text-muted">No help lines yet.</p> : null}
+      </ul>
+      <form onSubmit={(e) => void addLine(e)} className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="hl-channel">Channel</Label>
+          <select
+            id="hl-channel"
+            className="flex h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm"
+            value={channel}
+            onChange={(e) => setChannel(e.target.value as typeof channel)}
+          >
+            <option value="whatsapp">WhatsApp</option>
+            <option value="call">Call</option>
+            <option value="sms">SMS / Message</option>
+            <option value="facebook">Facebook</option>
+            <option value="other">Other (link)</option>
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="hl-label">Label</Label>
+          <Input id="hl-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Support WhatsApp" required />
+        </div>
+        <div className="space-y-1.5 sm:col-span-2">
+          <Label htmlFor="hl-value">Number or link</Label>
+          <Input
+            id="hl-value"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="26588… or https://facebook.com/…"
+            required
+          />
+        </div>
+        <Button type="submit" className="sm:col-span-2" disabled={busy || !label.trim() || !value.trim()}>
+          {busy ? "Saving…" : "Add help line"}
+        </Button>
+      </form>
+      {msg ? <p className="text-sm text-muted">{msg}</p> : null}
     </Card>
   );
 }

@@ -25,6 +25,7 @@ import { formatKwacha, kwachaToTambala, parseKwachaInput, splitDeposit } from "@
 import { formatPhoneDisplay } from "@/lib/nexa/phone";
 import type { BalanceResponse, PublicTx } from "@/lib/nexa/types";
 import { SecuritySurveyGate } from "@/components/security-survey";
+import { HelpFab } from "@/components/help-fab";
 
 export const Route = createFileRoute("/dashboard")({ component: DashboardPage });
 
@@ -73,6 +74,7 @@ function Vault({
   return (
     <div className="space-y-5">
       <SecuritySurveyGate />
+      <HelpFab />
       <div className="stagger-in">
         <p className="text-sm text-muted">Welcome back</p>
         <h1 className="font-display text-3xl font-semibold">{profile.firstName}</h1>

@@ -2102,21 +2102,59 @@ export const adminSecuritySurveyStatus = createServerFn({ method: "GET" })
     const flags = await readSurveyFlags(sql);
     let completed = 0;
     let total = 0;
+    let unchanged = 0;
+    let emailReverted = 0;
+    let phoneReverted = 0;
+    let bothReverted = 0;
+    let emailConfirmed = 0;
+    let phoneConfirmed = 0;
     if (flags.campaignId) {
-      const c = await sql<{ n: number }>`
-        select count(*)::int as n from security_survey_completions where campaign_id = ${flags.campaignId}
-      `;
       const u = await sql<{ n: number }>`
         select count(*)::int as n from profiles where deleted_at is null and role = ${"user"}
       `;
-      completed = Number(c[0]?.n ?? 0);
       total = Number(u[0]?.n ?? 0);
+      const stats = await sql<{
+        completed: number;
+        unchanged: number;
+        email_reverted: number;
+        phone_reverted: number;
+        both_reverted: number;
+        email_confirmed: number;
+        phone_confirmed: number;
+      }>`
+        select
+          count(*)::int as completed,
+          count(*) filter (where email_confirmed and phone_confirmed and not reverted_email and not reverted_phone)::int as unchanged,
+          count(*) filter (where reverted_email and not reverted_phone)::int as email_reverted,
+          count(*) filter (where reverted_phone and not reverted_email)::int as phone_reverted,
+          count(*) filter (where reverted_email and reverted_phone)::int as both_reverted,
+          count(*) filter (where email_confirmed)::int as email_confirmed,
+          count(*) filter (where phone_confirmed)::int as phone_confirmed
+        from security_survey_completions
+        where campaign_id = ${flags.campaignId}
+      `;
+      const s = stats[0];
+      completed = Number(s?.completed ?? 0);
+      unchanged = Number(s?.unchanged ?? 0);
+      emailReverted = Number(s?.email_reverted ?? 0);
+      phoneReverted = Number(s?.phone_reverted ?? 0);
+      bothReverted = Number(s?.both_reverted ?? 0);
+      emailConfirmed = Number(s?.email_confirmed ?? 0);
+      phoneConfirmed = Number(s?.phone_confirmed ?? 0);
     }
     return {
       active: flags.active,
       campaignId: flags.campaignId || null,
       completed,
       totalUsers: total,
+      pending: Math.max(0, total - completed),
+      unchanged,
+      emailReverted,
+      phoneReverted,
+      bothReverted,
+      emailConfirmed,
+      phoneConfirmed,
+      completionRate: total > 0 ? Math.round((completed / total) * 1000) / 10 : 0,
     };
   });
 
@@ -2289,5 +2327,120 @@ export const completeSecuritySurvey = createServerFn({ method: "POST" })
       revertedEmail: !data.emailIsMine,
       revertedPhone: !data.phoneIsMine,
     };
+  });
+
+
+
+/* ── Help lines (dashboard FAB) ─────────────────────────────────────────── */
+
+export type HelpLine = {
+  id: number;
+  channel: "whatsapp" | "call" | "sms" | "facebook" | "other";
+  label: string;
+  value: string;
+  sortOrder: number;
+  active: boolean;
+};
+
+export const listHelpLinesPublic = createServerFn({ method: "GET" })
+  .handler(async (): Promise<HelpLine[]> => {
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{
+      id: number;
+      channel: string;
+      label: string;
+      value: string;
+      sort_order: number;
+      active: boolean;
+    }>`
+      select id, channel, label, value, sort_order, active
+      from help_lines
+      where active = true
+      order by sort_order asc, id asc
+    `;
+    return rows.map((r) => ({
+      id: Number(r.id),
+      channel: r.channel as HelpLine["channel"],
+      label: r.label,
+      value: r.value,
+      sortOrder: Number(r.sort_order),
+      active: Boolean(r.active),
+    }));
+  });
+
+export const adminListHelpLines = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }): Promise<HelpLine[]> => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{
+      id: number;
+      channel: string;
+      label: string;
+      value: string;
+      sort_order: number;
+      active: boolean;
+    }>`
+      select id, channel, label, value, sort_order, active
+      from help_lines
+      order by sort_order asc, id asc
+    `;
+    return rows.map((r) => ({
+      id: Number(r.id),
+      channel: r.channel as HelpLine["channel"],
+      label: r.label,
+      value: r.value,
+      sortOrder: Number(r.sort_order),
+      active: Boolean(r.active),
+    }));
+  });
+
+export const adminUpsertHelpLine = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      id: z.number().int().positive().optional(),
+      channel: z.enum(["whatsapp", "call", "sms", "facebook", "other"]),
+      label: z.string().min(1).max(80),
+      value: z.string().min(1).max(300),
+      sortOrder: z.number().int().min(0).max(999).default(0),
+      active: z.boolean().default(true),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    if (data.id) {
+      await sql`
+        update help_lines
+        set channel = ${data.channel},
+            label = ${data.label},
+            value = ${data.value},
+            sort_order = ${data.sortOrder},
+            active = ${data.active}
+        where id = ${data.id}
+      `;
+      return { ok: true as const, id: data.id };
+    }
+    const rows = await sql<{ id: number }>`
+      insert into help_lines (channel, label, value, sort_order, active)
+      values (${data.channel}, ${data.label}, ${data.value}, ${data.sortOrder}, ${data.active})
+      returning id
+    `;
+    return { ok: true as const, id: Number(rows[0].id) };
+  });
+
+export const adminDeleteHelpLine = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ id: z.number().int().positive() }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await sql`delete from help_lines where id = ${data.id}`;
+    return { ok: true as const };
   });
 
