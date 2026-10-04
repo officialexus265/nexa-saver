@@ -14,8 +14,7 @@ import { Route as TermsRouteImport } from "./routes/terms";
 import { Route as SecureRouteImport } from "./routes/secure";
 import { Route as ResetPasswordRouteImport } from "./routes/reset-password";
 import { Route as ForgotPasswordRouteImport } from "./routes/forgot-password";
-import { Route as DepositReturnRouteImport } from "./routes/deposit.return";
-import { Route as DepositReturnAliasRouteImport } from "./routes/deposit-return";
+import { Route as DepositReturnRouteImport } from "./routes/deposit-return";
 import { Route as ApiAuthSplatRouteImport } from "./routes/api/auth/$";
 import { Route as ApiPaychanguWebhookRouteImport } from "./routes/api/paychangu/webhook";
 import { Route as ApiCronReconcileRouteImport } from "./routes/api/cron/reconcile";
@@ -75,14 +74,9 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
   path: "/reset-password",
   getParentRoute: () => rootRouteImport,
 } as any);
-const DepositReturnAliasRoute = DepositReturnAliasRouteImport.update({
+const DepositReturnRoute = DepositReturnRouteImport.update({
   id: "/deposit-return",
   path: "/deposit-return",
-  getParentRoute: () => rootRouteImport,
-} as any);
-const DepositReturnRoute = DepositReturnRouteImport.update({
-  id: "/deposit/return",
-  path: "/deposit/return",
   getParentRoute: () => rootRouteImport,
 } as any);
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
@@ -112,13 +106,8 @@ export interface FileRoutesByFullPath {
   "/terms": typeof TermsRoute;
   "/secure": typeof SecureRoute;
   "/forgot-password": typeof ForgotPasswordRoute;
-  "/forgot-password": typeof ForgotPasswordRoute;
-  "/forgot-password": typeof ForgotPasswordRoute;
   "/reset-password": typeof ResetPasswordRoute;
-  "/deposit/return": typeof DepositReturnRoute;
-  "/deposit-return": typeof DepositReturnAliasRoute;
-  "/deposit-return": typeof DepositReturnAliasRoute;
-  "/deposit-return": typeof DepositReturnAliasRoute;
+  "/deposit-return": typeof DepositReturnRoute;
   "/api/auth/$": typeof ApiAuthSplatRoute;
   "/api/paychangu/webhook": typeof ApiPaychanguWebhookRoute;
   "/api/cron/reconcile": typeof ApiCronReconcileRoute;
@@ -133,8 +122,9 @@ export interface FileRoutesByTo {
   "/signup": typeof SignupRoute;
   "/terms": typeof TermsRoute;
   "/secure": typeof SecureRoute;
+  "/forgot-password": typeof ForgotPasswordRoute;
   "/reset-password": typeof ResetPasswordRoute;
-  "/deposit/return": typeof DepositReturnRoute;
+  "/deposit-return": typeof DepositReturnRoute;
   "/api/auth/$": typeof ApiAuthSplatRoute;
   "/api/paychangu/webhook": typeof ApiPaychanguWebhookRoute;
   "/api/cron/reconcile": typeof ApiCronReconcileRoute;
@@ -150,18 +140,65 @@ export interface FileRoutesById {
   "/signup": typeof SignupRoute;
   "/terms": typeof TermsRoute;
   "/secure": typeof SecureRoute;
+  "/forgot-password": typeof ForgotPasswordRoute;
   "/reset-password": typeof ResetPasswordRoute;
-  "/deposit/return": typeof DepositReturnRoute;
+  "/deposit-return": typeof DepositReturnRoute;
   "/api/auth/$": typeof ApiAuthSplatRoute;
   "/api/paychangu/webhook": typeof ApiPaychanguWebhookRoute;
   "/api/cron/reconcile": typeof ApiCronReconcileRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
-  fullPaths: keyof FileRoutesByFullPath;
+  fullPaths:
+    | "/"
+    | "/admin"
+    | "/conditions"
+    | "/dashboard"
+    | "/privacy"
+    | "/profile"
+    | "/signup"
+    | "/terms"
+    | "/secure"
+    | "/forgot-password"
+    | "/reset-password"
+    | "/deposit-return"
+    | "/api/auth/$"
+    | "/api/paychangu/webhook"
+    | "/api/cron/reconcile";
   fileRoutesByTo: FileRoutesByTo;
-  to: keyof FileRoutesByTo;
-  id: keyof FileRoutesById;
+  to:
+    | "/"
+    | "/admin"
+    | "/conditions"
+    | "/dashboard"
+    | "/privacy"
+    | "/profile"
+    | "/signup"
+    | "/terms"
+    | "/secure"
+    | "/forgot-password"
+    | "/reset-password"
+    | "/deposit-return"
+    | "/api/auth/$"
+    | "/api/paychangu/webhook"
+    | "/api/cron/reconcile";
+  id:
+    | "__root__"
+    | "/"
+    | "/admin"
+    | "/conditions"
+    | "/dashboard"
+    | "/privacy"
+    | "/profile"
+    | "/signup"
+    | "/terms"
+    | "/secure"
+    | "/forgot-password"
+    | "/reset-password"
+    | "/deposit-return"
+    | "/api/auth/$"
+    | "/api/paychangu/webhook"
+    | "/api/cron/reconcile";
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
@@ -177,7 +214,6 @@ export interface RootRouteChildren {
   ForgotPasswordRoute: typeof ForgotPasswordRoute;
   ResetPasswordRoute: typeof ResetPasswordRoute;
   DepositReturnRoute: typeof DepositReturnRoute;
-  DepositReturnAliasRoute: typeof DepositReturnAliasRoute;
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute;
   ApiPaychanguWebhookRoute: typeof ApiPaychanguWebhookRoute;
   ApiCronReconcileRoute: typeof ApiCronReconcileRoute;
@@ -262,18 +298,11 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof ResetPasswordRouteImport;
       parentRoute: typeof rootRouteImport;
     };
-    "/deposit/return": {
-      id: "/deposit/return";
-      path: "/deposit/return";
-      fullPath: "/deposit/return";
-      preLoaderRoute: typeof DepositReturnRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
     "/deposit-return": {
       id: "/deposit-return";
       path: "/deposit-return";
       fullPath: "/deposit-return";
-      preLoaderRoute: typeof DepositReturnAliasRouteImport;
+      preLoaderRoute: typeof DepositReturnRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/api/auth/$": {
@@ -313,7 +342,6 @@ const rootRouteChildren: RootRouteChildren = {
   ForgotPasswordRoute,
   ResetPasswordRoute,
   DepositReturnRoute,
-  DepositReturnAliasRoute,
   ApiAuthSplatRoute,
   ApiPaychanguWebhookRoute,
   ApiCronReconcileRoute,
