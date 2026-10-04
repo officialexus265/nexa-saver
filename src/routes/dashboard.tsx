@@ -52,6 +52,7 @@ function Vault({
   const [success, setSuccess] = useState<{ title: string; body: string } | null>(null);
   // Hidden until the user explicitly reveals with PIN (never auto-show on load).
   const [balanceVisible, setBalanceVisible] = useState(false);
+  const [selectedTx, setSelectedTx] = useState<PublicTx | null>(null);
 
   const revealed = Boolean(balanceVisible && balance && !balance.locked);
 
@@ -138,20 +139,30 @@ function Vault({
         ) : (
           <ul className="space-y-2">
             {txs.map((tx) => (
-              <li key={tx.id} className="flex items-center justify-between rounded-xl border border-border bg-surface px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium capitalize">{tx.kind}</p>
-                  <p className="text-xs text-muted">{tx.status} · {new Date(tx.createdAt).toLocaleString()}</p>
-                </div>
-                <p className="text-sm tabular-nums">
-                  {tx.kind === "deposit" ? "+" : "−"}
-                  {formatKwacha(tx.kind === "deposit" ? tx.creditedTambala : tx.grossTambala, { compact: true })}
-                </p>
+              <li key={tx.id}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedTx(tx)}
+                  className="flex w-full items-center justify-between rounded-xl border border-border bg-surface px-4 py-3 text-left transition hover:border-primary/40 hover:bg-surface-2"
+                >
+                  <div>
+                    <p className="text-sm font-medium capitalize">{tx.kind}</p>
+                    <p className="text-xs text-muted">
+                      {tx.status} · {new Date(tx.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <p className="text-sm tabular-nums">
+                    {tx.kind === "deposit" ? "+" : "−"}
+                    {formatKwacha(tx.kind === "deposit" ? tx.creditedTambala : tx.grossTambala, { compact: true })}
+                  </p>
+                </button>
               </li>
             ))}
           </ul>
         )}
       </section>
+
+      <ActivityDetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} />
 
       <CheckBalanceModal
         open={checkOpen}
@@ -193,6 +204,101 @@ function Vault({
   );
 }
 
+
+
+function ActivityDetailModal({ tx, onClose }: { tx: PublicTx | null; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  if (!tx) return null;
+
+  const when = new Date(tx.createdAt);
+  const feeTambala = tx.kind === "deposit" ? Math.max(0, tx.grossTambala - tx.creditedTambala) : 0;
+
+  async function copyRef() {
+    try {
+      await navigator.clipboard.writeText(tx.reference);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      window.prompt("Copy reference:", tx.reference);
+    }
+  }
+
+  return (
+    <Modal open={Boolean(tx)} title={tx.kind === "deposit" ? "Deposit details" : "Withdrawal details"} onClose={onClose}>
+      <dl className="space-y-3 text-sm">
+        <div className="flex justify-between gap-3">
+          <dt className="text-muted">Status</dt>
+          <dd className="font-medium capitalize">{tx.status}</dd>
+        </div>
+        <div className="flex justify-between gap-3">
+          <dt className="text-muted">Date</dt>
+          <dd>
+            {when.toLocaleDateString(undefined, {
+              weekday: "short",
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+            })}
+          </dd>
+        </div>
+        <div className="flex justify-between gap-3">
+          <dt className="text-muted">Time</dt>
+          <dd>{when.toLocaleTimeString()}</dd>
+        </div>
+        {tx.kind === "deposit" ? (
+          <>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted">Paid (gross)</dt>
+              <dd className="tabular-nums">{formatKwacha(tx.grossTambala)}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted">Fee (6%)</dt>
+              <dd className="tabular-nums">{formatKwacha(feeTambala)}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted">Credited to vault</dt>
+              <dd className="tabular-nums font-medium text-primary">{formatKwacha(tx.creditedTambala)}</dd>
+            </div>
+          </>
+        ) : (
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted">Amount</dt>
+            <dd className="tabular-nums font-medium">{formatKwacha(tx.grossTambala)}</dd>
+          </div>
+        )}
+        {tx.phone ? (
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted">Mobile number</dt>
+            <dd>{formatPhoneDisplay(tx.phone)}</dd>
+          </div>
+        ) : null}
+        <div className="space-y-1.5 border-t border-border pt-3">
+          <dt className="text-muted">Reference</dt>
+          <dd className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 break-all rounded-lg bg-surface-2 px-3 py-2 text-xs">{tx.reference}</code>
+            <Button type="button" variant="secondary" className="shrink-0" onClick={() => void copyRef()}>
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          </dd>
+        </div>
+        {tx.note ? (
+          <div className="space-y-1 border-t border-border pt-3">
+            <dt className="text-muted">Note</dt>
+            <dd className="text-xs text-muted">{tx.note}</dd>
+          </div>
+        ) : null}
+      </dl>
+      {tx.status === "pending" && tx.kind === "deposit" ? (
+        <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-muted">
+          Still pending. If money left your mobile wallet, contact support with this reference.
+        </p>
+      ) : null}
+      <Button type="button" className="mt-5 w-full" variant="secondary" onClick={onClose}>
+        Close
+      </Button>
+    </Modal>
+  );
+}
 
 function EmailVerifyBanner() {
   const [busy, setBusy] = useState(false);
