@@ -5,9 +5,34 @@ import { env, isProduction } from "@/lib/env.server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { kwachaToTambala } from "@/lib/nexa/money";
 
+/**
+ * PayChangu sometimes redirects the *browser* to callback_url (this path)
+ * instead of return_url. GET must never 404 — send the user to deposit-return.
+ * Server notifications use POST.
+ */
+function browserReturnRedirect(request: Request): Response {
+  const url = new URL(request.url);
+  const ref =
+    url.searchParams.get("tx_ref") ||
+    url.searchParams.get("txRef") ||
+    url.searchParams.get("ref") ||
+    url.searchParams.get("reference") ||
+    "";
+  const target = new URL("/deposit-return", url.origin);
+  if (ref) target.searchParams.set("ref", ref);
+  // Preserve other useful params if present
+  for (const key of ["status", "data_tx_ref"]) {
+    const v = url.searchParams.get(key);
+    if (v) target.searchParams.set(key, v);
+  }
+  return Response.redirect(target.toString(), 302);
+}
+
 export const Route = createFileRoute("/api/paychangu/webhook")({
   server: {
     handlers: {
+      GET: async ({ request }) => browserReturnRedirect(request),
+
       POST: async ({ request }) => {
         const raw = await request.text();
         const secret = env("PAYCHANGU_WEBHOOK_SECRET");
