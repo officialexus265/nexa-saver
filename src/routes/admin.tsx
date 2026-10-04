@@ -15,6 +15,9 @@ import {
   adminAnnotateTransaction,
   getPlatformSupportPhone,
   setPlatformSupportPhone,
+  adminSecuritySurveyStatus,
+  adminStartSecuritySurvey,
+  adminStopSecuritySurvey,
 } from "@/lib/nexa/fns";
 import { formatKwacha, tambalaToKwacha } from "@/lib/nexa/money";
 import type { AdminOverview, AdminUserRow, PublicTx } from "@/lib/nexa/types";
@@ -79,14 +82,18 @@ function Console() {
   const [supportPhone, setSupportPhone] = useState("");
   const [supportMsg, setSupportMsg] = useState<string | null>(null);
   const [supportBusy, setSupportBusy] = useState(false);
+  const [surveyStatus, setSurveyStatus] = useState<{ active: boolean; campaignId: string | null; completed: number; totalUsers: number } | null>(null);
+  const [surveyBusy, setSurveyBusy] = useState(false);
+  const [surveyMsg, setSurveyMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone()])
-      .then(([o, u, t, s]) => {
+    Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone(), adminSecuritySurveyStatus()])
+      .then(([o, u, t, s, sv]) => {
         setOverview(o);
         setUsers(u);
         setTxs(t);
         if (s.phone) setSupportPhone(s.phone);
+        setSurveyStatus(sv);
       })
       .catch((err) => setError(errMessage(err)));
   }, []);
@@ -168,6 +175,66 @@ function Console() {
           </Button>
         </form>
         {supportMsg ? <p className="text-sm text-muted">{supportMsg}</p> : null}
+      </Card>
+
+
+      <Card className="space-y-3 p-4">
+        <h2 className="font-display text-lg font-semibold">Security survey</h2>
+        <p className="text-sm text-muted">
+          Launch a mandatory check on every saver&apos;s dashboard. Users must confirm email, withdrawal number,
+          and security question before they can continue. Starting a new survey creates a new campaign so
+          everyone is asked again.
+        </p>
+        {surveyStatus ? (
+          <p className="text-sm text-muted">
+            Status:{" "}
+            <span className="font-medium text-fg">{surveyStatus.active ? "Active" : "Off"}</span>
+            {surveyStatus.campaignId ? ` · campaign ${surveyStatus.campaignId}` : ""}
+            {surveyStatus.active
+              ? ` · ${surveyStatus.completed} of ${surveyStatus.totalUsers} users finished`
+              : ""}
+          </p>
+        ) : null}
+        {surveyMsg ? <p className="text-sm text-primary">{surveyMsg}</p> : null}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            disabled={surveyBusy}
+            onClick={() => {
+              setSurveyBusy(true);
+              setSurveyMsg(null);
+              void adminStartSecuritySurvey()
+                .then((r) => {
+                  setSurveyMsg(`Survey started (${r.campaignId}). Users will see it on the next dashboard visit.`);
+                  return adminSecuritySurveyStatus();
+                })
+                .then(setSurveyStatus)
+                .catch((err) => setSurveyMsg(errMessage(err)))
+                .finally(() => setSurveyBusy(false));
+            }}
+          >
+            {surveyBusy ? "Working…" : "Start survey for all users"}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={surveyBusy || !surveyStatus?.active}
+            onClick={() => {
+              setSurveyBusy(true);
+              setSurveyMsg(null);
+              void adminStopSecuritySurvey()
+                .then(() => {
+                  setSurveyMsg("Survey turned off. Users who have not finished will no longer be blocked.");
+                  return adminSecuritySurveyStatus();
+                })
+                .then(setSurveyStatus)
+                .catch((err) => setSurveyMsg(errMessage(err)))
+                .finally(() => setSurveyBusy(false));
+            }}
+          >
+            Stop survey
+          </Button>
+        </div>
       </Card>
 
       <Card className="h-64 p-4">

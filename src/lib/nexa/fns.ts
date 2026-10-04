@@ -97,6 +97,8 @@ type ProfileRow = {
   daily_withdraw_cap_kwacha: number;
   withdraw_cap_updated_at: unknown;
   created_at: unknown;
+  anchor_email?: string | null;
+  anchor_phone?: string | null;
 };
 
 function toPublic(row: ProfileRow): PublicProfile {
@@ -304,11 +306,13 @@ export const completeProfile = createServerFn({ method: "POST" })
     await sql`
       insert into profiles (
         user_id, first_name, last_name, email, phone, username, date_of_birth, gender,
-        pin_hash, security_question, security_answer_hash, role, login_identifier_pref
+        pin_hash, security_question, security_answer_hash, role, login_identifier_pref,
+        anchor_email, anchor_phone
       ) values (
         ${context.userId}, ${data.firstName}, ${data.lastName}, ${email}, ${phone},
         ${data.username}, ${data.dateOfBirth}, ${data.gender}, ${pinHash}, ${data.securityQuestion},
-        ${answerHash}, ${"user"}, ${data.loginIdentifierPref ?? "username"}
+        ${answerHash}, ${"user"}, ${data.loginIdentifierPref ?? "username"},
+        ${email}, ${phone}
       )
     `;
     await sql`insert into wallets (user_id) values (${context.userId})`;
@@ -1556,20 +1560,79 @@ export const secureAccountWithPin = createServerFn({ method: "POST" })
 
 
 /** Request a password-reset email. Always returns ok (no account enumeration). */
+export type PasswordResetAccountChoice = {
+  userId: string;
+  username: string;
+  firstName: string;
+  maskedEmail: string;
+  maskedPhone: string;
+};
+
+function maskEmail(email: string): string {
+  const [local, domain] = email.split("@");
+  if (!domain) return "***";
+  const head = local.slice(0, 1) || "*";
+  return `${head}***@${domain}`;
+}
+
+function maskPhoneDigits(phone: string): string {
+  const d = phone.replace(/\D/g, "");
+  if (d.length < 4) return "****";
+  return `***${d.slice(-4)}`;
+}
+
+async function sendPasswordResetEmail(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sql: any,
+  profile: { user_id: string; email: string; first_name: string },
+) {
+  const { issueSecurityToken } = await import("./security-tokens.server");
+  const { sendMail } = await import("./mail.server");
+  const { APP_NAME } = await import("./constants");
+  const { url } = await issueSecurityToken(sql, {
+    userId: profile.user_id,
+    action: "password_reset",
+    ttlHours: 2,
+  });
+  const subject = `${APP_NAME}: reset your password`;
+  const text = [
+    `Hi ${profile.first_name},`,
+    ``,
+    `We received a request to reset your ${APP_NAME} password.`,
+    `Open this link within 2 hours:`,
+    url,
+    ``,
+    `If you did not ask for this, you can ignore this email. Your password will stay the same.`,
+    ``,
+    `— ${APP_NAME}`,
+  ].join("\n");
+  const html = `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;padding:24px">
+    <p>Hi ${profile.first_name},</p>
+    <p>We received a request to reset your ${APP_NAME} password.</p>
+    <p><a href="${url}" style="display:inline-block;background:#3dcf8e;color:#062016;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px">Reset password</a></p>
+    <p style="font-size:12px;color:#666;word-break:break-all">${url}</p>
+    <p style="font-size:12px;color:#666">This link expires in 2 hours. If you did not request it, ignore this email.</p>
+  </body></html>`;
+  void sendMail({ to: profile.email, subject, text, html });
+}
+
 export const requestPasswordReset = createServerFn({ method: "POST" })
-  .validator(z.object({ identifier: z.string().min(1).max(120) }))
+  .validator(
+    z.object({
+      identifier: z.string().min(1).max(120),
+      /** When multiple accounts match, client sends the chosen user id. */
+      userId: z.string().min(1).optional(),
+    }),
+  )
   .handler(async ({ data }) => {
     const { getSql } = await import("@/lib/db");
     const { assertRateLimit } = await import("./rate-limit.server");
     const { normalizeMwPhone } = await import("./phone");
-    const { issueSecurityToken } = await import("./security-tokens.server");
-    const { sendMail } = await import("./mail.server");
-    const { APP_NAME } = await import("./constants");
     const sql = await getSql();
     const raw = data.identifier.trim();
     await assertRateLimit(sql, {
       bucket: `pw-reset:${raw.toLowerCase().slice(0, 64)}`,
-      limit: 5,
+      limit: 8,
       windowSeconds: 60 * 60,
       message: "Too many reset attempts. Try again later.",
     });
@@ -1577,57 +1640,70 @@ export const requestPasswordReset = createServerFn({ method: "POST" })
     // Only email or Malawi phone — not username (usernames are easy to guess).
     const looksEmail = raw.includes("@") && raw.includes(".");
     const phone = normalizeMwPhone(raw);
+    const generic = {
+      ok: true as const,
+      mode: "sent" as const,
+      message: "If an account matches, we sent a reset link to the registered email.",
+    };
     if (!looksEmail && !phone) {
-      // Same generic response — do not reveal why.
-      return {
-        ok: true as const,
-        message: "If an account matches, we sent a reset link to the registered email.",
-      };
+      return generic;
     }
 
-    const rows = await sql<{ user_id: string; email: string; first_name: string }>`
-      select user_id, email, first_name from profiles
+    const rows = await sql<{
+      user_id: string;
+      email: string;
+      first_name: string;
+      username: string;
+      phone: string;
+    }>`
+      select user_id, email, first_name, username, phone from profiles
       where deleted_at is null
         and (
           (${looksEmail} and lower(email) = ${raw.toLowerCase()})
           or (${Boolean(phone)} and phone = ${phone ?? "__none__"})
         )
-      limit 1
+      order by created_at asc
+      limit 20
     `;
-    const profile = rows[0];
-    if (profile) {
-      try {
-        const { url } = await issueSecurityToken(sql, {
-          userId: profile.user_id,
-          action: "password_reset",
-          ttlHours: 2,
-        });
-        const subject = `${APP_NAME}: reset your password`;
-        const text = [
-          `Hi ${profile.first_name},`,
-          ``,
-          `We received a request to reset your ${APP_NAME} password.`,
-          `Open this link within 2 hours:`,
-          url,
-          ``,
-          `If you did not ask for this, you can ignore this email. Your password will stay the same.`,
-          ``,
-          `— ${APP_NAME}`,
-        ].join("\n");
-        const html = `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;padding:24px">
-          <p>Hi ${profile.first_name},</p>
-          <p>We received a request to reset your ${APP_NAME} password.</p>
-          <p><a href="${url}" style="display:inline-block;background:#3dcf8e;color:#062016;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px">Reset password</a></p>
-          <p style="font-size:12px;color:#666;word-break:break-all">${url}</p>
-          <p style="font-size:12px;color:#666">This link expires in 2 hours. If you did not request it, ignore this email.</p>
-        </body></html>`;
-        void sendMail({ to: profile.email, subject, text, html });
-      } catch (err) {
-        console.error("[password-reset]", (err as Error).message);
+
+    if (!rows.length) {
+      return generic;
+    }
+
+    // Multiple matches → list accounts so the user picks which one to reset.
+    if (rows.length > 1 && !data.userId) {
+      const accounts: PasswordResetAccountChoice[] = rows.map((r) => ({
+        userId: r.user_id,
+        username: r.username,
+        firstName: r.first_name,
+        maskedEmail: maskEmail(r.email),
+        maskedPhone: maskPhoneDigits(r.phone),
+      }));
+      return {
+        ok: true as const,
+        mode: "choose" as const,
+        message: "More than one account matches. Choose which one to reset.",
+        accounts,
+      };
+    }
+
+    let profile = rows[0];
+    if (data.userId) {
+      const picked = rows.find((r) => r.user_id === data.userId);
+      if (!picked) {
+        return generic;
       }
+      profile = picked;
+    }
+
+    try {
+      await sendPasswordResetEmail(sql, profile);
+    } catch (err) {
+      console.error("[password-reset]", (err as Error).message);
     }
     return {
       ok: true as const,
+      mode: "sent" as const,
       message: "If an account matches, we sent a reset link to the registered email.",
     };
   });
@@ -1960,3 +2036,258 @@ export const adminAnnotateTransaction = createServerFn({ method: "POST" })
     });
     return { ok: true as const };
   });
+
+
+/* ── Security survey (admin-triggered, mandatory on dashboard) ─────────── */
+
+export type SecuritySurveyState =
+  | { required: false }
+  | {
+      required: true;
+      campaignId: string;
+      email: string;
+      phone: string;
+      anchorEmail: string;
+      anchorPhone: string;
+      securityQuestion: string;
+    };
+
+async function readSurveyFlags(sql: any): Promise<{ active: boolean; campaignId: string }> {
+  const rows = await sql<{ key: string; value: string }>`
+    select key, value from platform_settings
+    where key in (${"security_survey_active"}, ${"security_survey_campaign_id"})
+  `;
+  const map = Object.fromEntries(rows.map((r: { key: string; value: string }) => [r.key, r.value]));
+  return {
+    active: map.security_survey_active === "true",
+    campaignId: String(map.security_survey_campaign_id || ""),
+  };
+}
+
+export const getSecuritySurveyState = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }): Promise<SecuritySurveyState> => {
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const flags = await readSurveyFlags(sql);
+    if (!flags.active || !flags.campaignId) return { required: false };
+
+    const done = await sql<{ user_id: string }>`
+      select user_id from security_survey_completions
+      where user_id = ${context.userId} and campaign_id = ${flags.campaignId}
+      limit 1
+    `;
+    if (done.length) return { required: false };
+
+    const profile = await loadProfile(context.userId);
+    if (!profile) return { required: false };
+
+    return {
+      required: true,
+      campaignId: flags.campaignId,
+      email: profile.email,
+      phone: profile.phone,
+      anchorEmail: (profile as { anchor_email?: string }).anchor_email || profile.email,
+      anchorPhone: (profile as { anchor_phone?: string }).anchor_phone || profile.phone,
+      securityQuestion: profile.security_question,
+    };
+  });
+
+export const adminSecuritySurveyStatus = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const flags = await readSurveyFlags(sql);
+    let completed = 0;
+    let total = 0;
+    if (flags.campaignId) {
+      const c = await sql<{ n: number }>`
+        select count(*)::int as n from security_survey_completions where campaign_id = ${flags.campaignId}
+      `;
+      const u = await sql<{ n: number }>`
+        select count(*)::int as n from profiles where deleted_at is null and role = ${"user"}
+      `;
+      completed = Number(c[0]?.n ?? 0);
+      total = Number(u[0]?.n ?? 0);
+    }
+    return {
+      active: flags.active,
+      campaignId: flags.campaignId || null,
+      completed,
+      totalUsers: total,
+    };
+  });
+
+export const adminStartSecuritySurvey = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { randomBytes } = await import("node:crypto");
+    const sql = await getSql();
+    const campaignId = `surv_${randomBytes(8).toString("hex")}`;
+    await sql`
+      insert into platform_settings (key, value, updated_at) values
+        (${"security_survey_active"}, ${"true"}, now()),
+        (${"security_survey_campaign_id"}, ${campaignId}, now()),
+        (${"security_survey_started_at"}, ${new Date().toISOString()}, now())
+      on conflict (key) do update set value = excluded.value, updated_at = now()
+    `;
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "security_survey_start",
+      detail: `campaign=${campaignId}`,
+    });
+    return { ok: true as const, campaignId, active: true };
+  });
+
+export const adminStopSecuritySurvey = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await sql`
+      insert into platform_settings (key, value, updated_at)
+      values (${"security_survey_active"}, ${"false"}, now())
+      on conflict (key) do update set value = excluded.value, updated_at = now()
+    `;
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "security_survey_stop",
+      detail: "active=false",
+    });
+    return { ok: true as const, active: false };
+  });
+
+export const completeSecuritySurvey = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      campaignId: z.string().min(4),
+      emailIsMine: z.boolean(),
+      phoneIsMine: z.boolean(),
+      securityAnswer: z.string().min(1).max(200),
+      /** Required when emailIsMine is false */
+      newPassword: z.string().min(8).max(128).optional(),
+      /** Required when phoneIsMine is false */
+      newPin: z.string().regex(/^\d{4}$/).optional(),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { verifySecret, hashSecret, normalizeAnswer } = await import("./crypto");
+    const { hashPassword } = await import("better-auth/crypto");
+    const sql = await getSql();
+    const flags = await readSurveyFlags(sql);
+    if (!flags.active || flags.campaignId !== data.campaignId) {
+      throw new Error("This security survey is no longer active");
+    }
+    const already = await sql<{ user_id: string }>`
+      select user_id from security_survey_completions
+      where user_id = ${context.userId} and campaign_id = ${data.campaignId}
+      limit 1
+    `;
+    if (already.length) return { ok: true as const, already: true as const };
+
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Complete your profile first");
+
+    const answerOk = await verifySecret(
+      profile.security_answer_hash,
+      normalizeAnswer(data.securityAnswer),
+    );
+    if (!answerOk) throw new Error("Security answer is incorrect");
+
+    if (!data.emailIsMine && (!data.newPassword || data.newPassword.length < 8)) {
+      throw new Error("Set a new password (at least 8 characters) when reclaiming your email");
+    }
+    if (!data.phoneIsMine && (!data.newPin || !/^\d{4}$/.test(data.newPin))) {
+      throw new Error("Set a new 4-digit PIN when reclaiming your withdrawal number");
+    }
+
+    const anchorEmail = (profile as { anchor_email?: string }).anchor_email || profile.email;
+    const anchorPhone = (profile as { anchor_phone?: string }).anchor_phone || profile.phone;
+
+    await withTransaction(async (tx) => {
+      let revertedEmail = false;
+      let revertedPhone = false;
+
+      if (!data.emailIsMine) {
+        // Restore first registered email on profile + auth user
+        await tx`
+          update profiles
+          set email = ${anchorEmail}, updated_at = now()
+          where user_id = ${context.userId}
+        `;
+        await tx`
+          update "user"
+          set email = ${anchorEmail}, "emailVerified" = true, "updatedAt" = now()
+          where id = ${context.userId}
+        `;
+        const passwordHash = await hashPassword(data.newPassword!);
+        await tx`
+          update "account"
+          set password = ${passwordHash}, "updatedAt" = now()
+          where "userId" = ${context.userId} and "providerId" = ${"credential"}
+        `;
+        // Sign out all sessions for this user
+        await tx`delete from "session" where "userId" = ${context.userId}`;
+        revertedEmail = true;
+      }
+
+      if (!data.phoneIsMine) {
+        const pinHash = await hashSecret(data.newPin!);
+        await tx`
+          update profiles
+          set phone = ${anchorPhone},
+              phone_verified_at = now(),
+              pin_hash = ${pinHash},
+              pin_verified_at = null,
+              failed_pin_attempts = 0,
+              updated_at = now()
+          where user_id = ${context.userId}
+        `;
+        revertedPhone = true;
+      }
+
+      await tx`
+        insert into security_survey_completions (
+          user_id, campaign_id, email_confirmed, phone_confirmed, security_answer_ok,
+          reverted_email, reverted_phone, completed_at
+        ) values (
+          ${context.userId}, ${data.campaignId}, ${data.emailIsMine}, ${data.phoneIsMine}, ${true},
+          ${revertedEmail}, ${revertedPhone}, now()
+        )
+        on conflict (user_id) do update set
+          campaign_id = excluded.campaign_id,
+          email_confirmed = excluded.email_confirmed,
+          phone_confirmed = excluded.phone_confirmed,
+          security_answer_ok = excluded.security_answer_ok,
+          reverted_email = excluded.reverted_email,
+          reverted_phone = excluded.reverted_phone,
+          completed_at = now()
+      `;
+    });
+
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      userId: context.userId,
+      actorUserId: context.userId,
+      action: "security_survey_complete",
+      detail: `campaign=${data.campaignId} emailOk=${data.emailIsMine} phoneOk=${data.phoneIsMine}`,
+    });
+
+    return {
+      ok: true as const,
+      already: false as const,
+      mustReLogin: !data.emailIsMine,
+      revertedEmail: !data.emailIsMine,
+      revertedPhone: !data.phoneIsMine,
+    };
+  });
+
