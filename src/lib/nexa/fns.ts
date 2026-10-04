@@ -99,6 +99,17 @@ type ProfileRow = {
   created_at: unknown;
   anchor_email?: string | null;
   anchor_phone?: string | null;
+  bank_uuid?: string | null;
+  bank_name?: string | null;
+  bank_account_number?: string | null;
+  bank_account_name?: string | null;
+  bank_verified_at?: unknown;
+  bank_hold_until?: unknown;
+  bank_updated_at?: unknown;
+  anchor_bank_uuid?: string | null;
+  anchor_bank_name?: string | null;
+  anchor_bank_account_number?: string | null;
+  anchor_bank_account_name?: string | null;
 };
 
 function toPublic(row: ProfileRow): PublicProfile {
@@ -109,6 +120,14 @@ function toPublic(row: ProfileRow): PublicProfile {
     email: row.email,
     phone: row.phone,
     phoneVerified: Boolean(row.phone_verified_at),
+    bankName: row.bank_name ?? null,
+    bankAccountNumberMasked: row.bank_account_number
+      ? `****${String(row.bank_account_number).slice(-4)}`
+      : null,
+    bankAccountName: row.bank_account_name ?? null,
+    bankVerified: Boolean(row.bank_verified_at),
+    bankHoldUntil: iso(row.bank_hold_until),
+    hasBankDetails: Boolean(row.bank_uuid && row.bank_account_number),
     lockMode: row.lock_mode === "instant" ? "instant" : "idle",
     lockIdleMinutes: Math.min(60, Math.max(1, asInt(row.lock_idle_minutes) || 5)),
     username: row.username,
@@ -717,12 +736,13 @@ export const startWithdraw = createServerFn({ method: "POST" })
       amountKwacha: z.number().positive(),
       pin: pinSchema,
       idempotencyKey: z.string().min(8).max(128),
+      method: z.enum(["momo", "bank"]).default("momo"),
     }),
   )
   .handler(async ({ context, data }) => {
     const { getSql, withTransaction } = await import("@/lib/db");
     const { verifySecret, newReference } = await import("./crypto");
-    const { paychanguConfigured, demoPaymentsEnabled, initiateMomoPayout } = await import("./paychangu.server");
+    const { paychanguConfigured, demoPaymentsEnabled, initiateMomoPayout, initiateBankPayout } = await import("./paychangu.server");
     const { claimIdempotencyKey, storeIdempotencyResponse } = await import("./idempotency.server");
     const { finalizeWithdrawalSuccess, finalizeWithdrawalFailure } = await import("./ledger.server");
     if (!paychanguConfigured() && !demoPaymentsEnabled()) {
@@ -761,12 +781,26 @@ export const startWithdraw = createServerFn({ method: "POST" })
       await sql`update profiles set pin_verified_at = now(), failed_pin_attempts = 0, pin_locked_until = null where user_id = ${context.userId}`;
 
       const amountTambala = kwachaToTambala(data.amountKwacha);
-      if (!profile.phone_verified_at) {
-        throw new Error(
-          "Verify your registered number first: make a successful deposit from " +
-            profile.phone +
-            ". Once that deposit lands, withdrawals unlock.",
-        );
+      const method = data.method ?? "momo";
+      if (method === "momo") {
+        if (!profile.phone_verified_at) {
+          throw new Error(
+            "Verify your registered number first: make a successful deposit from " +
+              profile.phone +
+              ". Once that deposit lands, mobile withdrawals unlock.",
+          );
+        }
+      } else {
+        if (!profile.bank_uuid || !profile.bank_account_number || !profile.bank_account_name) {
+          throw new Error("Add your bank payout details in Profile before withdrawing to bank.");
+        }
+        if (profile.bank_hold_until && new Date(String(profile.bank_hold_until)).getTime() > Date.now()) {
+          throw new Error(
+            "Bank withdrawals are on hold until " +
+              new Date(String(profile.bank_hold_until)).toLocaleString() +
+              ". This is normal after adding or changing bank details.",
+          );
+        }
       }
       const { assertWithdrawAllowed } = await import("./withdraw-limits.server");
       await assertWithdrawAllowed(sql, {
@@ -819,7 +853,9 @@ export const startWithdraw = createServerFn({ method: "POST" })
         ) values (
           ${context.userId}, ${"withdrawal"}, ${"processing"}, ${amount}, ${amount},
           ${0}, ${reserveShare}, ${profile.phone}, ${reference},
-          ${`Withdraw ${formatKwacha(amount)} to registered number ${profile.phone}`}
+          ${(data.method ?? "momo") === "bank"
+          ? `Withdraw ${formatKwacha(amount)} to bank ${profile.bank_name ?? ""} ****${String(profile.bank_account_number ?? "").slice(-4)}`
+          : `Withdraw ${formatKwacha(amount)} to registered number ${profile.phone}`}
         )
         returning id
       `;
@@ -837,18 +873,37 @@ export const startWithdraw = createServerFn({ method: "POST" })
     // Outside the DB transaction: talk to PayChangu (or demo).
     try {
       if (paychanguConfigured()) {
-        const payout = await initiateMomoPayout({
-          phone: profile.phone,
-          amountKwacha: tambalaToKwacha(amount),
-          chargeId: reference,
-          email: profile.email,
-          firstName: profile.first_name,
-          lastName: profile.last_name,
-        });
-        const status = String(payout.status ?? "").toLowerCase();
-        // Provider accepted the request. Terminal success statuses vary by operator;
-        // treat explicit failure as failure, everything else as success for now
-        // (async payout confirmation can be added when a payout webhook is available).
+        const method = data.method ?? "momo";
+        let status = "pending";
+        if (method === "bank") {
+          const payout = await initiateBankPayout({
+            bankUuid: String(profile.bank_uuid),
+            accountName: String(profile.bank_account_name),
+            accountNumber: String(profile.bank_account_number),
+            amountKwacha: tambalaToKwacha(amount),
+            chargeId: reference,
+            email: profile.email,
+          });
+          status = String(payout.status ?? "").toLowerCase();
+          // Mark bank verified after provider accepts first successful-style response
+          if (status !== "failed" && status !== "failure" && status !== "rejected") {
+            await sql`
+              update profiles
+              set bank_verified_at = coalesce(bank_verified_at, now()), updated_at = now()
+              where user_id = ${context.userId}
+            `;
+          }
+        } else {
+          const payout = await initiateMomoPayout({
+            phone: profile.phone,
+            amountKwacha: tambalaToKwacha(amount),
+            chargeId: reference,
+            email: profile.email,
+            firstName: profile.first_name,
+            lastName: profile.last_name,
+          });
+          status = String(payout.status ?? "").toLowerCase();
+        }
         if (status === "failed" || status === "failure" || status === "rejected") {
           throw new Error(`Payout rejected by provider (${status})`);
         }
@@ -2050,6 +2105,12 @@ export type SecuritySurveyState =
       anchorEmail: string;
       anchorPhone: string;
       securityQuestion: string;
+      hasBank: boolean;
+      bankName: string | null;
+      bankAccountMasked: string | null;
+      bankAccountName: string | null;
+      anchorBankName: string | null;
+      anchorBankMasked: string | null;
     };
 
 async function readSurveyFlags(sql: any): Promise<{ active: boolean; campaignId: string }> {
@@ -2082,14 +2143,25 @@ export const getSecuritySurveyState = createServerFn({ method: "GET" })
     const profile = await loadProfile(context.userId);
     if (!profile) return { required: false };
 
+    const hasBank = Boolean(profile.bank_uuid && profile.bank_account_number);
     return {
       required: true,
       campaignId: flags.campaignId,
       email: profile.email,
       phone: profile.phone,
-      anchorEmail: (profile as { anchor_email?: string }).anchor_email || profile.email,
-      anchorPhone: (profile as { anchor_phone?: string }).anchor_phone || profile.phone,
+      anchorEmail: profile.anchor_email || profile.email,
+      anchorPhone: profile.anchor_phone || profile.phone,
       securityQuestion: profile.security_question,
+      hasBank,
+      bankName: profile.bank_name || null,
+      bankAccountMasked: profile.bank_account_number
+        ? `****${String(profile.bank_account_number).slice(-4)}`
+        : null,
+      bankAccountName: profile.bank_account_name || null,
+      anchorBankName: profile.anchor_bank_name || profile.bank_name || null,
+      anchorBankMasked: (profile.anchor_bank_account_number || profile.bank_account_number)
+        ? `****${String(profile.anchor_bank_account_number || profile.bank_account_number).slice(-4)}`
+        : null,
     };
   });
 
@@ -2209,6 +2281,7 @@ export const completeSecuritySurvey = createServerFn({ method: "POST" })
       campaignId: z.string().min(4),
       emailIsMine: z.boolean(),
       phoneIsMine: z.boolean(),
+      bankIsMine: z.boolean().optional(),
       securityAnswer: z.string().min(1).max(200),
       /** Required when emailIsMine is false */
       newPassword: z.string().min(8).max(128).optional(),
@@ -2293,13 +2366,30 @@ export const completeSecuritySurvey = createServerFn({ method: "POST" })
         revertedPhone = true;
       }
 
+      let revertedBank = false;
+      const bankIsMine = data.bankIsMine !== false;
+      if (!bankIsMine && profile.bank_account_number) {
+        await tx`
+          update profiles set
+            bank_uuid = coalesce(anchor_bank_uuid, bank_uuid),
+            bank_name = coalesce(anchor_bank_name, bank_name),
+            bank_account_number = coalesce(anchor_bank_account_number, bank_account_number),
+            bank_account_name = coalesce(anchor_bank_account_name, bank_account_name),
+            bank_verified_at = null,
+            bank_hold_until = ${new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString()},
+            updated_at = now()
+          where user_id = ${context.userId}
+        `;
+        revertedBank = true;
+      }
+
       await tx`
         insert into security_survey_completions (
           user_id, campaign_id, email_confirmed, phone_confirmed, security_answer_ok,
-          reverted_email, reverted_phone, completed_at
+          reverted_email, reverted_phone, bank_confirmed, reverted_bank, completed_at
         ) values (
           ${context.userId}, ${data.campaignId}, ${data.emailIsMine}, ${data.phoneIsMine}, ${true},
-          ${revertedEmail}, ${revertedPhone}, now()
+          ${revertedEmail}, ${revertedPhone}, ${bankIsMine}, ${revertedBank}, now()
         )
         on conflict (user_id) do update set
           campaign_id = excluded.campaign_id,
@@ -2308,6 +2398,8 @@ export const completeSecuritySurvey = createServerFn({ method: "POST" })
           security_answer_ok = excluded.security_answer_ok,
           reverted_email = excluded.reverted_email,
           reverted_phone = excluded.reverted_phone,
+          bank_confirmed = excluded.bank_confirmed,
+          reverted_bank = excluded.reverted_bank,
           completed_at = now()
       `;
     });
@@ -2442,5 +2534,77 @@ export const adminDeleteHelpLine = createServerFn({ method: "POST" })
     const sql = await getSql();
     await sql`delete from help_lines where id = ${data.id}`;
     return { ok: true as const };
+  });
+
+
+
+export const listPaychanguBanks = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async () => {
+    const { paychanguConfigured, listSupportedBanks } = await import("./paychangu.server");
+    if (!paychanguConfigured()) return [] as Array<{ uuid: string; name: string }>;
+    try {
+      return await listSupportedBanks();
+    } catch {
+      return [];
+    }
+  });
+
+/** Save or update bank payout details. Starts a 72h withdraw hold (like phone change). */
+export const saveBankPayoutDetails = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      bankUuid: z.string().min(8).max(80),
+      bankName: z.string().min(2).max(120),
+      accountNumber: z.string().min(5).max(32),
+      accountName: z.string().min(2).max(120),
+      pin: pinSchema,
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    const { getSql } = await import("@/lib/db");
+    const { verifySecret } = await import("./crypto");
+    const sql = await getSql();
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Complete your profile first");
+    const pinOk = await verifySecret(profile.pin_hash, data.pin);
+    if (!pinOk) throw new Error("Incorrect PIN");
+
+    const holdUntil = new Date(Date.now() + 72 * 60 * 60 * 1000);
+    const isFirst =
+      !profile.bank_account_number &&
+      !profile.anchor_bank_account_number;
+
+    await sql`
+      update profiles set
+        bank_uuid = ${data.bankUuid},
+        bank_name = ${data.bankName},
+        bank_account_number = ${data.accountNumber.replace(/\s/g, "")},
+        bank_account_name = ${data.accountName.trim()},
+        bank_verified_at = null,
+        bank_hold_until = ${holdUntil.toISOString()},
+        bank_updated_at = now(),
+        anchor_bank_uuid = coalesce(anchor_bank_uuid, ${data.bankUuid}),
+        anchor_bank_name = coalesce(anchor_bank_name, ${data.bankName}),
+        anchor_bank_account_number = coalesce(anchor_bank_account_number, ${data.accountNumber.replace(/\s/g, "")}),
+        anchor_bank_account_name = coalesce(anchor_bank_account_name, ${data.accountName.trim()}),
+        updated_at = now()
+      where user_id = ${context.userId}
+    `;
+
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      userId: context.userId,
+      action: "bank_details_set",
+      detail: `bank=${data.bankName} first=${isFirst}`,
+    });
+
+    return {
+      ok: true as const,
+      holdUntil: holdUntil.toISOString(),
+      message:
+        "Bank details saved. Bank withdrawals stay on hold for 72 hours. After that, and after a successful bank payout, the account is treated as verified.",
+    };
   });
 

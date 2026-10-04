@@ -21,6 +21,8 @@ import {
   changeLockPreference,
   listActiveSessions,
   revokeSessionById,
+  saveBankPayoutDetails,
+  listPaychanguBanks,
   type PublicSession,
 } from "@/lib/nexa/fns";
 import { LOCK_MODE_OPTIONS, type LockMode } from "@/lib/nexa/constants";
@@ -33,11 +35,22 @@ function ProfilePage() {
   return <SessionGate>{(ctx) => <Settings {...ctx} />}</SessionGate>;
 }
 
-function Settings({ profile, emailVerified }: { profile: { firstName: string; lastName: string; email: string; phone: string; username: string; loginIdentifierPref: LoginPref; role: string; phoneVerified?: boolean; lockMode?: LockMode; lockIdleMinutes?: number }; emailVerified?: boolean }) {
+function Settings({ profile, emailVerified }: { profile: { firstName: string; lastName: string; email: string; phone: string; username: string; loginIdentifierPref: LoginPref; role: string; phoneVerified?: boolean; lockMode?: LockMode; lockIdleMinutes?: number; hasBankDetails?: boolean; bankName?: string | null; bankAccountNumberMasked?: string | null; bankAccountName?: string | null; bankHoldUntil?: string | null }; emailVerified?: boolean }) {
   const [pref, setPref] = useState<LoginPref>(profile.loginIdentifierPref);
   const [pw, setPw] = useState({ current: "", next: "" });
   const [pins, setPins] = useState({ current: "", next: "", password: "" });
   const [phoneForm, setPhoneForm] = useState({ phone: "", password: "" });
+  const [banks, setBanks] = useState<Array<{ uuid: string; name: string }>>([]);
+  const [bankForm, setBankForm] = useState({ bankUuid: "", bankName: "", accountNumber: "", accountName: "", pin: "" });
+  const [bankMsg, setBankMsg] = useState<string | null>(null);
+  const [bankBusy, setBankBusy] = useState(false);
+
+  useEffect(() => {
+    void listPaychanguBanks()
+      .then(setBanks)
+      .catch(() => setBanks([]));
+  }, []);
+
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lockMode, setLockMode] = useState<LockMode>(profile.lockMode === "instant" ? "instant" : "idle");
@@ -198,6 +211,97 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
           </Button>
         </form>
       </Card>
+
+      <Card className="space-y-3 p-4">
+        <h2 className="font-display text-lg font-semibold">Bank payout details</h2>
+        <p className="text-sm text-muted">
+          Optional. Used only for withdrawals to bank — not for deposits. After you save, bank withdrawals are
+          held for 72 hours. The first successful bank payout marks the account verified.
+        </p>
+        {profile.hasBankDetails ? (
+          <p className="rounded-xl bg-surface-2 px-3 py-2 text-sm">
+            Current: {profile.bankName} {profile.bankAccountNumberMasked}
+            {profile.bankAccountName ? ` · ${profile.bankAccountName}` : ""}
+            {profile.bankHoldUntil && new Date(profile.bankHoldUntil).getTime() > Date.now()
+              ? ` · hold until ${new Date(profile.bankHoldUntil).toLocaleString()}`
+              : ""}
+          </p>
+        ) : (
+          <p className="text-sm text-muted">No bank details yet.</p>
+        )}
+        <form
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setBankBusy(true);
+            setBankMsg(null);
+            void saveBankPayoutDetails({ data: bankForm })
+              .then((r) => {
+                setBankMsg(r.message);
+                setBankForm((f) => ({ ...f, pin: "" }));
+                window.location.reload();
+              })
+              .catch((err) => setBankMsg(errMessage(err)))
+              .finally(() => setBankBusy(false));
+          }}
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor="bank-select">Bank</Label>
+            <select
+              id="bank-select"
+              className="flex h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm"
+              value={bankForm.bankUuid}
+              onChange={(e) => {
+                const uuid = e.target.value;
+                const name = banks.find((b) => b.uuid === uuid)?.name ?? "";
+                setBankForm((f) => ({ ...f, bankUuid: uuid, bankName: name }));
+              }}
+              required
+            >
+              <option value="">Select bank…</option>
+              {banks.map((b) => (
+                <option key={b.uuid} value={b.uuid}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bank-acc-name">Account name</Label>
+            <Input
+              id="bank-acc-name"
+              value={bankForm.accountName}
+              onChange={(e) => setBankForm((f) => ({ ...f, accountName: e.target.value }))}
+              required
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bank-acc-num">Account number</Label>
+            <Input
+              id="bank-acc-num"
+              value={bankForm.accountNumber}
+              onChange={(e) => setBankForm((f) => ({ ...f, accountNumber: e.target.value }))}
+              required
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bank-pin">Confirm with PIN</Label>
+            <Input
+              id="bank-pin"
+              inputMode="numeric"
+              maxLength={4}
+              value={bankForm.pin}
+              onChange={(e) => setBankForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+              required
+            />
+          </div>
+          {bankMsg ? <p className="text-sm text-muted">{bankMsg}</p> : null}
+          <Button type="submit" disabled={bankBusy || bankForm.pin.length !== 4 || !bankForm.bankUuid}>
+            {bankBusy ? "Saving…" : "Save bank details"}
+          </Button>
+        </form>
+      </Card>
+
 
       <Card className="space-y-3 p-4">
         <h2 className="font-display text-lg font-semibold">Email</h2>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { MessageCircle, Phone, Facebook, X, MessageSquare, Headphones } from "lucide-react";
+import { MessageCircle, Phone, Facebook, X, MessageSquare } from "lucide-react";
 import { listHelpLinesPublic, type HelpLine } from "@/lib/nexa/fns";
 import { cn } from "@/lib/utils";
 
@@ -80,9 +80,13 @@ export function HelpFab() {
         aria-expanded={open}
         aria-label={open ? "Close help" : "Open help"}
         onClick={() => setOpen((v) => !v)}
-        className="pointer-events-auto grid size-14 place-items-center rounded-full bg-primary text-primary-fg shadow-lg transition-transform duration-300"
+        className="pointer-events-auto grid size-14 place-items-center overflow-hidden rounded-full bg-white shadow-lg ring-2 ring-primary/40 transition-transform duration-300"
       >
-        {open ? <X className="size-6" /> : <Headphones className="size-6" />}
+        {open ? (
+          <X className="size-6" />
+        ) : (
+          <img src="/help-agent.png" alt="Help" className="size-9 object-contain" />
+        )}
       </button>
     </div>
   );

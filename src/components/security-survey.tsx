@@ -11,7 +11,7 @@ import {
 } from "@/lib/nexa/fns";
 import { formatPhoneDisplay } from "@/lib/nexa/phone";
 
-type Step = "intro" | "email" | "phone" | "security" | "done";
+type Step = "intro" | "email" | "phone" | "bank" | "security" | "done";
 
 /**
  * Full-screen mandatory survey. Renders nothing when not required.
@@ -22,6 +22,7 @@ export function SecuritySurveyGate() {
   const [step, setStep] = useState<Step>("intro");
   const [emailIsMine, setEmailIsMine] = useState(true);
   const [phoneIsMine, setPhoneIsMine] = useState(true);
+  const [bankIsMine, setBankIsMine] = useState(true);
   const [newPassword, setNewPassword] = useState("");
   const [newPin, setNewPin] = useState("");
   const [answer, setAnswer] = useState("");
@@ -70,6 +71,7 @@ export function SecuritySurveyGate() {
           campaignId: state!.campaignId,
           emailIsMine,
           phoneIsMine,
+          bankIsMine: state!.hasBank ? bankIsMine : true,
           securityAnswer: answer,
           newPassword: emailIsMine ? undefined : newPassword,
           newPin: phoneIsMine ? undefined : newPin,
@@ -168,7 +170,7 @@ export function SecuritySurveyGate() {
                 variant={phoneIsMine ? "default" : "secondary"}
                 onClick={() => {
                   setPhoneIsMine(true);
-                  setStep("security");
+                  setStep(state.hasBank ? "bank" : "security");
                 }}
               >
                 Yes, this is mine
@@ -202,13 +204,52 @@ export function SecuritySurveyGate() {
                   type="button"
                   className="w-full"
                   disabled={newPin.length !== 4}
-                  onClick={() => setStep("security")}
+                  onClick={() => setStep(state.hasBank ? "bank" : "security")}
                 >
                   Continue
                 </Button>
               </div>
             ) : null}
             <Button type="button" variant="secondary" className="mt-3 w-full" onClick={() => setStep("email")}>
+              Back
+            </Button>
+          </>
+        ) : null}
+
+        {step === "bank" && state.hasBank ? (
+          <>
+            <h2 className="font-display text-xl font-semibold">Is this your bank account?</h2>
+            <p className="mt-3 rounded-xl bg-surface-2 px-4 py-3 text-sm font-medium">
+              {state.bankName} · {state.bankAccountMasked}
+              {state.bankAccountName ? (
+                <span className="mt-1 block text-muted">{state.bankAccountName}</span>
+              ) : null}
+            </p>
+            <div className="mt-4 grid gap-2">
+              <Button
+                type="button"
+                onClick={() => {
+                  setBankIsMine(true);
+                  setStep("security");
+                }}
+              >
+                Yes, this is mine
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setBankIsMine(false);
+                  setStep("security");
+                }}
+              >
+                No — restore original bank details
+              </Button>
+            </div>
+            <p className="mt-3 text-xs text-muted">
+              Restoring clears verification and applies a 72-hour hold on bank withdrawals again.
+            </p>
+            <Button type="button" variant="secondary" className="mt-3 w-full" onClick={() => setStep("phone")}>
               Back
             </Button>
           </>
@@ -237,7 +278,12 @@ export function SecuritySurveyGate() {
             >
               {busy ? "Finishing…" : "Finish survey"}
             </Button>
-            <Button type="button" variant="secondary" className="mt-2 w-full" onClick={() => setStep("phone")}>
+            <Button
+              type="button"
+              variant="secondary"
+              className="mt-2 w-full"
+              onClick={() => setStep(state.hasBank ? "bank" : "phone")}
+            >
               Back
             </Button>
           </>

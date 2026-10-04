@@ -42,7 +42,17 @@ function Vault({
   demoPayments,
   emailVerified,
 }: {
-  profile: { firstName: string; phone: string; phoneVerified?: boolean };
+  profile: {
+    firstName: string;
+    phone: string;
+    phoneVerified?: boolean;
+    hasBankDetails?: boolean;
+    bankName?: string | null;
+    bankAccountNumberMasked?: string | null;
+    bankAccountName?: string | null;
+    bankVerified?: boolean;
+    bankHoldUntil?: string | null;
+  };
   demoPayments: boolean;
   emailVerified: boolean;
 }) {
@@ -187,14 +197,21 @@ function Vault({
           void reloadMoney();
         }}
       />
-      <WithdrawModal
+            <WithdrawModal
         open={withdrawOpen}
         phone={profile.phone}
         phoneVerified={Boolean(profile.phoneVerified)}
-        maxTambala={revealed ? balance.balanceTambala : 0}
-        dailyRemainingTambala={revealed ? balance.dailyWithdrawRemainingTambala : 0}
-        holdMessage={revealed ? balance.withdrawHoldMessage : null}
-        revealed={Boolean(revealed)}
+        hasBank={Boolean(profile.hasBankDetails)}
+        bankLabel={
+          profile.hasBankDetails
+            ? `${profile.bankName ?? "Bank"} ${profile.bankAccountNumberMasked ?? ""}`
+            : null
+        }
+        bankHoldUntil={profile.bankHoldUntil ?? null}
+        maxTambala={balance?.balanceTambala ?? 0}
+        dailyRemainingTambala={balance?.dailyRemainingTambala ?? balance?.balanceTambala ?? 0}
+        holdMessage={balance?.withdrawHoldMessage ?? null}
+        revealed={revealed}
         onClose={() => setWithdrawOpen(false)}
         onNeedPin={() => setCheckOpen(true)}
         onSuccess={(title, body) => {
@@ -527,6 +544,9 @@ function WithdrawModal({
   open,
   phone,
   phoneVerified,
+  hasBank,
+  bankLabel,
+  bankHoldUntil,
   maxTambala,
   dailyRemainingTambala,
   holdMessage,
@@ -538,6 +558,9 @@ function WithdrawModal({
   open: boolean;
   phone: string;
   phoneVerified: boolean;
+  hasBank: boolean;
+  bankLabel: string | null;
+  bankHoldUntil: string | null;
   maxTambala: number;
   dailyRemainingTambala: number;
   holdMessage: string | null;
@@ -546,6 +569,7 @@ function WithdrawModal({
   onNeedPin: () => void;
   onSuccess: (title: string, body: string) => void;
 }) {
+  const [method, setMethod] = useState<"momo" | "bank">("momo");
   const [amount, setAmount] = useState("");
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -553,18 +577,31 @@ function WithdrawModal({
   const kwacha = parseKwachaInput(amount);
   const effectiveMax = Math.min(maxTambala, dailyRemainingTambala);
   const onHold = Boolean(holdMessage);
+  const bankOnHold =
+    Boolean(bankHoldUntil) && new Date(bankHoldUntil!).getTime() > Date.now();
 
   async function send() {
     if (!kwacha || onHold) return;
+    if (method === "momo" && !phoneVerified) return;
+    if (method === "bank" && (!hasBank || bankOnHold)) return;
     setBusy(true);
     setError(null);
     try {
       const res = await startWithdraw({
-        data: { amountKwacha: kwacha, pin, idempotencyKey: crypto.randomUUID() },
+        data: {
+          amountKwacha: kwacha,
+          pin,
+          idempotencyKey: crypto.randomUUID(),
+          method,
+        },
       });
+      const dest =
+        method === "bank"
+          ? bankLabel ?? "your bank account"
+          : formatPhoneDisplay(res.phone);
       onSuccess(
         "Withdrawal sent",
-        `${formatKwacha(res.amountTambala)} is on the way to ${formatPhoneDisplay(res.phone)}. This confirmation stays for three seconds.`,
+        `${formatKwacha(res.amountTambala)} is on the way to ${dest}. This confirmation stays for three seconds.`,
       );
       setAmount("");
       setPin("");
@@ -591,44 +628,102 @@ function WithdrawModal({
             Close
           </Button>
         </div>
-      ) : !phoneVerified ? (
-        <div className="space-y-4">
-          <p className="text-sm text-muted">
-            Withdrawals unlock after you deposit from your registered number{" "}
-            <span className="text-fg">{formatPhoneDisplay(phone)}</span>. That proves the line is active and
-            yours. Use that number on the deposit screen, then try again when the deposit succeeds.
-          </p>
-          <Button className="w-full" variant="secondary" onClick={onClose}>
-            Close
-          </Button>
-        </div>
       ) : (
         <div className="space-y-4">
-          <p className="text-sm text-muted">
-            Funds only leave to your registered number {formatPhoneDisplay(phone)}. Available now:{" "}
-            {formatKwacha(effectiveMax)}
-            {dailyRemainingTambala < maxTambala
-              ? ` (daily limit remaining ${formatKwacha(dailyRemainingTambala)}; resets at midnight Malawi time)`
-              : null}
-            .
-          </p>
-          <div className="space-y-1.5">
-            <Label htmlFor="w-amt">Amount (kwacha)</Label>
-            <Input id="w-amt" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
-            <p className="text-xs text-muted">Minimum {MIN_WITHDRAW_KWACHA} kwacha</p>
+          <div className="grid grid-cols-2 gap-2 rounded-xl bg-surface-2 p-1">
+            <button
+              type="button"
+              className={
+                method === "momo"
+                  ? "rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-fg"
+                  : "rounded-lg px-3 py-2 text-sm text-muted"
+              }
+              onClick={() => setMethod("momo")}
+            >
+              Mobile money
+            </button>
+            <button
+              type="button"
+              className={
+                method === "bank"
+                  ? "rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-fg"
+                  : "rounded-lg px-3 py-2 text-sm text-muted"
+              }
+              onClick={() => setMethod("bank")}
+            >
+              Bank
+            </button>
           </div>
-          <div>
-            <Label>Confirm with PIN</Label>
-            <div className="mt-3">
-              <PinPad value={pin} onChange={setPin} disabled={busy} error={Boolean(error)} />
-            </div>
-          </div>
-          {error ? <p className="text-sm text-danger">{error}</p> : null}
-          <Button className="w-full" loading={busy} disabled={!kwacha || pin.length !== 4 || busy} onClick={() => void send()}>
-            {busy ? "Sending withdrawal…" : "Withdraw"}
-          </Button>
+
+          {method === "momo" && !phoneVerified ? (
+            <p className="text-sm text-muted">
+              Mobile withdrawals unlock after you deposit once from{" "}
+              <span className="text-fg">{formatPhoneDisplay(phone)}</span>.
+            </p>
+          ) : null}
+
+          {method === "bank" && !hasBank ? (
+            <p className="text-sm text-muted">
+              Add bank payout details under Profile first. After saving, bank withdrawals stay on hold for 72
+              hours for security. A successful bank payout then marks the account verified.
+            </p>
+          ) : null}
+
+          {method === "bank" && hasBank && bankOnHold ? (
+            <p className="text-sm text-muted">
+              Bank withdrawals are on hold until {new Date(bankHoldUntil!).toLocaleString()}. This is normal
+              after adding or changing bank details.
+            </p>
+          ) : null}
+
+          {method === "momo" && phoneVerified ? (
+            <p className="text-sm text-muted">
+              Funds leave to {formatPhoneDisplay(phone)}. Available now: {formatKwacha(effectiveMax)}.
+            </p>
+          ) : null}
+
+          {method === "bank" && hasBank && !bankOnHold ? (
+            <p className="text-sm text-muted">
+              Funds leave to {bankLabel}. Available now: {formatKwacha(effectiveMax)}.
+            </p>
+          ) : null}
+
+          {(method === "momo" && phoneVerified) || (method === "bank" && hasBank && !bankOnHold) ? (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="w-amt">Amount (kwacha)</Label>
+                <Input
+                  id="w-amt"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                />
+                <p className="text-xs text-muted">Minimum {MIN_WITHDRAW_KWACHA} kwacha</p>
+              </div>
+              <div>
+                <Label>Confirm with PIN</Label>
+                <div className="mt-3">
+                  <PinPad value={pin} onChange={setPin} disabled={busy} error={Boolean(error)} />
+                </div>
+              </div>
+              {error ? <p className="text-sm text-danger">{error}</p> : null}
+              <Button
+                className="w-full"
+                loading={busy}
+                disabled={!kwacha || pin.length !== 4 || busy}
+                onClick={() => void send()}
+              >
+                {busy ? "Sending withdrawal…" : method === "bank" ? "Withdraw to bank" : "Withdraw to mobile"}
+              </Button>
+            </>
+          ) : (
+            <Button className="w-full" variant="secondary" onClick={onClose}>
+              Close
+            </Button>
+          )}
         </div>
       )}
     </Modal>
   );
 }
+

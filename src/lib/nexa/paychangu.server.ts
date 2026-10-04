@@ -162,3 +162,44 @@ export function parseWebhookPayload(body: unknown): {
     amount: Number(rec.amount ?? 0),
   };
 }
+
+
+export type PaychanguBank = { uuid: string; name: string };
+
+export async function listSupportedBanks(): Promise<PaychanguBank[]> {
+  const json = await paychanguFetch("/direct-charge/payouts/supported-banks?currency=MWK");
+  const list = (json.data ?? json) as Array<{ uuid?: string; name?: string }>;
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((b) => b.uuid && b.name)
+    .map((b) => ({ uuid: String(b.uuid), name: String(b.name) }));
+}
+
+export async function initiateBankPayout(input: {
+  bankUuid: string;
+  accountName: string;
+  accountNumber: string;
+  amountKwacha: number;
+  chargeId: string;
+  email?: string;
+}): Promise<{ chargeId: string; status: string }> {
+  const json = await paychanguFetch("/direct-charge/payouts/initialize", {
+    method: "POST",
+    body: JSON.stringify({
+      payout_method: "bank_transfer",
+      bank_uuid: input.bankUuid,
+      amount: String(Math.round(input.amountKwacha)),
+      charge_id: input.chargeId,
+      bank_account_name: input.accountName,
+      bank_account_number: input.accountNumber,
+      ...(input.email ? { email: input.email } : {}),
+    }),
+  });
+  const data = json.data as
+    | { transaction?: { status?: string; charge_id?: string } }
+    | undefined;
+  return {
+    chargeId: data?.transaction?.charge_id ?? input.chargeId,
+    status: String(data?.transaction?.status ?? json.status ?? "pending"),
+  };
+}
