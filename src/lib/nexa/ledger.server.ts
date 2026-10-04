@@ -52,7 +52,7 @@ export async function creditDeposit(reference: string): Promise<CreditResult> {
         update wallets
         set balance_tambala = balance_tambala + ${credited},
             payout_reserve_tambala = payout_reserve_tambala + ${reserve},
-            lifetime_deposited_tambala = lifetime_deposited_tambala + ${gross},
+            lifetime_deposited_tambala = lifetime_deposited_tambala + ${credited},
             updated_at = now()
         where user_id = ${txRow.user_id}
       `;
