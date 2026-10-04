@@ -25,7 +25,7 @@ function pickRefFromWindow(): string {
   return "";
 }
 
-export const Route = createFileRoute("/deposit-return")({
+export const Route = createFileRoute("/deposit/return")({
   validateSearch: (search: Record<string, unknown>) => ({
     ...search,
     ref: pickRef(search),
