@@ -70,16 +70,27 @@ export function SessionGate({
 
   useEffect(() => {
     if (!me || me.needsProfile) return;
-    const lockMode = me.profile.lockMode === "instant" ? "instant" : "idle";
+    const lockMode =
+      me.profile.lockMode === "instant"
+        ? "instant"
+        : me.profile.lockMode === "off"
+          ? "off"
+          : "idle";
     const idleMs = Math.max(1, me.profile.lockIdleMinutes ?? 5) * 60 * 1000;
     let last = Date.now();
     const bump = () => {
       last = Date.now();
     };
     const events = ["pointerdown", "keydown", "touchstart", "scroll"] as const;
+
+    // No auto PIN lock when user chose "Do not lock".
+    if (lockMode === "off") {
+      setLocked(false);
+      return;
+    }
+
     events.forEach((e) => window.addEventListener(e, bump, { passive: true }));
 
-    // Idle timer always runs when mode is "idle".
     const idle = window.setInterval(() => {
       if (lockMode === "idle" && Date.now() - last >= idleMs) setLocked(true);
     }, 1000);
@@ -212,7 +223,9 @@ export function SessionGate({
           subtitle={
             profile.lockMode === "instant"
               ? "The vault locks when you leave the app."
-              : `After ${profile.lockIdleMinutes ?? 5} minute${(profile.lockIdleMinutes ?? 5) === 1 ? "" : "s"} of quiet, NEXA locks the vault.`
+              : profile.lockMode === "off"
+                ? "Auto-lock is off. Balance still needs PIN to reveal."
+                : `After ${profile.lockIdleMinutes ?? 5} minute${(profile.lockIdleMinutes ?? 5) === 1 ? "" : "s"} of quiet, NEXA locks the vault.`
           }
           onUnlocked={() => {
             setLocked(false);

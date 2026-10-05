@@ -78,6 +78,7 @@ export type Gender = (typeof GENDER_OPTIONS)[number]["value"];
 export const LOCK_MODE_OPTIONS = [
   { value: "idle", label: "After idle time" },
   { value: "instant", label: "When I leave the app" },
+  { value: "off", label: "Do not lock" },
 ] as const;
 export type LockMode = (typeof LOCK_MODE_OPTIONS)[number]["value"];
 export const DEFAULT_LOCK_IDLE_MINUTES = 5;

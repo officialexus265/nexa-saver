@@ -132,7 +132,8 @@ function toPublic(row: ProfileRow): PublicProfile {
     hasBankDetails: Boolean(row.bank_uuid && row.bank_account_number),
     adminLocked: Boolean(row.admin_locked_at),
     adminLockReason: row.admin_lock_reason ?? null,
-    lockMode: row.lock_mode === "instant" ? "instant" : "idle",
+    lockMode:
+      row.lock_mode === "instant" ? "instant" : row.lock_mode === "off" ? "off" : "idle",
     lockIdleMinutes: Math.min(60, Math.max(1, asInt(row.lock_idle_minutes) || 5)),
     username: row.username,
     dateOfBirth: String(row.date_of_birth).slice(0, 10),
@@ -1899,7 +1900,7 @@ export const changeLockPreference = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator(
     z.object({
-      mode: z.enum(["instant", "idle"]),
+      mode: z.enum(["instant", "idle", "off"]),
       idleMinutes: z.number().int().min(1).max(60).optional(),
     }),
   )

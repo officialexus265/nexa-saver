@@ -59,7 +59,9 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
 
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [lockMode, setLockMode] = useState<LockMode>(profile.lockMode === "instant" ? "instant" : "idle");
+  const [lockMode, setLockMode] = useState<LockMode>(
+    profile.lockMode === "instant" ? "instant" : profile.lockMode === "off" ? "off" : "idle",
+  );
   const [lockMinutes, setLockMinutes] = useState(String(profile.lockIdleMinutes ?? 5));
   const [sessions, setSessions] = useState<PublicSession[] | null>(null);
   const [sessionBusy, setSessionBusy] = useState<string | null>(null);
@@ -406,7 +408,9 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
         summary={
           profile.lockMode === "instant"
             ? "Locks when you leave the app"
-            : `Idle · ${profile.lockIdleMinutes ?? 5} min`
+            : profile.lockMode === "off"
+              ? "Do not lock"
+              : `Idle · ${profile.lockIdleMinutes ?? 5} min`
         }
         openId={openSection}
         onToggle={setOpenSection}
@@ -454,7 +458,9 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
                 setMessage(
                   res.mode === "instant"
                     ? "Vault will lock when you leave the app."
-                    : `Vault will lock after ${res.idleMinutes} minute${res.idleMinutes === 1 ? "" : "s"} of inactivity.`,
+                    : res.mode === "off"
+                      ? "Auto-lock is off. Your balance still needs PIN to reveal."
+                      : `Vault will lock after ${res.idleMinutes} minute${res.idleMinutes === 1 ? "" : "s"} of inactivity.`,
                 );
               } catch (err) {
                 setError(errMessage(err));
