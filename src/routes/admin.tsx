@@ -22,6 +22,8 @@ import {
   adminUpsertHelpLine,
   adminListHelpLines,
   adminAnalytics,
+  adminGetPayoutMethods,
+  adminSetPayoutMethods,
   adminExportSurveyCsv,
   adminDeleteUser,
   adminLockUser,
@@ -108,17 +110,22 @@ function Console() {
   const [userQuery, setUserQuery] = useState("");
   const [analytics, setAnalytics] = useState<Awaited<ReturnType<typeof adminAnalytics>> | null>(null);
   const [userActionMsg, setUserActionMsg] = useState<string | null>(null);
+  const [payoutMethods, setPayoutMethods] = useState<{ momo: boolean; bank: boolean } | null>(null);
+  const [payoutMsg, setPayoutMsg] = useState<string | null>(null);
+  const [payoutBusy, setPayoutBusy] = useState(false);
+
 
 
   useEffect(() => {
-    Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone(), adminSecuritySurveyStatus(), adminAnalytics()])
-      .then(([o, u, t, s, sv, an]) => {
+    Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone(), adminSecuritySurveyStatus(), adminAnalytics(), adminGetPayoutMethods()])
+      .then(([o, u, t, s, sv, an, pm]) => {
         setOverview(o);
         setUsers(u);
         setTxs(t);
         if (s.phone) setSupportPhone(s.phone);
         setSurveyStatus(sv);
         setAnalytics(an);
+        setPayoutMethods(pm);
       })
       .catch((err) => setError(errMessage(err)));
   }, []);
@@ -183,9 +190,9 @@ function Console() {
         </p>
         <form
           onSubmit={(e) => void saveSupportPhone(e)}
-          className="flex flex-col gap-3 sm:flex-row sm:items-end"
+          className="flex w-full flex-col gap-3 sm:flex-row sm:items-end"
         >
-          <div className="flex-1 space-y-1.5">
+          <div className="w-full min-w-0 flex-1 space-y-1.5">
             <Label htmlFor="support-phone">Platform support phone</Label>
             <Input
               id="support-phone"
@@ -193,15 +200,72 @@ function Console() {
               value={supportPhone}
               onChange={(e) => setSupportPhone(e.target.value)}
               placeholder="09… or 08…"
+              className="w-full"
             />
           </div>
-          <Button type="submit" disabled={supportBusy || supportPhone.trim().length < 8}>
+          <Button
+            type="submit"
+            className="h-12 w-full shrink-0 sm:h-11 sm:w-auto"
+            disabled={supportBusy || supportPhone.trim().length < 8}
+          >
             {supportBusy ? "Saving…" : "Save"}
           </Button>
         </form>
         {supportMsg ? <p className="text-sm text-muted">{supportMsg}</p> : null}
       </Card>
 
+
+      <Card className="space-y-3 p-4">
+        <h2 className="font-display text-lg font-semibold">Payout methods</h2>
+        <p className="text-sm text-muted">
+          Choose which ways savers can withdraw. At least one method must stay on. Bank withdrawals show a 700
+          MWK rail flat fee to the user (not a NEXA charge).
+        </p>
+        {payoutMethods ? (
+          <div className="space-y-3">
+            <label className="flex items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                className="size-4"
+                checked={payoutMethods.momo}
+                onChange={(e) =>
+                  setPayoutMethods((p) => (p ? { ...p, momo: e.target.checked } : p))
+                }
+              />
+              Mobile money (MoMo)
+            </label>
+            <label className="flex items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                className="size-4"
+                checked={payoutMethods.bank}
+                onChange={(e) =>
+                  setPayoutMethods((p) => (p ? { ...p, bank: e.target.checked } : p))
+                }
+              />
+              Bank transfer
+            </label>
+            <Button
+              type="button"
+              className="w-full sm:w-auto"
+              disabled={payoutBusy || (!payoutMethods.momo && !payoutMethods.bank)}
+              onClick={() => {
+                setPayoutBusy(true);
+                setPayoutMsg(null);
+                void adminSetPayoutMethods({ data: payoutMethods })
+                  .then(() => setPayoutMsg("Payout methods saved."))
+                  .catch((err) => setPayoutMsg(errMessage(err)))
+                  .finally(() => setPayoutBusy(false));
+              }}
+            >
+              {payoutBusy ? "Saving…" : "Save payout methods"}
+            </Button>
+            {payoutMsg ? <p className="text-sm text-muted">{payoutMsg}</p> : null}
+          </div>
+        ) : (
+          <p className="text-sm text-muted">Loading…</p>
+        )}
+      </Card>
 
       <Card className="space-y-3 p-4">
         <h2 className="font-display text-lg font-semibold">Security survey</h2>
@@ -233,9 +297,10 @@ function Console() {
           </div>
         ) : null}
         {surveyMsg ? <p className="text-sm text-primary">{surveyMsg}</p> : null}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <Button
             type="button"
+            className="w-full sm:w-auto"
             disabled={surveyBusy}
             onClick={() => {
               setSurveyBusy(true);
@@ -279,6 +344,7 @@ function Console() {
           <Button
             type="button"
             variant="secondary"
+            className="w-full sm:w-auto"
             disabled={surveyBusy || !surveyStatus?.active}
             onClick={() => {
               setSurveyBusy(true);
@@ -372,13 +438,14 @@ function Console() {
       <section>
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <h2 className="font-display text-lg font-semibold">Accounts</h2>
-          <div className="w-full sm:max-w-xs space-y-1.5">
+          <div className="w-full space-y-1.5 sm:max-w-sm">
             <Label htmlFor="user-search">Search accounts</Label>
             <Input
               id="user-search"
               value={userQuery}
               onChange={(e) => setUserQuery(e.target.value)}
               placeholder="Username, email, phone…"
+              className="w-full"
             />
           </div>
         </div>
@@ -583,20 +650,23 @@ function SupportDesk() {
   }
 
   return (
-    <section className="space-y-3">
+    <Card className="space-y-3 p-4">
       <h2 className="font-display text-lg font-semibold">Support desk</h2>
       <p className="text-sm text-muted">
         Look up a deposit or withdrawal by reference. For stuck deposits, confirm success in PayChangu, then
         credit. For missing withdrawals, check status here and in PayChangu payouts before refunding.
       </p>
-      <form onSubmit={(e) => void lookup(e)} className="flex flex-col gap-2 sm:flex-row">
+      <form onSubmit={(e) => void lookup(e)} className="flex w-full flex-col gap-3 sm:flex-row sm:items-stretch">
         <Input
           value={ref}
           onChange={(e) => setRef(e.target.value)}
-          placeholder="Reference e.g. DEP-…"
-          className="flex-1"
+          placeholder="Reference e.g. DEP_…"
+          className="w-full min-w-0 flex-1"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
         />
-        <Button type="submit" loading={busy}>
+        <Button type="submit" loading={busy} className="h-12 w-full shrink-0 sm:h-11 sm:w-auto sm:min-w-[7.5rem]">
           Look up
         </Button>
       </form>
@@ -634,7 +704,7 @@ function SupportDesk() {
                 onChange={(e) => setReason(e.target.value)}
                 placeholder="Confirmed success in PayChangu dashboard"
               />
-              <Button type="button" loading={busy} onClick={() => void forceCredit()}>
+              <Button type="button" className="h-12 w-full sm:h-11" loading={busy} onClick={() => void forceCredit()}>
                 Credit deposit to wallet
               </Button>
             </div>
@@ -642,13 +712,13 @@ function SupportDesk() {
           <div className="space-y-2 border-t border-border pt-3">
             <Label htmlFor="support-note">Add support note</Label>
             <Input id="support-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Called user, ticket #…" />
-            <Button type="button" variant="secondary" loading={busy} onClick={() => void saveNote()}>
+            <Button type="button" variant="secondary" className="h-12 w-full sm:h-11" loading={busy} onClick={() => void saveNote()}>
               Save note
             </Button>
           </div>
         </Card>
       ) : null}
-    </section>
+    </Card>
   );
 }
 
@@ -739,7 +809,7 @@ function HelpLinesManager() {
         {lines.map((l) => (
           <li
             key={l.id}
-            className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2 text-sm"
+            className="flex flex-col gap-2 rounded-xl border border-border px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
           >
             <div>
               <p className="font-medium capitalize">
@@ -759,7 +829,7 @@ function HelpLinesManager() {
           <Label htmlFor="hl-channel">Channel</Label>
           <select
             id="hl-channel"
-            className="flex h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm"
+            className="flex h-12 w-full min-w-0 rounded-xl border border-border bg-surface-2 px-3.5 text-base sm:h-11 sm:text-sm"
             value={channel}
             onChange={(e) => setChannel(e.target.value as typeof channel)}
           >

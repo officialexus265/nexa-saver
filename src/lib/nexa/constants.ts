@@ -13,6 +13,10 @@ export const DELETE_LAYER_WAIT_MS = 5000;
 
 export const MIN_DEPOSIT_KWACHA = 100;
 export const MIN_WITHDRAW_KWACHA = 50;
+/** PayChangu bank payout flat fee (MWK). Deducted from the user's requested amount so they receive request − 700. Not a NEXA fee. */
+export const BANK_FLAT_FEE_KWACHA = 700;
+export const MIN_BANK_WITHDRAW_KWACHA = MIN_WITHDRAW_KWACHA + BANK_FLAT_FEE_KWACHA;
+
 export const DEPOSIT_FEE_RATE = 0.06;
 export const PLATFORM_PROFIT_RATE = 0.03;
 export const PAYOUT_FEE_RATE = 0.03;

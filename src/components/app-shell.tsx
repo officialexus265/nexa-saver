@@ -41,7 +41,7 @@ export function AppShell({
           </button>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-3xl px-4 py-6">{children}</main>
+      <main className="mx-auto w-full max-w-3xl px-4 py-6 pb-28 md:pb-6">{children}</main>
       <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-3 border-t border-border bg-surface/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 md:hidden">
         <TabLink to="/dashboard" current={pathname} icon={<LayoutDashboard className="size-5" />} label="Home" />
         <TabLink to="/profile" current={pathname} icon={<UserRound className="size-5" />} label="Profile" />

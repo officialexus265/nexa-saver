@@ -10,7 +10,7 @@ import { LoadingStatus } from "@/components/ui/spinner";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { DEPOSIT_FEE_RATE, MIN_DEPOSIT_KWACHA, MIN_WITHDRAW_KWACHA } from "@/lib/nexa/constants";
+import { DEPOSIT_FEE_RATE, MIN_DEPOSIT_KWACHA, MIN_WITHDRAW_KWACHA, BANK_FLAT_FEE_KWACHA, MIN_BANK_WITHDRAW_KWACHA } from "@/lib/nexa/constants";
 import { errMessage } from "@/lib/nexa/errors";
 import {
   confirmDemoDeposit,
@@ -18,6 +18,7 @@ import {
   listTransactions,
   startDeposit,
   startWithdraw,
+  getPayoutMethodsPublic,
   verifyPin,
   resendVerificationEmailFn,
 } from "@/lib/nexa/fns";
@@ -640,16 +641,41 @@ function WithdrawModal({
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [allowed, setAllowed] = useState<{ momo: boolean; bank: boolean }>({ momo: true, bank: true });
+  const [bankFeeAccepted, setBankFeeAccepted] = useState(false);
+  const [bankFinalAck, setBankFinalAck] = useState(false);
   const kwacha = parseKwachaInput(amount);
   const effectiveMax = Math.min(maxTambala, dailyRemainingTambala);
   const onHold = Boolean(holdMessage);
   const bankOnHold =
     Boolean(bankHoldUntil) && new Date(bankHoldUntil!).getTime() > Date.now();
+  const netBankReceive =
+    method === "bank" && kwacha && kwacha > BANK_FLAT_FEE_KWACHA
+      ? kwacha - BANK_FLAT_FEE_KWACHA
+      : null;
+
+  useEffect(() => {
+    if (!open) return;
+    void getPayoutMethodsPublic()
+      .then((m) => {
+        setAllowed(m);
+        if (!m.momo && m.bank) setMethod("bank");
+        if (m.momo && !m.bank) setMethod("momo");
+      })
+      .catch(() => setAllowed({ momo: true, bank: true }));
+  }, [open]);
+
+  useEffect(() => {
+    setBankFeeAccepted(false);
+    setBankFinalAck(false);
+    setPin("");
+    setError(null);
+  }, [method, amount]);
 
   async function send() {
     if (!kwacha || onHold) return;
     if (method === "momo" && !phoneVerified) return;
-    if (method === "bank" && (!hasBank || bankOnHold)) return;
+    if (method === "bank" && (!hasBank || bankOnHold || !bankFeeAccepted || !bankFinalAck)) return;
     setBusy(true);
     setError(null);
     try {
@@ -663,20 +689,27 @@ function WithdrawModal({
       });
       const dest =
         method === "bank"
-          ? bankLabel ?? "your bank account"
+          ? `${bankLabel ?? "your bank"} (about ${formatKwacha((res.amountTambala / 100 - BANK_FLAT_FEE_KWACHA) * 100)} after bank flat fee)`
           : formatPhoneDisplay(res.phone);
       onSuccess(
         "Withdrawal sent",
-        `${formatKwacha(res.amountTambala)} is on the way to ${dest}. This confirmation stays for three seconds.`,
+        method === "bank"
+          ? `${formatKwacha(res.amountTambala)} left your vault. The bank channel keeps a 700 MWK flat fee (not NEXA). You should receive about ${formatKwacha(res.amountTambala - BANK_FLAT_FEE_KWACHA * 100)}.`
+          : `${formatKwacha(res.amountTambala)} is on the way to ${dest}.`,
       );
       setAmount("");
       setPin("");
+      setBankFeeAccepted(false);
+      setBankFinalAck(false);
     } catch (err) {
       setError(errMessage(err));
     } finally {
       setBusy(false);
     }
   }
+
+  const showForm =
+    (method === "momo" && phoneVerified) || (method === "bank" && hasBank && !bankOnHold);
 
   return (
     <Modal open={open} title="Withdraw" onClose={onClose}>
@@ -699,27 +732,38 @@ function WithdrawModal({
           <div className="grid grid-cols-2 gap-2 rounded-xl bg-surface-2 p-1">
             <button
               type="button"
+              disabled={!allowed.momo}
               className={
                 method === "momo"
                   ? "rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-fg"
-                  : "rounded-lg px-3 py-2 text-sm text-muted"
+                  : "rounded-lg px-3 py-2 text-sm text-muted disabled:opacity-40"
               }
-              onClick={() => setMethod("momo")}
+              onClick={() => allowed.momo && setMethod("momo")}
             >
               Mobile money
             </button>
             <button
               type="button"
+              disabled={!allowed.bank}
               className={
                 method === "bank"
                   ? "rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-fg"
-                  : "rounded-lg px-3 py-2 text-sm text-muted"
+                  : "rounded-lg px-3 py-2 text-sm text-muted disabled:opacity-40"
               }
-              onClick={() => setMethod("bank")}
+              onClick={() => allowed.bank && setMethod("bank")}
             >
               Bank
             </button>
           </div>
+          {!allowed.momo && !allowed.bank ? (
+            <p className="text-sm text-danger">Withdrawals are paused by the platform.</p>
+          ) : null}
+          {!allowed.momo ? (
+            <p className="text-xs text-muted">Mobile money withdrawals are off right now.</p>
+          ) : null}
+          {!allowed.bank ? (
+            <p className="text-xs text-muted">Bank withdrawals are off right now.</p>
+          ) : null}
 
           {method === "momo" && !phoneVerified ? (
             <p className="text-sm text-muted">
@@ -731,56 +775,116 @@ function WithdrawModal({
           {method === "bank" && !hasBank ? (
             <p className="text-sm text-muted">
               Add bank payout details under Profile first. After saving, bank withdrawals stay on hold for 72
-              hours for security. A successful bank payout then marks the account verified.
+              hours.
             </p>
           ) : null}
 
           {method === "bank" && hasBank && bankOnHold ? (
             <p className="text-sm text-muted">
-              Bank withdrawals are on hold until {new Date(bankHoldUntil!).toLocaleString()}. This is normal
-              after adding or changing bank details.
+              Bank withdrawals are on hold until {new Date(bankHoldUntil!).toLocaleString()}.
             </p>
           ) : null}
 
-          {method === "momo" && phoneVerified ? (
-            <p className="text-sm text-muted">
-              Funds leave to {formatPhoneDisplay(phone)}. Available now: {formatKwacha(effectiveMax)}.
-            </p>
-          ) : null}
-
-          {method === "bank" && hasBank && !bankOnHold ? (
-            <p className="text-sm text-muted">
-              Funds leave to {bankLabel}. Available now: {formatKwacha(effectiveMax)}.
-            </p>
-          ) : null}
-
-          {(method === "momo" && phoneVerified) || (method === "bank" && hasBank && !bankOnHold) ? (
+          {showForm ? (
             <>
-              <div className="space-y-1.5">
-                <Label htmlFor="w-amt">Amount (kwacha)</Label>
-                <Input
-                  id="w-amt"
-                  inputMode="decimal"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                />
-                <p className="text-xs text-muted">Minimum {MIN_WITHDRAW_KWACHA} kwacha</p>
-              </div>
-              <div>
-                <Label>Confirm with PIN</Label>
-                <div className="mt-3">
-                  <PinPad value={pin} onChange={setPin} disabled={busy} error={Boolean(error)} />
+              <p className="text-sm text-muted">
+                {method === "momo"
+                  ? `Funds leave to ${formatPhoneDisplay(phone)}. Available now: ${formatKwacha(effectiveMax)}.`
+                  : `Funds leave to ${bankLabel}. Available now: ${formatKwacha(effectiveMax)}.`}
+              </p>
+
+              {method === "bank" ? (
+                <div className="space-y-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                  <p className="font-medium text-fg">Bank channel flat fee: 700 MWK</p>
+                  <p className="text-muted">
+                    This is charged by the <span className="text-fg">payment / bank rail (PayChangu)</span>, not by
+                    NEXA-SAVER. If you request 1,000 kwacha, about <span className="text-fg">930 kwacha</span> reaches
+                    the bank account. Your vault is debited the full amount you request.
+                  </p>
+                  <label className="flex items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="mt-1 size-4"
+                      checked={bankFeeAccepted}
+                      onChange={(e) => setBankFeeAccepted(e.target.checked)}
+                    />
+                    <span>
+                      I understand 700 MWK will be taken from my requested amount by the bank channel, not by
+                      NEXA, and I want to continue.
+                    </span>
+                  </label>
                 </div>
-              </div>
-              {error ? <p className="text-sm text-danger">{error}</p> : null}
-              <Button
-                className="w-full"
-                loading={busy}
-                disabled={!kwacha || pin.length !== 4 || busy}
-                onClick={() => void send()}
-              >
-                {busy ? "Sending withdrawal…" : method === "bank" ? "Withdraw to bank" : "Withdraw to mobile"}
-              </Button>
+              ) : null}
+
+              {method === "momo" || bankFeeAccepted ? (
+                <>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="w-amt">Amount (kwacha)</Label>
+                    <Input
+                      id="w-amt"
+                      inputMode="decimal"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                    />
+                    <p className="text-xs text-muted">
+                      Minimum{" "}
+                      {method === "bank" ? MIN_BANK_WITHDRAW_KWACHA : MIN_WITHDRAW_KWACHA} kwacha
+                      {method === "bank" ? " (includes room for the 700 bank flat fee)" : ""}
+                    </p>
+                    {method === "bank" && netBankReceive != null ? (
+                      <p className="text-sm text-fg">
+                        You request <span className="font-semibold">{kwacha}</span> · bank receives about{" "}
+                        <span className="font-semibold">{netBankReceive}</span> kwacha after 700 flat
+                      </p>
+                    ) : null}
+                  </div>
+
+                  {method === "bank" && kwacha && kwacha >= MIN_BANK_WITHDRAW_KWACHA ? (
+                    <label className="flex items-start gap-2 rounded-xl border border-border bg-surface-2 p-3 text-sm">
+                      <input
+                        type="checkbox"
+                        className="mt-1 size-4"
+                        checked={bankFinalAck}
+                        onChange={(e) => setBankFinalAck(e.target.checked)}
+                      />
+                      <span>
+                        Final check: I accept that <strong>700 MWK</strong> is deducted from this request by the
+                        bank channel so the account receives about{" "}
+                        <strong>{netBankReceive ?? "—"} kwacha</strong>. This is not a NEXA fee.
+                      </span>
+                    </label>
+                  ) : null}
+
+                  {(method === "momo" || bankFinalAck) && (
+                    <>
+                      <div>
+                        <Label>Confirm with PIN</Label>
+                        <div className="mt-3">
+                          <PinPad value={pin} onChange={setPin} disabled={busy} error={Boolean(error)} />
+                        </div>
+                      </div>
+                      {error ? <p className="text-sm text-danger">{error}</p> : null}
+                      <Button
+                        className="w-full"
+                        loading={busy}
+                        disabled={
+                          !kwacha ||
+                          pin.length !== 4 ||
+                          busy ||
+                          (method === "bank" && (!bankFeeAccepted || !bankFinalAck))
+                        }
+                        onClick={() => void send()}
+                      >
+                        {busy
+                          ? "Sending withdrawal…"
+                          : method === "bank"
+                            ? "Withdraw to bank"
+                            : "Withdraw to mobile"}
+                      </Button>
+                    </>
+                  )}
+                </>
+              ) : null}
             </>
           ) : (
             <Button className="w-full" variant="secondary" onClick={onClose}>
@@ -792,4 +896,5 @@ function WithdrawModal({
     </Modal>
   );
 }
+
 

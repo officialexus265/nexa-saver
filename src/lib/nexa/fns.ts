@@ -761,8 +761,10 @@ export const startWithdraw = createServerFn({ method: "POST" })
     }
     const { assertWithdrawalsAllowed } = await import("./kill-switch.server");
     assertWithdrawalsAllowed();
-
     const sql = await getSql();
+    const { getPayoutMethods, assertMethodAllowed } = await import("./payout-methods.server");
+    const methods = await getPayoutMethods(sql);
+    assertMethodAllowed(methods, data.method ?? "momo");
 
     const claim = await claimIdempotencyKey(sql, {
       key: data.idempotencyKey,
@@ -796,6 +798,15 @@ export const startWithdraw = createServerFn({ method: "POST" })
 
       const amountTambala = kwachaToTambala(data.amountKwacha);
       const method = data.method ?? "momo";
+      if (method === "bank") {
+        const { BANK_FLAT_FEE_KWACHA, MIN_BANK_WITHDRAW_KWACHA } = await import("./constants");
+        if (data.amountKwacha < MIN_BANK_WITHDRAW_KWACHA) {
+          throw new Error(
+            `Bank withdrawals need at least ${MIN_BANK_WITHDRAW_KWACHA} kwacha (minimum withdraw + 700 MWK bank flat fee).`,
+          );
+        }
+      }
+
       if (method === "momo") {
         if (!profile.phone_verified_at) {
           throw new Error(
@@ -868,7 +879,7 @@ export const startWithdraw = createServerFn({ method: "POST" })
           ${context.userId}, ${"withdrawal"}, ${"processing"}, ${amount}, ${amount},
           ${0}, ${reserveShare}, ${profile.phone}, ${reference},
           ${(data.method ?? "momo") === "bank"
-          ? `Withdraw ${formatKwacha(amount)} to bank ${profile.bank_name ?? ""} ****${String(profile.bank_account_number ?? "").slice(-4)}`
+          ? `Withdraw ${formatKwacha(amount)} to bank ${profile.bank_name ?? ""} ****${String(profile.bank_account_number ?? "").slice(-4)} (bank flat 700 MWK — recipient gets less; not a NEXA fee)`
           : `Withdraw ${formatKwacha(amount)} to registered number ${profile.phone}`}
         )
         returning id
@@ -890,11 +901,20 @@ export const startWithdraw = createServerFn({ method: "POST" })
         const method = data.method ?? "momo";
         let status = "pending";
         if (method === "bank") {
+          const { BANK_FLAT_FEE_KWACHA } = await import("./constants");
+          const grossKwacha = tambalaToKwacha(amount);
+          if (grossKwacha <= BANK_FLAT_FEE_KWACHA) {
+            throw new Error(
+              `Bank withdrawals must be more than ${BANK_FLAT_FEE_KWACHA} kwacha so the bank flat fee can be covered.`,
+            );
+          }
+          const netKwacha = grossKwacha - BANK_FLAT_FEE_KWACHA;
+          // User is debited the full request; bank receives request − 700 (PayChangu bank flat, not a NEXA fee).
           const payout = await initiateBankPayout({
             bankUuid: String(profile.bank_uuid),
             accountName: String(profile.bank_account_name),
             accountNumber: String(profile.bank_account_number),
-            amountKwacha: tambalaToKwacha(amount),
+            amountKwacha: netKwacha,
             chargeId: reference,
             email: profile.email,
           });
@@ -2885,4 +2905,48 @@ export const adminAnalytics = createServerFn({ method: "GET" })
         count: Number(r.n),
       })),
     };
+  });
+
+
+export const adminGetPayoutMethods = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { getPayoutMethods } = await import("./payout-methods.server");
+    const sql = await getSql();
+    return getPayoutMethods(sql);
+  });
+
+export const adminSetPayoutMethods = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      momo: z.boolean(),
+      bank: z.boolean(),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { setPayoutMethods } = await import("./payout-methods.server");
+    const sql = await getSql();
+    await setPayoutMethods(sql, data);
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "payout_methods_set",
+      detail: `momo=${data.momo} bank=${data.bank}`,
+    });
+    return { ok: true as const, ...data };
+  });
+
+/** Public for withdraw UI (authenticated). */
+export const getPayoutMethodsPublic = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async () => {
+    const { getSql } = await import("@/lib/db");
+    const { getPayoutMethods } = await import("./payout-methods.server");
+    const sql = await getSql();
+    return getPayoutMethods(sql);
   });
