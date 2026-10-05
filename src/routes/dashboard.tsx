@@ -74,11 +74,14 @@ function Vault({
     setTxs(t);
   }, []);
 
-  // Activity loads without PIN; balance figure stays hidden until PIN reveal.
+  // Activity + withdraw meta load without PIN; balance figure stays hidden until PIN reveal.
   useEffect(() => {
     void listTransactions()
       .then(setTxs)
       .catch(() => setTxs([]));
+    void getBalance()
+      .then(setBalance)
+      .catch(() => setBalance(null));
   }, []);
 
   return (
@@ -128,11 +131,35 @@ function Vault({
           <Button className="mt-5 w-full" onClick={() => setCheckOpen(true)}>
             Check balance
           </Button>
-        ) : (
+        ) : balance && !balance.locked ? (
           <p className="mt-3 text-sm text-muted">
-            Lifetime in {formatKwacha(balance.lifetimeDepositedTambala)} · out {formatKwacha(balance.lifetimeWithdrawnTambala)}
+            Lifetime in {formatKwacha(balance.lifetimeDepositedTambala)} · out{" "}
+            {formatKwacha(balance.lifetimeWithdrawnTambala)}
           </p>
-        )}
+        ) : null}
+
+        {balance ? (
+          <div className="mt-3 space-y-1.5 text-sm">
+            <WithdrawHoldCountdown until={balance.withdrawHoldUntil} />
+            <p className="text-muted">
+              Daily max{" "}
+              <span className="font-medium text-fg">
+                {formatKwacha(balance.dailyWithdrawCapTambala)}
+              </span>
+              {balance.withdrawHoldUntil && new Date(balance.withdrawHoldUntil).getTime() > Date.now()
+                ? null
+                : (
+                    <>
+                      {" "}
+                      · left today{" "}
+                      <span className="font-medium text-fg">
+                        {formatKwacha(balance.dailyWithdrawRemainingTambala)}
+                      </span>
+                    </>
+                  )}
+            </p>
+          </div>
+        ) : null}
       </Card>
 
       <div className="grid grid-cols-2 gap-3">
@@ -226,6 +253,45 @@ function Vault({
 }
 
 
+
+
+function WithdrawHoldCountdown({ until }: { until: string | null }) {
+  const [label, setLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!until) {
+      setLabel(null);
+      return;
+    }
+    function tick() {
+      const ms = new Date(until!).getTime() - Date.now();
+      if (ms <= 0) {
+        setLabel(null);
+        return;
+      }
+      const totalMin = Math.floor(ms / 60000);
+      const days = Math.floor(totalMin / (60 * 24));
+      const hours = Math.floor((totalMin % (60 * 24)) / 60);
+      const mins = totalMin % 60;
+      const parts: string[] = [];
+      if (days > 0) parts.push(`${days}d`);
+      if (hours > 0 || days > 0) parts.push(`${hours}h`);
+      parts.push(`${mins}m`);
+      setLabel(parts.join(" "));
+    }
+    tick();
+    const id = window.setInterval(tick, 30000);
+    return () => window.clearInterval(id);
+  }, [until]);
+
+  if (!label) return null;
+  return (
+    <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-fg">
+      Withdrawable in <span className="font-semibold tabular-nums">{label}</span>
+      <span className="text-muted"> · new accounts and security changes stay on a short hold</span>
+    </p>
+  );
+}
 
 function ActivityDetailModal({ tx, onClose }: { tx: PublicTx | null; onClose: () => void }) {
   const [copied, setCopied] = useState(false);

@@ -5,8 +5,9 @@ import { PinGate } from "@/components/pin-gate";
 import { Button } from "@/components/ui/button";
 import { PasswordField } from "@/components/password-field";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
+import { signOut as clientSignOut } from "@/lib/auth/client";
 import { errMessage } from "@/lib/nexa/errors";
-import { changePasswordFn, getMe, heartbeat } from "@/lib/nexa/fns";
+import { changePasswordFn, getMe, heartbeat, recordPageVisit } from "@/lib/nexa/fns";
 import type { MeResponse, PublicProfile } from "@/lib/nexa/types";
 
 export function SessionGate({
@@ -56,6 +57,12 @@ export function SessionGate({
 
   // After sign-in / page load: no PIN gate. Password session is enough to use the app.
   // PIN appears only when idle/instant lock rules fire (or user locks). Balance still needs PIN to reveal.
+
+  useEffect(() => {
+    if (!me || me.needsProfile) return;
+    void recordPageVisit({ data: { path: window.location.pathname } }).catch(() => {});
+  }, [me]);
+
   useEffect(() => {
     if (!me || me.needsProfile) return;
     setLocked((prev) => (prev === null ? false : prev));
@@ -122,6 +129,26 @@ export function SessionGate({
   if (!me) return <Navigate to="/" />;
   if (me.needsProfile) return <Navigate to="/signup" />;
   if (admin && me.profile.role !== "admin") return <Navigate to="/dashboard" />;
+  if (me.profile.adminLocked) {
+    return (
+      <AppShell profile={me.profile}>
+        <div className="mx-auto max-w-md space-y-4 p-6 text-center">
+          <h1 className="font-display text-2xl font-semibold">Account locked</h1>
+          <p className="text-sm text-muted">
+            This account was locked by platform support
+            {me.profile.adminLockReason ? `: ${me.profile.adminLockReason}` : "."} Contact support to
+            recover access. Sessions were signed out when the account was locked.
+          </p>
+          <Button
+            className="w-full"
+            onClick={() => void clientSignOut().then(() => (window.location.href = "/"))}
+          >
+            Sign out
+          </Button>
+        </div>
+      </AppShell>
+    );
+  }
   if (locked === null) return <ShellSkeleton />;
 
   const profile = me.profile;

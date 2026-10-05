@@ -31,7 +31,14 @@ export type MeResponse =
     };
 
 export type BalanceResponse =
-  | { ok: true; locked: true }
+  | {
+      ok: true;
+      locked: true;
+      withdrawHoldUntil: string | null;
+      withdrawHoldMessage: string | null;
+      dailyWithdrawCapTambala: number;
+      dailyWithdrawRemainingTambala: number;
+    }
   | {
       ok: true;
       locked: false;

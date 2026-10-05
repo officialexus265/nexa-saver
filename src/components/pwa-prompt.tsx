@@ -6,15 +6,40 @@ import { Button } from "@/components/ui/button";
 type BeforeInstall = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
 
 const DISMISS_KEY = "nexa.pwa.dismissed";
+const INSTALLED_KEY = "nexa.pwa.installed";
 
-function isStandalone() {
+function isStandalone(): boolean {
   if (typeof window === "undefined") return false;
-  return window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  const nav = navigator as Navigator & { standalone?: boolean; getInstalledRelatedApps?: () => Promise<unknown[]> };
+  if (nav.standalone === true) return true;
+  const modes = ["standalone", "fullscreen", "minimal-ui", "window-controls-overlay"] as const;
+  for (const mode of modes) {
+    try {
+      if (window.matchMedia(`(display-mode: ${mode})`).matches) return true;
+    } catch {
+      /* ignore */
+    }
+  }
+  // Some desktop PWAs launch without standalone; remember after successful install.
+  try {
+    if (localStorage.getItem(INSTALLED_KEY) === "1") return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
 }
 
 function isIos() {
   if (typeof navigator === "undefined") return false;
   return /iphone|ipad|ipod/i.test(navigator.userAgent);
+}
+
+function wasDismissed(): boolean {
+  try {
+    return localStorage.getItem(DISMISS_KEY) === "1" || sessionStorage.getItem(DISMISS_KEY) === "1";
+  } catch {
+    return false;
+  }
 }
 
 export function PwaPrompt() {
@@ -23,31 +48,60 @@ export function PwaPrompt() {
   const ios = isIos();
 
   useEffect(() => {
-    if (isStandalone()) return;
-    try {
-      if (sessionStorage.getItem(DISMISS_KEY) === "1") return;
-    } catch {
-      /* ignore */
-    }
+    if (isStandalone() || wasDismissed()) return;
+
     const onPrompt = (e: Event) => {
       e.preventDefault();
+      // Browser only fires this when the app is NOT installed.
       setDeferred(e as BeforeInstall);
       setOpen(true);
     };
     window.addEventListener("beforeinstallprompt", onPrompt);
-    const t = window.setTimeout(() => setOpen(true), 400);
+
+    // iOS never fires beforeinstallprompt — show manual instructions once, not on every visit forever.
+    let iosTimer: number | undefined;
+    if (ios) {
+      iosTimer = window.setTimeout(() => {
+        if (!isStandalone() && !wasDismissed()) setOpen(true);
+      }, 800);
+    }
+
+    // If related apps API is available, hide when already installed.
+    const nav = navigator as Navigator & {
+      getInstalledRelatedApps?: () => Promise<Array<{ id?: string }>>;
+    };
+    if (typeof nav.getInstalledRelatedApps === "function") {
+      void nav.getInstalledRelatedApps().then((apps) => {
+        if (apps && apps.length > 0) {
+          try {
+            localStorage.setItem(INSTALLED_KEY, "1");
+          } catch {
+            /* ignore */
+          }
+          setOpen(false);
+        }
+      });
+    }
+
     return () => {
       window.removeEventListener("beforeinstallprompt", onPrompt);
-      window.clearTimeout(t);
+      if (iosTimer) window.clearTimeout(iosTimer);
     };
-  }, []);
+  }, [ios]);
 
   if (!open || isStandalone()) return null;
 
   async function install() {
     if (deferred) {
       await deferred.prompt();
-      await deferred.userChoice;
+      const choice = await deferred.userChoice;
+      if (choice.outcome === "accepted") {
+        try {
+          localStorage.setItem(INSTALLED_KEY, "1");
+        } catch {
+          /* ignore */
+        }
+      }
     }
     dismiss();
   }
@@ -55,6 +109,7 @@ export function PwaPrompt() {
   function dismiss() {
     setOpen(false);
     try {
+      localStorage.setItem(DISMISS_KEY, "1");
       sessionStorage.setItem(DISMISS_KEY, "1");
     } catch {
       /* ignore */
@@ -80,7 +135,7 @@ export function PwaPrompt() {
         ) : null}
         <div className="mt-4 flex gap-2">
           {deferred ? (
-            <Button className="flex-1" onClick={install}>
+            <Button className="flex-1" onClick={() => void install()}>
               <Download className="size-4" /> Install
             </Button>
           ) : null}

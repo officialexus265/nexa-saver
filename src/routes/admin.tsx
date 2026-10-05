@@ -21,6 +21,10 @@ import {
   adminDeleteHelpLine,
   adminUpsertHelpLine,
   adminListHelpLines,
+  adminAnalytics,
+  adminExportSurveyCsv,
+  adminDeleteUser,
+  adminLockUser,
 } from "@/lib/nexa/fns";
 import { formatKwacha, tambalaToKwacha } from "@/lib/nexa/money";
 import type { AdminOverview, AdminUserRow, PublicTx } from "@/lib/nexa/types";
@@ -101,15 +105,20 @@ function Console() {
   } | null>(null);
   const [surveyBusy, setSurveyBusy] = useState(false);
   const [surveyMsg, setSurveyMsg] = useState<string | null>(null);
+  const [userQuery, setUserQuery] = useState("");
+  const [analytics, setAnalytics] = useState<Awaited<ReturnType<typeof adminAnalytics>> | null>(null);
+  const [userActionMsg, setUserActionMsg] = useState<string | null>(null);
+
 
   useEffect(() => {
-    Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone(), adminSecuritySurveyStatus()])
-      .then(([o, u, t, s, sv]) => {
+    Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone(), adminSecuritySurveyStatus(), adminAnalytics()])
+      .then(([o, u, t, s, sv, an]) => {
         setOverview(o);
         setUsers(u);
         setTxs(t);
         if (s.phone) setSupportPhone(s.phone);
         setSurveyStatus(sv);
+        setAnalytics(an);
       })
       .catch((err) => setError(errMessage(err)));
   }, []);
@@ -246,6 +255,30 @@ function Console() {
           <Button
             type="button"
             variant="secondary"
+            disabled={surveyBusy || !surveyStatus?.campaignId}
+            onClick={() => {
+              setSurveyBusy(true);
+              setSurveyMsg(null);
+              void adminExportSurveyCsv({ data: { campaignId: surveyStatus?.campaignId ?? undefined } })
+                .then((res) => {
+                  const blob = new Blob([res.csv], { type: "text/csv;charset=utf-8" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = res.filename;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                  setSurveyMsg(`Downloaded ${res.rowCount} survey response(s).`);
+                })
+                .catch((err) => setSurveyMsg(errMessage(err)))
+                .finally(() => setSurveyBusy(false));
+            }}
+          >
+            Download survey CSV
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
             disabled={surveyBusy || !surveyStatus?.active}
             onClick={() => {
               setSurveyBusy(true);
@@ -275,8 +308,81 @@ function Console() {
         )}
       </Card>
 
+      <Card className="space-y-3 p-4">
+        <h2 className="font-display text-lg font-semibold">Usage analytics</h2>
+        {analytics ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <SurveyStat label="Visits today" value={String(analytics.todayVisits)} />
+              <SurveyStat label="Active users today" value={String(analytics.todayUsers)} />
+              <SurveyStat
+                label="Visits (30d)"
+                value={String(analytics.daily.reduce((s, d) => s + d.visits, 0))}
+              />
+              <SurveyStat
+                label="Top activity"
+                value={analytics.topActivity[0]?.label ?? "—"}
+              />
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Most visited (30 days)</p>
+              <ul className="space-y-1 text-sm">
+                {analytics.topPaths.map((p) => (
+                  <li key={p.path} className="flex justify-between gap-2 border-b border-border/60 py-1">
+                    <span className="truncate text-muted">{p.path}</span>
+                    <span className="tabular-nums font-medium">{p.hits}</span>
+                  </li>
+                ))}
+                {!analytics.topPaths.length ? (
+                  <li className="text-muted">No page visits recorded yet.</li>
+                ) : null}
+              </ul>
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Money activity (30 days)</p>
+              <ul className="space-y-1 text-sm">
+                {analytics.topActivity.map((a) => (
+                  <li key={a.label} className="flex justify-between gap-2 border-b border-border/60 py-1">
+                    <span className="text-muted">{a.label}</span>
+                    <span className="tabular-nums font-medium">{a.count}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Monthly visits</p>
+              <ul className="space-y-1 text-sm">
+                {analytics.monthly.map((m) => (
+                  <li key={m.month} className="flex justify-between gap-2 border-b border-border/60 py-1">
+                    <span className="text-muted">{m.month}</span>
+                    <span className="tabular-nums">
+                      {m.visits} visits · {m.users} users
+                    </span>
+                  </li>
+                ))}
+                {!analytics.monthly.length ? <li className="text-muted">No data yet.</li> : null}
+              </ul>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-muted">Loading analytics…</p>
+        )}
+      </Card>
+
       <section>
-        <h2 className="mb-3 font-display text-lg font-semibold">Accounts</h2>
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <h2 className="font-display text-lg font-semibold">Accounts</h2>
+          <div className="w-full sm:max-w-xs space-y-1.5">
+            <Label htmlFor="user-search">Search accounts</Label>
+            <Input
+              id="user-search"
+              value={userQuery}
+              onChange={(e) => setUserQuery(e.target.value)}
+              placeholder="Username, email, phone…"
+            />
+          </div>
+        </div>
+        {userActionMsg ? <p className="mb-2 text-sm text-muted">{userActionMsg}</p> : null}
         <div className="overflow-x-auto rounded-2xl border border-border">
           <table className="w-full min-w-[36rem] text-left text-sm">
             <thead className="bg-surface-2 text-muted">
@@ -286,10 +392,21 @@ function Console() {
                 <th className="px-3 py-2 font-medium">Balance</th>
                 <th className="px-3 py-2 font-medium">In</th>
                 <th className="px-3 py-2 font-medium">Out</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
+              {(users.filter((u) => {
+                const q = userQuery.trim().toLowerCase();
+                if (!q) return true;
+                return (
+                  u.username.toLowerCase().includes(q) ||
+                  u.email.toLowerCase().includes(q) ||
+                  u.phone.includes(q) ||
+                  u.firstName.toLowerCase().includes(q)
+                );
+              })).map((u) => (
                 <tr key={u.userId} className="border-t border-border">
                   <td className="px-3 py-2">
                     {u.username}
@@ -302,6 +419,75 @@ function Console() {
                   </td>
                   <td className="px-3 py-2 tabular-nums">
                     {formatKwacha(u.lifetimeWithdrawnTambala, { compact: true })}
+                  </td>
+                
+                  <td className="px-3 py-2 text-xs">
+                    {u.adminLocked ? (
+                      <span className="text-danger">Locked</span>
+                    ) : u.role === "admin" ? (
+                      <span className="text-muted">Admin</span>
+                    ) : (
+                      <span className="text-primary">Active</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    {u.role === "admin" ? (
+                      <span className="text-xs text-muted">—</span>
+                    ) : (
+                      <div className="flex flex-col gap-1">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="h-8 text-xs"
+                          onClick={() => {
+                            const reason =
+                              window.prompt(
+                                u.adminLocked
+                                  ? "Reason for unlocking (audit log):"
+                                  : "Reason for locking this account (reported / compromised):",
+                              ) || "";
+                            if (reason.trim().length < 3) return;
+                            void adminLockUser({
+                              data: { userId: u.userId, reason: reason.trim(), locked: !u.adminLocked },
+                            })
+                              .then(() => {
+                                setUserActionMsg(
+                                  u.adminLocked ? `Unlocked ${u.username}` : `Locked ${u.username}`,
+                                );
+                                return adminUsers();
+                              })
+                              .then(setUsers)
+                              .catch((err) => setUserActionMsg(errMessage(err)));
+                          }}
+                        >
+                          {u.adminLocked ? "Unlock" : "Lock"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="h-8 text-xs text-danger"
+                          onClick={() => {
+                            const reason =
+                              window.prompt(
+                                `Delete ${u.username}? This soft-deletes the account. Type a reason:`,
+                              ) || "";
+                            if (reason.trim().length < 3) return;
+                            if (!window.confirm(`Permanently soft-delete ${u.username}?`)) return;
+                            void adminDeleteUser({
+                              data: { userId: u.userId, reason: reason.trim() },
+                            })
+                              .then(() => {
+                                setUserActionMsg(`Deleted ${u.username}`);
+                                return adminUsers();
+                              })
+                              .then(setUsers)
+                              .catch((err) => setUserActionMsg(errMessage(err)));
+                          }}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

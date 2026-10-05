@@ -110,6 +110,8 @@ type ProfileRow = {
   anchor_bank_name?: string | null;
   anchor_bank_account_number?: string | null;
   anchor_bank_account_name?: string | null;
+  admin_locked_at?: unknown;
+  admin_lock_reason?: string | null;
 };
 
 function toPublic(row: ProfileRow): PublicProfile {
@@ -128,6 +130,8 @@ function toPublic(row: ProfileRow): PublicProfile {
     bankVerified: Boolean(row.bank_verified_at),
     bankHoldUntil: iso(row.bank_hold_until),
     hasBankDetails: Boolean(row.bank_uuid && row.bank_account_number),
+    adminLocked: Boolean(row.admin_locked_at),
+    adminLockReason: row.admin_lock_reason ?? null,
     lockMode: row.lock_mode === "instant" ? "instant" : "idle",
     lockIdleMinutes: Math.min(60, Math.max(1, asInt(row.lock_idle_minutes) || 5)),
     username: row.username,
@@ -519,27 +523,34 @@ export const getBalance = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<BalanceResponse> => {
     const profile = await loadProfile(context.userId);
     if (!profile) throw new Error("Complete your profile first");
-    if (!pinWindowOpen(profile.pin_verified_at)) return { ok: true, locked: true };
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
+    const { withdrawRoomTambala, holdMessage } = await import("./withdraw-limits.server");
+    const room = await withdrawRoomTambala(sql, context.userId, profile);
+    const holdUntil = room.holdUntilMs > 0 ? new Date(room.holdUntilMs).toISOString() : null;
+    const holdMsg = room.holdUntilMs > 0 ? holdMessage(room.holdUntilMs) : null;
+    const roomMeta = {
+      withdrawHoldUntil: holdUntil,
+      withdrawHoldMessage: holdMsg,
+      dailyWithdrawCapTambala: room.capTambala,
+      dailyWithdrawRemainingTambala: room.remainingTambala,
+    };
+    if (!pinWindowOpen(profile.pin_verified_at)) {
+      return { ok: true, locked: true, ...roomMeta };
+    }
     const wallets = await sql<{
       balance_tambala: number;
       lifetime_deposited_tambala: number;
       lifetime_withdrawn_tambala: number;
     }>`select balance_tambala, lifetime_deposited_tambala, lifetime_withdrawn_tambala from wallets where user_id = ${context.userId}`;
     const w = wallets[0];
-    const { withdrawRoomTambala, holdMessage } = await import("./withdraw-limits.server");
-    const room = await withdrawRoomTambala(sql, context.userId, profile);
     return {
       ok: true,
       locked: false,
       balanceTambala: asInt(w?.balance_tambala),
       lifetimeDepositedTambala: asInt(w?.lifetime_deposited_tambala),
       lifetimeWithdrawnTambala: asInt(w?.lifetime_withdrawn_tambala),
-      withdrawHoldUntil: room.holdUntilMs > 0 ? new Date(room.holdUntilMs).toISOString() : null,
-      withdrawHoldMessage: room.holdUntilMs > 0 ? holdMessage(room.holdUntilMs) : null,
-      dailyWithdrawCapTambala: room.capTambala,
-      dailyWithdrawRemainingTambala: room.remainingTambala,
+      ...roomMeta,
     };
   });
 
@@ -774,6 +785,9 @@ export const startWithdraw = createServerFn({ method: "POST" })
     try {
       profile = await loadProfile(context.userId);
       if (!profile) throw new Error("Complete your profile first");
+      if (profile.admin_locked_at) {
+        throw new Error("This account is locked by support. Withdrawals are disabled until it is unlocked.");
+      }
 
       const pinOk = await verifySecret(profile.pin_hash, data.pin);
       await requireVerifiedEmail(context.userId);
@@ -938,7 +952,10 @@ export const startWithdraw = createServerFn({ method: "POST" })
         });
       });
       await releaseKey();
-      throw new Error("Withdrawal could not be sent. Your balance was not taken.");
+      const reason = String((err as Error).message ?? "provider error").slice(0, 200);
+      throw new Error(
+        "Withdrawal could not be sent. Your balance was not taken. Details: " + reason,
+      );
     }
 
     const result = {
@@ -2608,3 +2625,264 @@ export const saveBankPayoutDetails = createServerFn({ method: "POST" })
     };
   });
 
+
+
+/* ── Admin ops: lock, delete, survey export, analytics ──────────────────── */
+
+export const adminLockUser = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      userId: z.string().min(1),
+      reason: z.string().min(3).max(300),
+      locked: z.boolean(),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    if (data.userId === context.userId) throw new Error("You cannot lock your own admin account");
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    if (data.locked) {
+      await sql`
+        update profiles
+        set admin_locked_at = now(),
+            admin_lock_reason = ${data.reason},
+            updated_at = now()
+        where user_id = ${data.userId} and role = ${"user"}
+      `;
+      // Kill sessions so stolen credentials stop working immediately
+      await sql`delete from "session" where "userId" = ${data.userId}`;
+    } else {
+      await sql`
+        update profiles
+        set admin_locked_at = null,
+            admin_lock_reason = null,
+            updated_at = now()
+        where user_id = ${data.userId}
+      `;
+    }
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      userId: data.userId,
+      action: data.locked ? "admin_lock_user" : "admin_unlock_user",
+      detail: data.reason,
+    });
+    return { ok: true as const, locked: data.locked };
+  });
+
+export const adminDeleteUser = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      userId: z.string().min(1),
+      reason: z.string().min(3).max(300),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    if (data.userId === context.userId) throw new Error("You cannot delete your own admin account");
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{ role: string }>`
+      select role from profiles where user_id = ${data.userId} limit 1
+    `;
+    if (!rows.length) throw new Error("User not found");
+    if (rows[0].role === "admin") throw new Error("Cannot delete an admin account this way");
+
+    await withTransaction(async (tx) => {
+      await tx`
+        update profiles
+        set deleted_at = now(),
+            admin_locked_at = now(),
+            admin_lock_reason = ${data.reason},
+            email = ${`deleted-${data.userId.slice(0, 8)}@deleted.local`},
+            phone = ${`deleted-${data.userId.slice(0, 10)}`},
+            username = ${`deleted_${data.userId.slice(0, 8)}`},
+            pin_hash = ${"deleted"},
+            security_answer_hash = ${"deleted"},
+            updated_at = now()
+        where user_id = ${data.userId}
+      `;
+      await tx`delete from "session" where "userId" = ${data.userId}`;
+      await tx`
+        update "user"
+        set email = ${`${data.userId.slice(0, 12)}@deleted.local`},
+            name = ${"Deleted User"},
+            "updatedAt" = now()
+        where id = ${data.userId}
+      `;
+    });
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      userId: data.userId,
+      action: "admin_delete_user",
+      detail: data.reason,
+    });
+    return { ok: true as const };
+  });
+
+export const adminExportSurveyCsv = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator(z.object({ campaignId: z.string().min(4).optional() }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const flags = await readSurveyFlags(sql);
+    const campaignId = data.campaignId || flags.campaignId;
+    if (!campaignId) throw new Error("No survey campaign to export");
+
+    const rows = await sql<{
+      user_id: string;
+      username: string;
+      email: string;
+      phone: string;
+      email_confirmed: boolean;
+      phone_confirmed: boolean;
+      bank_confirmed: boolean | null;
+      reverted_email: boolean;
+      reverted_phone: boolean;
+      reverted_bank: boolean;
+      completed_at: unknown;
+    }>`
+      select c.user_id, p.username, p.email, p.phone,
+             c.email_confirmed, c.phone_confirmed, c.bank_confirmed,
+             c.reverted_email, c.reverted_phone, c.reverted_bank, c.completed_at
+      from security_survey_completions c
+      join profiles p on p.user_id = c.user_id
+      where c.campaign_id = ${campaignId}
+      order by c.completed_at asc
+    `;
+
+    const header = [
+      "user_id",
+      "username",
+      "email",
+      "phone",
+      "email_confirmed",
+      "phone_confirmed",
+      "bank_confirmed",
+      "reverted_email",
+      "reverted_phone",
+      "reverted_bank",
+      "completed_at",
+      "campaign_id",
+    ];
+    const lines = [header.join(",")];
+    for (const r of rows) {
+      const cells = [
+        r.user_id,
+        r.username,
+        r.email,
+        r.phone,
+        String(r.email_confirmed),
+        String(r.phone_confirmed),
+        String(r.bank_confirmed ?? ""),
+        String(r.reverted_email),
+        String(r.reverted_phone),
+        String(r.reverted_bank),
+        String(r.completed_at ?? ""),
+        campaignId,
+      ].map((c) => `"${String(c).replace(/"/g, '""')}"`);
+      lines.push(cells.join(","));
+    }
+    return {
+      ok: true as const,
+      campaignId,
+      filename: `nexa-survey-${campaignId}.csv`,
+      csv: lines.join("\n"),
+      rowCount: rows.length,
+    };
+  });
+
+export const recordPageVisit = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ path: z.string().min(1).max(120) }))
+  .handler(async ({ context, data }) => {
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const path = data.path.slice(0, 120);
+    await sql`
+      insert into page_visits (user_id, path, visited_on, hits, last_seen_at)
+      values (${context.userId}, ${path}, (timezone('Africa/Blantyre', now()))::date, 1, now())
+      on conflict (user_id, path, visited_on)
+      do update set hits = page_visits.hits + 1, last_seen_at = now()
+    `;
+    return { ok: true as const };
+  });
+
+export const adminAnalytics = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+
+    const daily = await sql<{ day: string; visits: number; users: number }>`
+      select visited_on::text as day,
+             sum(hits)::int as visits,
+             count(distinct user_id)::int as users
+      from page_visits
+      where visited_on >= (timezone('Africa/Blantyre', now()))::date - 30
+      group by visited_on
+      order by visited_on asc
+    `;
+
+    const monthly = await sql<{ month: string; visits: number; users: number }>`
+      select to_char(visited_on, 'YYYY-MM') as month,
+             sum(hits)::int as visits,
+             count(distinct user_id)::int as users
+      from page_visits
+      where visited_on >= (timezone('Africa/Blantyre', now()))::date - 365
+      group by 1
+      order by 1 asc
+    `;
+
+    const topPaths = await sql<{ path: string; hits: number }>`
+      select path, sum(hits)::int as hits
+      from page_visits
+      where visited_on >= (timezone('Africa/Blantyre', now()))::date - 30
+      group by path
+      order by hits desc
+      limit 12
+    `;
+
+    const topTx = await sql<{ kind: string; status: string; n: number }>`
+      select kind, status, count(*)::int as n
+      from transactions
+      where created_at >= now() - interval '30 days'
+      group by kind, status
+      order by n desc
+      limit 12
+    `;
+
+    const today = await sql<{ visits: number; users: number }>`
+      select coalesce(sum(hits),0)::int as visits,
+             count(distinct user_id)::int as users
+      from page_visits
+      where visited_on = (timezone('Africa/Blantyre', now()))::date
+    `;
+
+    return {
+      todayVisits: Number(today[0]?.visits ?? 0),
+      todayUsers: Number(today[0]?.users ?? 0),
+      daily: daily.map((d) => ({
+        day: d.day,
+        visits: Number(d.visits),
+        users: Number(d.users),
+      })),
+      monthly: monthly.map((d) => ({
+        month: d.month,
+        visits: Number(d.visits),
+        users: Number(d.users),
+      })),
+      topPaths: topPaths.map((p) => ({ path: p.path, hits: Number(p.hits) })),
+      topActivity: topTx.map((r) => ({
+        label: `${r.kind}/${r.status}`,
+        count: Number(r.n),
+      })),
+    };
+  });
