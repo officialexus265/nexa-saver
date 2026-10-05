@@ -27,6 +27,7 @@ import {
 } from "@/lib/nexa/fns";
 import { LOCK_MODE_OPTIONS, type LockMode } from "@/lib/nexa/constants";
 import { formatPhoneDisplay } from "@/lib/nexa/phone";
+import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/profile")({ component: ProfilePage });
@@ -44,6 +45,9 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
   const [bankForm, setBankForm] = useState({ bankUuid: "", bankName: "", accountNumber: "", accountName: "", pin: "" });
   const [bankMsg, setBankMsg] = useState<string | null>(null);
   const [bankBusy, setBankBusy] = useState(false);
+  /** null = all collapsed; only one section open at a time */
+  const [openSection, setOpenSection] = useState<string | null>(null);
+
 
   useEffect(() => {
     void listPaychanguBanks()
@@ -124,8 +128,13 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
       {message ? <p className="text-sm text-primary">{message}</p> : null}
       {error ? <p className="text-sm text-danger">{error}</p> : null}
 
-      <Card className="space-y-3">
-        <h2 className="font-display text-lg font-semibold">Sign-in identifier</h2>
+      <ProfileSection
+        id="signin"
+        title="Sign-in identifier"
+        summary={LOGIN_PREF_LABEL[pref]}
+        openId={openSection}
+        onToggle={setOpenSection}
+      >
         <p className="text-sm text-muted">Choose what you type on the login screen next time.</p>
         <div className="grid grid-cols-3 gap-1 rounded-md bg-surface-2 p-1">
           {(Object.keys(LOGIN_PREF_LABEL) as LoginPref[]).map((key) => (
@@ -139,22 +148,32 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
             </button>
           ))}
         </div>
-      </Card>
+      </ProfileSection>
 
-      <Card>
+      <ProfileSection
+        id="password"
+        title="Change password"
+        summary="Update your sign-in password"
+        openId={openSection}
+        onToggle={setOpenSection}
+      >
         <form onSubmit={savePassword} className="space-y-3">
-          <h2 className="font-display text-lg font-semibold">Change password</h2>
           <PasswordField id="p-cur" label="Current password" value={pw.current} onChange={(v) => setPw((p) => ({ ...p, current: v }))} />
           <PasswordField id="p-new" label="New password" value={pw.next} onChange={(v) => setPw((p) => ({ ...p, next: v }))} autoComplete="new-password" />
           <Button type="submit" disabled={pw.next.length < 8}>
             Update password
           </Button>
         </form>
-      </Card>
+      </ProfileSection>
 
-      <Card>
+      <ProfileSection
+        id="pin"
+        title="Change withdraw PIN"
+        summary="4-digit vault PIN"
+        openId={openSection}
+        onToggle={setOpenSection}
+      >
         <form onSubmit={savePin} className="space-y-4">
-          <h2 className="font-display text-lg font-semibold">Change withdraw PIN</h2>
           <div>
             <Label>Current PIN</Label>
             <div className="mt-3">
@@ -180,11 +199,16 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
             Update PIN
           </Button>
         </form>
-      </Card>
+      </ProfileSection>
 
-      <Card>
+      <ProfileSection
+        id="phone"
+        title="Registered withdrawal number"
+        summary={formatPhoneDisplay(profile.phone)}
+        openId={openSection}
+        onToggle={setOpenSection}
+      >
         <form onSubmit={savePhone} className="space-y-3">
-          <h2 className="font-display text-lg font-semibold">Registered withdrawal number</h2>
           <p className="text-sm text-muted">
             Money is only paid to this number. Changing it requires your password and places a 72-hour hold on
             withdrawals. Your balance stays safe.
@@ -210,10 +234,15 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
             Update number
           </Button>
         </form>
-      </Card>
+      </ProfileSection>
 
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Bank payout details</h2>
+      <ProfileSection
+        id="bank"
+        title="Bank payout details"
+        summary={profile.hasBankDetails ? `${profile.bankName ?? "Bank"} ${profile.bankAccountNumberMasked ?? ""}` : "Optional · withdrawals only"}
+        openId={openSection}
+        onToggle={setOpenSection}
+      >
         <p className="text-sm text-muted">
           Optional. Used only for withdrawals to bank — not for deposits. After you save, bank withdrawals are
           held for 72 hours. The first successful bank payout marks the account verified.
@@ -300,11 +329,15 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
             {bankBusy ? "Saving…" : "Save bank details"}
           </Button>
         </form>
-      </Card>
+      </ProfileSection>
 
-
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Email</h2>
+      <ProfileSection
+        id="email"
+        title="Email"
+        summary={emailVerified ? `${profile.email} · Verified` : `${profile.email} · Not verified`}
+        openId={openSection}
+        onToggle={setOpenSection}
+      >
         <p className="text-sm text-muted">
           {profile.email}
           {emailVerified ? (
@@ -341,11 +374,19 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
             </Button>
           </>
         ) : null}
-      </Card>
+      </ProfileSection>
 
-      
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Vault lock</h2>
+      <ProfileSection
+        id="lock"
+        title="Vault lock"
+        summary={
+          profile.lockMode === "instant"
+            ? "Locks when you leave the app"
+            : `Idle · ${profile.lockIdleMinutes ?? 5} min`
+        }
+        openId={openSection}
+        onToggle={setOpenSection}
+      >
         <p className="text-sm text-muted">
           Choose when the PIN screen appears again after you unlock. Instant is safest on a shared phone.
         </p>
@@ -399,10 +440,15 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
         >
           Save lock setting
         </Button>
-      </Card>
+      </ProfileSection>
 
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Sessions</h2>
+      <ProfileSection
+        id="sessions"
+        title="Sessions"
+        summary="Devices signed in to this account"
+        openId={openSection}
+        onToggle={setOpenSection}
+      >
         <p className="text-sm text-muted">Active sign-ins on this account. Sign out any device you do not recognise.</p>
         {sessions === null ? (
           <p className="text-sm text-muted">Loading sessions…</p>
@@ -482,14 +528,77 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
         >
           Sign out all devices
         </Button>
-      </Card>
+      </ProfileSection>
 
-      {profile.role !== "admin" ? <DeleteAccount /> : null}
+      {profile.role !== "admin" ? (
+        <ProfileSection
+          id="delete"
+          title="Delete account"
+          summary="Permanent · three confirmations"
+          openId={openSection}
+          onToggle={setOpenSection}
+          danger
+        >
+          <DeleteAccount />
+        </ProfileSection>
+      ) : null}
     </div>
   );
 }
 
+function ProfileSection({
+  id,
+  title,
+  summary,
+  openId,
+  onToggle,
+  children,
+  danger,
+}: {
+  id: string;
+  title: string;
+  summary?: string;
+  openId: string | null;
+  onToggle: (id: string | null) => void;
+  children: React.ReactNode;
+  danger?: boolean;
+}) {
+  const open = openId === id;
+  return (
+    <Card className="overflow-hidden p-0">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left transition-colors hover:bg-surface-2/60"
+        onClick={() => onToggle(open ? null : id)}
+        aria-expanded={open}
+      >
+        <div className="min-w-0">
+          <h2
+            className={cn(
+              "font-display text-lg font-semibold",
+              danger ? "text-danger" : "text-fg",
+            )}
+          >
+            {title}
+          </h2>
+          {summary ? <p className="mt-0.5 truncate text-xs text-muted">{summary}</p> : null}
+        </div>
+        <ChevronDown
+          className={cn(
+            "size-5 shrink-0 text-muted transition-transform duration-200",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open ? (
+        <div className="space-y-3 border-t border-border px-4 pb-4 pt-3">{children}</div>
+      ) : null}
+    </Card>
+  );
+}
+
 function DeleteAccount() {
+
   const navigate = useNavigate();
   const [layer, setLayer] = useState(0);
   const [wait, setWait] = useState(false);
@@ -530,7 +639,7 @@ function DeleteAccount() {
   ][Math.max(0, layer - 1)];
 
   return (
-    <Card className="border-danger/40">
+    <div className="space-y-3">
       <h2 className="font-display text-lg font-semibold text-danger">Delete account</h2>
       {layer === 0 ? (
         <>
@@ -569,6 +678,6 @@ function DeleteAccount() {
           </div>
         </div>
       )}
-    </Card>
+    </div>
   );
 }
