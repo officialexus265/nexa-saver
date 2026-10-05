@@ -90,8 +90,13 @@ export type AdminOverview = {
   payoutReserveTambala: number;
   pendingCount: number;
   demoPayments: boolean;
+  /** Profit already paid out via treasury withdrawals */
+  treasuryPaidOutTambala: number;
+  /** Profit still available for admin treasury withdraw (book profit − paid out) */
+  treasuryAvailableTambala: number;
   series: Array<{ day: string; deposits: number; withdrawals: number; profit: number }>;
 };
+
 
 export type AdminUserRow = PublicProfile & {
   balanceTambala: number;

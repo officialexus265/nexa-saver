@@ -24,6 +24,7 @@ import {
   adminAnalytics,
   adminGetPayoutMethods,
   adminSetPayoutMethods,
+  adminTreasuryWithdraw,
   adminExportSurveyCsv,
   adminDeleteUser,
   adminLockUser,
@@ -181,6 +182,32 @@ function Console() {
         <Stat label="Payout reserve" value={formatKwacha(overview.payoutReserveTambala, { compact: true })} />
         <Stat label="Savers" value={String(overview.userCount)} />
       </div>
+
+      <Card className="space-y-3 p-4">
+        <h2 className="font-display text-lg font-semibold">Treasury (platform profit)</h2>
+        <p className="text-sm text-muted">
+          Book profit is fee income from deposits. Saver balances are liabilities — never withdrawn here.
+          Treasury cash-out only uses available profit and pays ~1.8% on the mobile-money rail.
+        </p>
+        {overview ? (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <SurveyStat label="System profit (book)" value={formatKwacha(overview.platformProfitTambala)} />
+            <SurveyStat label="Saver balances (liability)" value={formatKwacha(overview.userBalancesTambala)} />
+            <SurveyStat label="Withdrawable profit" value={formatKwacha(overview.treasuryAvailableTambala)} />
+          </div>
+        ) : null}
+        {overview && overview.treasuryPaidOutTambala > 0 ? (
+          <p className="text-xs text-muted">
+            Already paid out from profit: {formatKwacha(overview.treasuryPaidOutTambala)}
+          </p>
+        ) : null}
+        <TreasuryWithdrawForm
+          availableTambala={overview?.treasuryAvailableTambala ?? 0}
+          onDone={() => {
+            void adminOverview().then(setOverview);
+          }}
+        />
+      </Card>
 
       <Card className="space-y-3 p-4">
         <h2 className="font-display text-lg font-semibold">Large-withdrawal support number</h2>
@@ -592,7 +619,92 @@ function Console() {
   );
 }
 
+function TreasuryWithdrawForm({
+  availableTambala,
+  onDone,
+}: {
+  availableTambala: number;
+  onDone: () => void;
+}) {
+  const [amount, setAmount] = useState("");
+  const [pin, setPin] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const kwacha = Number(amount);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      const res = await adminTreasuryWithdraw({
+        data: {
+          amountKwacha: kwacha,
+          pin,
+          idempotencyKey: crypto.randomUUID(),
+        },
+      });
+      setMsg(
+        `Sent. Gross ${formatKwacha(res.grossTambala)} · rail fee ~${formatKwacha(res.feeTambala)} · net to your registered number ${formatKwacha(res.netTambala)}. Ref ${res.reference}`,
+      );
+      setAmount("");
+      setPin("");
+      onDone();
+    } catch (e) {
+      setErr(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => void submit(e)} className="space-y-3 border-t border-border pt-3">
+      <p className="text-sm text-muted">
+        Withdraw profit to the admin registered mobile number. Available: {formatKwacha(availableTambala)}.
+      </p>
+      <div className="space-y-1.5">
+        <Label htmlFor="try-amt">Amount (kwacha)</Label>
+        <Input
+          id="try-amt"
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          className="w-full"
+        />
+        {kwacha > 0 ? (
+          <p className="text-xs text-muted">
+            After ~1.8% rail fee you receive about {Math.max(0, Math.round(kwacha * 0.982))} kwacha
+          </p>
+        ) : null}
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="try-pin">Admin withdraw PIN</Label>
+        <Input
+          id="try-pin"
+          inputMode="numeric"
+          maxLength={4}
+          value={pin}
+          onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+          placeholder="Default was 0000 if never changed"
+        />
+      </div>
+      {err ? <p className="text-sm text-danger">{err}</p> : null}
+      {msg ? <p className="text-sm text-primary">{msg}</p> : null}
+      <Button
+        type="submit"
+        className="h-12 w-full sm:w-auto"
+        disabled={busy || pin.length !== 4 || !kwacha || kwacha <= 0}
+      >
+        {busy ? "Sending…" : "Withdraw profit"}
+      </Button>
+    </form>
+  );
+}
+
 function SupportDesk() {
+
   const [ref, setRef] = useState("");
   const [reason, setReason] = useState("");
   const [note, setNote] = useState("");

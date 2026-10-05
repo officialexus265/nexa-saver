@@ -22,6 +22,8 @@ import {
   listActiveSessions,
   revokeSessionById,
   saveBankPayoutDetails,
+  adminUpdateContact,
+  changeSecurityQuestionFn,
   listPaychanguBanks,
   type PublicSession,
 } from "@/lib/nexa/fns";
@@ -127,6 +129,28 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
       </div>
       {message ? <p className="text-sm text-primary">{message}</p> : null}
       {error ? <p className="text-sm text-danger">{error}</p> : null}
+
+      {profile.role === "admin" ? (
+        <ProfileSection
+          id="admin-contact"
+          title="Admin email & phone"
+          summary="Use a real inbox for alerts"
+          openId={openSection}
+          onToggle={setOpenSection}
+        >
+          <AdminContactForm currentEmail={profile.email} currentPhone={profile.phone} onDone={(m) => setMessage(m)} onError={(e) => setError(e)} />
+        </ProfileSection>
+      ) : null}
+
+      <ProfileSection
+        id="security-q"
+        title="Security question"
+        summary="Used for account recovery"
+        openId={openSection}
+        onToggle={setOpenSection}
+      >
+        <SecurityQuestionForm onDone={(m) => setMessage(m)} onError={(e) => setError(e)} />
+      </ProfileSection>
 
       <ProfileSection
         id="signin"
@@ -546,7 +570,131 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
   );
 }
 
+function AdminContactForm({
+  currentEmail,
+  currentPhone,
+  onDone,
+  onError,
+}: {
+  currentEmail: string;
+  currentPhone: string;
+  onDone: (m: string) => void;
+  onError: (m: string) => void;
+}) {
+  const [email, setEmail] = useState(currentEmail);
+  const [phone, setPhone] = useState(currentPhone);
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <form
+      className="space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        setBusy(true);
+        void adminUpdateContact({
+          data: {
+            email: email.trim() !== currentEmail ? email.trim() : undefined,
+            phone: phone.trim() !== currentPhone ? phone.trim() : undefined,
+            password,
+          },
+        })
+          .then((r) => {
+            onDone(
+              `Contact updated.${r.email ? ` Email → ${r.email}` : ""}${r.phone ? ` Phone → ${r.phone}` : ""}`,
+            );
+            setPassword("");
+            // Refresh so header + session show the new email/phone.
+            window.setTimeout(() => window.location.reload(), 800);
+          })
+          .catch((err) => onError(errMessage(err)))
+          .finally(() => setBusy(false));
+      }}
+    >
+      <p className="text-sm text-muted">
+        Seed default was admin@nexa-saver.app. Set a real email so alerts and recovery work. Confirm with your
+        password.
+      </p>
+      <div className="space-y-1.5">
+        <Label htmlFor="adm-email">Email</Label>
+        <Input id="adm-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="adm-phone">Phone</Label>
+        <Input id="adm-phone" value={phone} onChange={(e) => setPhone(e.target.value)} required />
+      </div>
+      <PasswordField id="adm-pw" label="Confirm with password" value={password} onChange={setPassword} />
+      <Button type="submit" disabled={busy || password.length < 1}>
+        {busy ? "Saving…" : "Save contact"}
+      </Button>
+    </form>
+  );
+}
+
+function SecurityQuestionForm({
+  onDone,
+  onError,
+}: {
+  onDone: (m: string) => void;
+  onError: (m: string) => void;
+}) {
+  const [question, setQuestion] = useState("What was the name of your first pet?");
+  const [answer, setAnswer] = useState("");
+  const [password, setPassword] = useState("");
+  const [pin, setPin] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <form
+      className="space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        setBusy(true);
+        void changeSecurityQuestionFn({
+          data: { question, answer, password, pin },
+        })
+          .then(() => {
+            onDone("Security question updated.");
+            setAnswer("");
+            setPassword("");
+            setPin("");
+          })
+          .catch((err) => onError(errMessage(err)))
+          .finally(() => setBusy(false));
+      }}
+    >
+      <p className="text-sm text-muted">
+        Default seed answer was &quot;nexa&quot;. Choose a question only you can answer. Requires password and PIN
+        (default PIN was 0000 if never changed).
+      </p>
+      <div className="space-y-1.5">
+        <Label htmlFor="sq">Question</Label>
+        <Input id="sq" value={question} onChange={(e) => setQuestion(e.target.value)} required />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="sa">New answer</Label>
+        <Input id="sa" value={answer} onChange={(e) => setAnswer(e.target.value)} required />
+      </div>
+      <PasswordField id="sq-pw" label="Password" value={password} onChange={setPassword} />
+      <div className="space-y-1.5">
+        <Label htmlFor="sq-pin">PIN</Label>
+        <Input
+          id="sq-pin"
+          inputMode="numeric"
+          maxLength={4}
+          value={pin}
+          onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+        />
+      </div>
+      <Button type="submit" disabled={busy || pin.length !== 4 || answer.length < 2}>
+        {busy ? "Saving…" : "Update security question"}
+      </Button>
+    </form>
+  );
+}
+
 function ProfileSection({
+
   id,
   title,
   summary,

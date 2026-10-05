@@ -1282,15 +1282,29 @@ export const adminOverview = createServerFn({ method: "GET" })
       order by 1
     `;
 
+    let paidOut = 0;
+    try {
+      const treasury = await sql<{ paid: number }>`
+        select coalesce(sum(gross_tambala), 0)::bigint as paid
+        from treasury_payouts
+        where status in (${"success"}, ${"processing"})
+      `;
+      paidOut = asInt(treasury[0]?.paid);
+    } catch {
+      paidOut = 0;
+    }
+    const bookProfit = asInt(money[0]?.profit);
     return {
       userCount: asInt(users[0]?.n),
       totalDepositsTambala: asInt(money[0]?.deposits),
       totalWithdrawalsTambala: asInt(money[0]?.withdrawals),
       userBalancesTambala: asInt(wallet[0]?.bal),
-      platformProfitTambala: asInt(money[0]?.profit),
+      platformProfitTambala: bookProfit,
       payoutReserveTambala: asInt(wallet[0]?.res),
       pendingCount: asInt(money[0]?.pending),
       demoPayments: demoPaymentsEnabled(),
+      treasuryPaidOutTambala: paidOut,
+      treasuryAvailableTambala: Math.max(0, bookProfit - paidOut),
       series: seriesRows.map((r) => ({
         day: String(r.day).slice(0, 10),
         deposits: asInt(r.deposits),
@@ -2949,4 +2963,292 @@ export const getPayoutMethodsPublic = createServerFn({ method: "GET" })
     const { getPayoutMethods } = await import("./payout-methods.server");
     const sql = await getSql();
     return getPayoutMethods(sql);
+  });
+
+
+/** Admin: update email (real inbox) and/or phone. Email is marked verified. */
+export const adminUpdateContact = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      email: z.string().email().max(120).optional(),
+      phone: z.string().min(9).max(20).optional(),
+      password: z.string().min(1),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    if (!data.email && !data.phone) throw new Error("Provide a new email and/or phone");
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { auth } = await import("@/lib/auth/server");
+    const sql = await getSql();
+
+    // Verify password via better-auth credential path isn't trivial; use account password hash check
+    const { verifyPassword } = await import("better-auth/crypto");
+    const acc = await sql<{ password: string | null }>`
+      select password from "account"
+      where "userId" = ${context.userId} and "providerId" = ${"credential"}
+      limit 1
+    `;
+    if (!acc[0]?.password) throw new Error("No password credential on this account");
+    const ok = await verifyPassword({ hash: acc[0].password, password: data.password });
+    if (!ok) throw new Error("Incorrect password");
+
+    let email = data.email?.trim().toLowerCase();
+    let phone: string | undefined;
+    if (data.phone) {
+      const { normalizeMwPhone } = await import("./phone");
+      const n = normalizeMwPhone(data.phone);
+      if (!n) throw new Error("Enter a valid Malawi mobile number");
+      phone = n;
+    }
+
+    if (email) {
+      const taken = await sql`select id from "user" where email = ${email} and id <> ${context.userId} limit 1`;
+      if (taken.length) throw new Error("That email is already in use");
+    }
+    if (phone) {
+      const taken = await sql`
+        select user_id from profiles
+        where phone = ${phone} and user_id <> ${context.userId} and deleted_at is null
+        limit 1
+      `;
+      if (taken.length) throw new Error("That phone is already in use");
+    }
+
+    await withTransaction(async (tx) => {
+      if (email) {
+        await tx`
+          update "user"
+          set email = ${email}, "emailVerified" = ${true}, "updatedAt" = now()
+          where id = ${context.userId}
+        `;
+        await tx`
+          update profiles set email = ${email}, updated_at = now()
+          where user_id = ${context.userId}
+        `;
+      }
+      if (phone) {
+        await tx`
+          update profiles
+          set phone = ${phone}, phone_verified_at = now(), updated_at = now()
+          where user_id = ${context.userId}
+        `;
+      }
+    });
+
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      userId: context.userId,
+      action: "admin_contact_update",
+      detail: [email ? `email=${email}` : null, phone ? `phone=${phone}` : null].filter(Boolean).join(" "),
+    });
+    return { ok: true as const, email: email ?? null, phone: phone ?? null };
+  });
+
+/** Any signed-in user: change security question with password + PIN. */
+export const changeSecurityQuestionFn = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      password: z.string().min(1),
+      pin: pinSchema,
+      question: z.string().min(8).max(200),
+      answer: z.string().min(2).max(120),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Complete your profile first");
+    const { getSql } = await import("@/lib/db");
+    const { verifySecret, hashSecret, normalizeAnswer } = await import("./crypto");
+    const { verifyPassword } = await import("better-auth/crypto");
+    const sql = await getSql();
+
+    const acc = await sql<{ password: string | null }>`
+      select password from "account"
+      where "userId" = ${context.userId} and "providerId" = ${"credential"}
+      limit 1
+    `;
+    if (!acc[0]?.password) throw new Error("No password on this account");
+    const pwOk = await verifyPassword({ hash: acc[0].password, password: data.password });
+    if (!pwOk) throw new Error("Incorrect password");
+    const pinOk = await verifySecret(profile.pin_hash, data.pin);
+    if (!pinOk) throw new Error("Incorrect PIN");
+
+    const answerHash = await hashSecret(normalizeAnswer(data.answer));
+    await sql`
+      update profiles
+      set security_question = ${data.question.trim()},
+          security_answer_hash = ${answerHash},
+          updated_at = now()
+      where user_id = ${context.userId}
+    `;
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      userId: context.userId,
+      action: "security_question_changed",
+      detail: "updated",
+    });
+    return { ok: true as const };
+  });
+
+/**
+ * Admin treasury withdraw: cash out book profit only (never saver balances).
+ * Gross amount is reserved against profit; ~1.8% rail fee means net sent to admin phone.
+ */
+export const adminTreasuryWithdraw = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      amountKwacha: z.number().positive(),
+      pin: pinSchema,
+      idempotencyKey: z.string().min(8).max(128),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { verifySecret, newReference } = await import("./crypto");
+    const { kwachaToTambala, tambalaToKwacha, formatKwacha } = await import("./money");
+    const { paychanguConfigured, demoPaymentsEnabled, initiateMomoPayout } = await import("./paychangu.server");
+    const { claimIdempotencyKey, storeIdempotencyResponse } = await import("./idempotency.server");
+    const { MIN_WITHDRAW_KWACHA } = await import("./constants");
+
+    if (!paychanguConfigured() && !demoPaymentsEnabled()) {
+      throw new Error("Payouts are not configured");
+    }
+    if (data.amountKwacha < MIN_WITHDRAW_KWACHA) {
+      throw new Error(`Minimum treasury withdraw is ${MIN_WITHDRAW_KWACHA} kwacha`);
+    }
+
+    const sql = await getSql();
+    const claim = await claimIdempotencyKey(sql, {
+      key: data.idempotencyKey,
+      userId: context.userId,
+      action: "treasury_withdraw",
+    });
+    if (claim.hit) return claim.response as { ok: true; reference: string; grossTambala: number; netTambala: number };
+
+    const releaseKey = async () => {
+      await sql`delete from idempotency_keys where key = ${data.idempotencyKey} and response_json is null`;
+    };
+
+    const profile = await loadProfile(context.userId);
+    if (!profile) {
+      await releaseKey();
+      throw new Error("Admin profile missing");
+    }
+    const pinOk = await verifySecret(profile.pin_hash, data.pin);
+    if (!pinOk) {
+      await releaseKey();
+      throw new Error("Incorrect PIN");
+    }
+
+    const gross = kwachaToTambala(data.amountKwacha);
+    // 1.8% rail fee estimated on gross; net sent to phone
+    const fee = Math.round(gross * 0.018);
+    const net = gross - fee;
+    if (net <= 0) {
+      await releaseKey();
+      throw new Error("Amount too small after 1.8% payout fee");
+    }
+
+    const profitRows = await sql<{ profit: number }>`
+      select coalesce(sum(case when kind = 'deposit' and status = 'success' then platform_profit_tambala else 0 end), 0)::bigint as profit
+      from transactions
+    `;
+    const paidRows = await sql<{ paid: number }>`
+      select coalesce(sum(gross_tambala), 0)::bigint as paid
+      from treasury_payouts
+      where status in (${"success"}, ${"processing"})
+    `;
+    const available = asInt(profitRows[0]?.profit) - asInt(paidRows[0]?.paid);
+    if (gross > available) {
+      await releaseKey();
+      throw new Error(
+        `Only ${formatKwacha(Math.max(0, available))} of platform profit is available to withdraw. Saver balances are never used.`,
+      );
+    }
+
+    const reference = newReference("TRY");
+    let payoutId: number;
+    try {
+      const inserted = await sql<{ id: number }>`
+        insert into treasury_payouts (
+          admin_user_id, gross_tambala, fee_tambala, net_tambala, phone, reference, status, note
+        ) values (
+          ${context.userId}, ${gross}, ${fee}, ${net}, ${profile.phone}, ${reference},
+          ${"processing"},
+          ${`Treasury withdraw ${formatKwacha(gross)}; ~1.8% rail fee ${formatKwacha(fee)}; net ${formatKwacha(net)}`}
+        )
+        returning id
+      `;
+      payoutId = inserted[0]!.id;
+    } catch (err) {
+      await releaseKey();
+      throw err;
+    }
+
+    try {
+      if (paychanguConfigured()) {
+        const payout = await initiateMomoPayout({
+          phone: profile.phone,
+          amountKwacha: tambalaToKwacha(net),
+          chargeId: reference,
+          email: profile.email,
+          firstName: profile.first_name,
+          lastName: profile.last_name,
+        });
+        const status = String(payout.status ?? "").toLowerCase();
+        if (status === "failed" || status === "failure" || status === "rejected") {
+          throw new Error(`Payout rejected (${status})`);
+        }
+      }
+      await sql`
+        update treasury_payouts
+        set status = ${"success"}, completed_at = now()
+        where id = ${payoutId}
+      `;
+      // Keep platform_treasury in sync when the table exists (migration 0020).
+      try {
+        await sql`
+          update platform_treasury
+          set balance_tambala = greatest(0, balance_tambala - ${gross}),
+              lifetime_out_tambala = lifetime_out_tambala + ${gross},
+              updated_at = now()
+          where id = 1
+        `;
+      } catch {
+        /* table may not exist yet on first deploy */
+      }
+    } catch (err) {
+      await sql`
+        update treasury_payouts
+        set status = ${"failed"}, note = ${String((err as Error).message ?? "failed")}
+        where id = ${payoutId}
+      `;
+      await releaseKey();
+      throw new Error(
+        "Treasury withdrawal could not be sent. Profit was not taken. Details: " +
+          String((err as Error).message ?? "").slice(0, 180),
+      );
+    }
+
+    const result = {
+      ok: true as const,
+      reference,
+      grossTambala: gross,
+      netTambala: net,
+      feeTambala: fee,
+    };
+    await storeIdempotencyResponse(sql, data.idempotencyKey, result);
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "treasury_withdraw",
+      detail: `ref=${reference} gross=${gross} net=${net}`,
+    });
+    return result;
   });

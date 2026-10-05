@@ -66,6 +66,18 @@ export async function creditDeposit(reference: string): Promise<CreditResult> {
           (${txRow.id}, ${"payout_reserve"}, ${reserve})
       `;
 
+      // Book profit into platform treasury (admin withdrawable pool — not saver funds).
+      if (profit > 0) {
+        await tx`
+          insert into platform_treasury (id, balance_tambala, lifetime_in_tambala, updated_at)
+          values (1, ${profit}, ${profit}, now())
+          on conflict (id) do update set
+            balance_tambala = platform_treasury.balance_tambala + ${profit},
+            lifetime_in_tambala = platform_treasury.lifetime_in_tambala + ${profit},
+            updated_at = now()
+        `;
+      }
+
       // If the payer number matches the registered withdraw number, mark it verified.
       if (txRow.phone) {
         await tx`
