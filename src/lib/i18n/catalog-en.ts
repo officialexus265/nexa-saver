@@ -1,6 +1,11 @@
 /**
  * Source-of-truth English UI strings for the whole front end.
- * Admin translates by key; missing keys fall back to these values.
+ *
+ * Each value is a FULL phrase as shown on screen (sentence / button label / hint).
+ * Translators replace the whole string with a natural equivalent in the target language
+ * (e.g. "I want tea" → "Ndikufuna tiyi"), never word-by-word glosses.
+ *
+ * Admin translates by key; missing keys fall back to these English values.
  */
 export const EN_CATALOG = {
   // App / shell

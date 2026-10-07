@@ -81,8 +81,9 @@ function Studio() {
           <p className="text-sm text-muted">Admin</p>
           <h1 className="font-display text-3xl font-semibold">Translation studio</h1>
           <p className="mt-1 text-sm text-muted">
-            Edit every front-end phrase. Save draft keeps work private. Save & deploy publishes to users and can enable
-            the language.
+            Translate <strong className="text-fg">whole phrases as users see them</strong> — not word by word. Example:
+            English &quot;I want tea&quot; → Chichewa &quot;Ndikufuna tiyi&quot; (one natural line), never separate boxes for I / want /
+            tea. Save draft is private; Save & deploy publishes to users.
           </p>
         </div>
         <Link to="/admin" className="text-sm text-primary">
@@ -204,17 +205,22 @@ function Studio() {
           onChange={(e) => setQ(e.target.value)}
           className="w-full"
         />
-        <p className="text-xs text-muted">{keys.length} phrases · English left, translation right</p>
+        <p className="text-xs text-muted">
+          {keys.length} full UI phrases · top = English as on screen · bottom = your natural translation of that whole
+          line
+        </p>
         <ul className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">
           {keys.map((key) => (
             <li key={key} className="rounded-xl border border-border bg-surface-2 p-3">
               <p className="text-[11px] font-mono text-faint">{key}</p>
-              <p className="mt-1 text-sm text-muted">{english[key] || key}</p>
-              <Input
-                className="mt-2 w-full"
+              <p className="mt-1 text-sm text-fg">{english[key] || key}</p>
+              <p className="mt-0.5 text-[11px] text-faint">Translate this whole line naturally</p>
+              <textarea
+                className="mt-2 min-h-[2.75rem] w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-fg"
                 value={draft[key] ?? ""}
-                placeholder={english[key] || key}
+                placeholder="Full phrase in the target language…"
                 onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
+                rows={2}
               />
             </li>
           ))}
