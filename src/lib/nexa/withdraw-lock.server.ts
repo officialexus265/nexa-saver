@@ -52,18 +52,38 @@ export async function loadLockStatus(
   balanceTambala: number,
   feeRates?: { baseRate?: number; capRate?: number },
 ): Promise<LockStatus> {
-  const rows = await sql<{
+  let rows: Array<{
     withdraw_lock_until: Date | string | null;
     withdraw_lock_started_at: Date | string | null;
     withdraw_lock_cooling_ends_at: Date | string | null;
     withdraw_lock_original_until: Date | string | null;
     admin_withdraw_locked_at: Date | string | null;
     admin_withdraw_lock_reason: string | null;
-  }>`
-    select withdraw_lock_until, withdraw_lock_started_at, withdraw_lock_cooling_ends_at,
-           withdraw_lock_original_until, admin_withdraw_locked_at, admin_withdraw_lock_reason
-    from profiles where user_id = ${userId} limit 1
-  `;
+  }> = [];
+  try {
+    rows = await sql`
+      select withdraw_lock_until, withdraw_lock_started_at, withdraw_lock_cooling_ends_at,
+             withdraw_lock_original_until, admin_withdraw_locked_at, admin_withdraw_lock_reason
+      from profiles where user_id = ${userId} limit 1
+    `;
+  } catch {
+    // columns may be missing until migration 0021
+    return {
+      active: false,
+      until: null,
+      startedAt: null,
+      coolingEndsAt: null,
+      originalUntil: null,
+      inCoolingOff: false,
+      canEditFree: false,
+      adminWithdrawLocked: false,
+      adminWithdrawLockReason: null,
+      earlyUnlockFeeTambala: 0,
+      earlyUnlockFeeRate: 0,
+      remainingMs: 0,
+      originalDurationMs: 1,
+    };
+  }
   const r = rows[0];
   const until = asDate(r?.withdraw_lock_until);
   const started = asDate(r?.withdraw_lock_started_at);

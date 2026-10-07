@@ -627,6 +627,7 @@ function DepositModal({
 
 function WithdrawLockPanel() {
   const [status, setStatus] = useState<Awaited<ReturnType<typeof getWithdrawLockStatus>> | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("30");
   const [unit, setUnit] = useState<"days" | "months" | "years">("days");
@@ -637,11 +638,18 @@ function WithdrawLockPanel() {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [supportPhone, setSupportPhone] = useState<string | null>(null);
+  const [unlockCapPct, setUnlockCapPct] = useState(3);
 
   function refresh() {
+    setStatusError(null);
     void getWithdrawLockStatus()
-      .then(setStatus)
-      .catch(() => setStatus(null));
+      .then((s) => {
+        setStatus(s);
+      })
+      .catch((e) => {
+        setStatus(null);
+        setStatusError(errMessage(e));
+      });
   }
 
   useEffect(() => {
@@ -649,6 +657,9 @@ function WithdrawLockPanel() {
     void getPlatformSupportPhone()
       .then((p) => setSupportPhone(p?.phone ?? null))
       .catch(() => null);
+    void getPublicFeePolicy()
+      .then((p) => setUnlockCapPct(p.earlyUnlockCapPercent || 3))
+      .catch(() => undefined);
   }, []);
 
   const yearsApprox =
@@ -658,11 +669,20 @@ function WithdrawLockPanel() {
         ? Number(amount) / 12
         : Number(amount) / 365;
 
+  const locked = Boolean(status?.active);
+  const formVisible = open && !locked;
+
   async function applyLock() {
     setBusy(true);
     setErr(null);
     setMsg(null);
     try {
+      if (!Number(amount) || Number(amount) < 1) {
+        throw new Error("Enter a period of at least 1.");
+      }
+      if (pin.length !== 4) {
+        throw new Error("Enter your 4-digit PIN.");
+      }
       const res = await setWithdrawTimeLock({
         data: {
           amount: Number(amount),
@@ -687,7 +707,9 @@ function WithdrawLockPanel() {
   async function unlock() {
     setBusy(true);
     setErr(null);
+    setMsg(null);
     try {
+      if (pin.length !== 4) throw new Error("Enter your 4-digit PIN.");
       const res = await cancelWithdrawTimeLock({
         data: { pin, acceptFee: acceptFee || undefined },
       });
@@ -698,6 +720,7 @@ function WithdrawLockPanel() {
       );
       setPin("");
       setAcceptFee(false);
+      setOpen(false);
       refresh();
     } catch (e) {
       setErr(errMessage(e));
@@ -706,12 +729,10 @@ function WithdrawLockPanel() {
     }
   }
 
-  const adminLocked = status?.adminWithdrawLocked;
-
   return (
     <Card className="space-y-3 p-4">
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0 flex-1">
           <h2 className="font-display text-lg font-semibold">Withdrawal lock</h2>
           <p className="text-sm text-muted">
             Optional commitment: deposit anytime, no withdrawals until the date you set.
@@ -720,32 +741,44 @@ function WithdrawLockPanel() {
         <button
           type="button"
           role="switch"
-          aria-checked={Boolean(status?.active) || open}
+          aria-checked={locked || open}
+          aria-label={locked ? "Withdrawal lock is on" : open ? "Close lock form" : "Open lock form"}
           className={
-            status?.active || open
-              ? "relative h-7 w-12 shrink-0 rounded-full bg-primary"
-              : "relative h-7 w-12 shrink-0 rounded-full bg-surface-2"
+            locked || open
+              ? "relative h-7 w-12 shrink-0 rounded-full bg-primary transition-colors"
+              : "relative h-7 w-12 shrink-0 rounded-full bg-surface-2 transition-colors"
           }
           onClick={() => {
-            if (status?.active) return;
+            setErr(null);
+            setMsg(null);
+            if (locked) {
+              // Already locked — scroll attention to unlock section; do not flip off via toggle
+              return;
+            }
             setOpen((v) => !v);
           }}
         >
           <span
             className={
-              status?.active || open
-                ? "absolute left-6 top-0.5 size-6 rounded-full bg-white transition"
-                : "absolute left-0.5 top-0.5 size-6 rounded-full bg-muted transition"
+              locked || open
+                ? "absolute left-6 top-0.5 size-6 rounded-full bg-white shadow transition-all"
+                : "absolute left-0.5 top-0.5 size-6 rounded-full bg-muted shadow transition-all"
             }
           />
         </button>
       </div>
 
-      {adminLocked ? (
+      {statusError ? (
+        <p className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+          Could not load lock status: {statusError}. If you just deployed, wait for migration 0021 then refresh.
+        </p>
+      ) : null}
+
+      {status?.adminWithdrawLocked ? (
         <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm">
           <p className="font-medium text-danger">Withdrawals locked by the platform</p>
           <p className="mt-1 text-muted">
-            {status?.adminWithdrawLockReason || "Contact support for details. Deposits still work."}
+            {status.adminWithdrawLockReason || "Contact support for details. Deposits still work."}
           </p>
           {supportPhone ? (
             <a
@@ -760,8 +793,8 @@ function WithdrawLockPanel() {
         </div>
       ) : null}
 
-      {status?.active ? (
-        <div className="space-y-2 text-sm">
+      {locked && status ? (
+        <div className="space-y-3 rounded-xl border border-border bg-surface-2 p-3 text-sm">
           <p>
             Locked until{" "}
             <span className="font-medium text-fg">
@@ -771,23 +804,18 @@ function WithdrawLockPanel() {
           {status.inCoolingOff ? (
             <p className="text-primary">
               Free cooling-off until{" "}
-              {status.coolingEndsAt ? new Date(status.coolingEndsAt).toLocaleString() : "—"}. Cancel or edit free.
+              {status.coolingEndsAt ? new Date(status.coolingEndsAt).toLocaleString() : "—"}. You can cancel free.
             </p>
           ) : (
             <p className="text-muted">
               Early unlock fee about {(status.earlyUnlockFeeRate * 100).toFixed(1)}% of balance (
-              {formatKwacha(status.earlyUnlockFeeTambala)}). Extending the lock is free. Shortening after cooling-off
-              costs the same as unlocking early.
+              {formatKwacha(status.earlyUnlockFeeTambala)}). Extending is free. Shortening after cooling-off costs the
+              same as unlocking early.
             </p>
           )}
           <div className="space-y-2">
             <Label>PIN to cancel / unlock</Label>
-            <Input
-              inputMode="numeric"
-              maxLength={4}
-              value={pin}
-              onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
-            />
+            <PinPad value={pin} onChange={setPin} disabled={busy} />
             {!status.inCoolingOff && status.earlyUnlockFeeTambala > 0 ? (
               <label className="flex items-start gap-2 text-sm">
                 <input
@@ -798,23 +826,28 @@ function WithdrawLockPanel() {
                 />
                 <span>
                   I accept the early-unlock fee of {formatKwacha(status.earlyUnlockFeeTambala)} taken from my vault
-                  (not a surprise admin fee — calculated by the system).
+                  (system-calculated, not an informal admin fee).
                 </span>
               </label>
             ) : null}
             <Button
               type="button"
               variant="secondary"
-              disabled={busy || pin.length !== 4 || (!status.inCoolingOff && status.earlyUnlockFeeTambala > 0 && !acceptFee)}
+              className="w-full"
+              disabled={
+                busy ||
+                pin.length !== 4 ||
+                (!status.inCoolingOff && status.earlyUnlockFeeTambala > 0 && !acceptFee)
+              }
               onClick={() => void unlock()}
             >
-              {status.inCoolingOff ? "Cancel lock free" : "Unlock early"}
+              {busy ? "Working…" : status.inCoolingOff ? "Cancel lock free" : "Unlock early"}
             </Button>
           </div>
         </div>
       ) : null}
 
-      {open && !status?.active ? (
+      {formVisible ? (
         <div className="space-y-3 border-t border-border pt-3">
           <p className="text-sm text-muted">
             Max 5 years. After you confirm, a 48-hour cooling-off lets you cancel free. After that, early unlock costs a
@@ -822,16 +855,18 @@ function WithdrawLockPanel() {
           </p>
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1.5">
-              <Label>Period</Label>
+              <Label htmlFor="lock-period">Period</Label>
               <Input
+                id="lock-period"
                 inputMode="numeric"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value.replace(/\D/g, "").slice(0, 4))}
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Unit</Label>
+              <Label htmlFor="lock-unit">Unit</Label>
               <select
+                id="lock-unit"
                 className="flex h-11 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm"
                 value={unit}
                 onChange={(e) => setUnit(e.target.value as "days" | "months" | "years")}
@@ -858,21 +893,24 @@ function WithdrawLockPanel() {
           ) : null}
           <div className="space-y-1.5">
             <Label>Confirm with PIN</Label>
-            <Input
-              inputMode="numeric"
-              maxLength={4}
-              value={pin}
-              onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
-            />
+            <PinPad value={pin} onChange={setPin} disabled={busy} />
           </div>
           <Button
             type="button"
+            className="w-full"
             disabled={busy || pin.length !== 4 || !Number(amount) || (yearsApprox >= 2 && !confirmLong)}
             onClick={() => void applyLock()}
           >
             {busy ? "Saving…" : "Lock withdrawals"}
           </Button>
+          <Button type="button" variant="secondary" className="w-full" disabled={busy} onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
         </div>
+      ) : null}
+
+      {!locked && !open ? (
+        <p className="text-xs text-muted">Turn the switch on to choose how long withdrawals stay locked.</p>
       ) : null}
 
       {err ? <p className="text-sm text-danger">{err}</p> : null}
@@ -880,6 +918,7 @@ function WithdrawLockPanel() {
     </Card>
   );
 }
+
 
 function WithdrawModal({
   open,
