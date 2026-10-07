@@ -557,16 +557,16 @@ function Console() {
         </div>
         {userActionMsg ? <p className="mb-2 text-sm text-muted">{userActionMsg}</p> : null}
         <div className="overflow-x-auto rounded-2xl border border-border">
-          <table className="w-full min-w-[36rem] text-left text-sm">
+          <table className="w-full min-w-[52rem] table-fixed text-left text-sm">
             <thead className="bg-surface-2 text-muted">
               <tr>
-                <th className="px-3 py-2 font-medium">User</th>
-                <th className="px-3 py-2 font-medium">Phone</th>
-                <th className="px-3 py-2 font-medium">Balance</th>
-                <th className="px-3 py-2 font-medium">In</th>
-                <th className="px-3 py-2 font-medium">Out</th>
-                <th className="px-3 py-2 font-medium">Status</th>
-                <th className="px-3 py-2 font-medium">Actions</th>
+                <th className="w-[14%] px-3 py-2.5 font-medium">User</th>
+                <th className="w-[14%] px-3 py-2.5 font-medium">Phone</th>
+                <th className="w-[12%] px-3 py-2.5 font-medium">Balance</th>
+                <th className="w-[12%] px-3 py-2.5 font-medium">In</th>
+                <th className="w-[12%] px-3 py-2.5 font-medium">Out</th>
+                <th className="w-[10%] px-3 py-2.5 font-medium">Status</th>
+                <th className="w-[26%] px-3 py-2.5 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -580,21 +580,20 @@ function Console() {
                   u.firstName.toLowerCase().includes(q)
                 );
               })).map((u) => (
-                <tr key={u.userId} className="border-t border-border">
-                  <td className="px-3 py-2">
-                    {u.username}
+                <tr key={u.userId} className="border-t border-border align-middle">
+                  <td className="px-3 py-3">
+                    <span className="font-medium">{u.username}</span>
                     {u.role === "admin" ? <span className="ml-2 text-xs text-primary">admin</span> : null}
                   </td>
-                  <td className="px-3 py-2 tabular-nums">{u.phone}</td>
-                  <td className="px-3 py-2 tabular-nums">{formatKwacha(u.balanceTambala, { compact: true })}</td>
-                  <td className="px-3 py-2 tabular-nums">
+                  <td className="px-3 py-3 tabular-nums text-muted">{u.phone}</td>
+                  <td className="px-3 py-3 tabular-nums">{formatKwacha(u.balanceTambala, { compact: true })}</td>
+                  <td className="px-3 py-3 tabular-nums">
                     {formatKwacha(u.lifetimeDepositedTambala, { compact: true })}
                   </td>
-                  <td className="px-3 py-2 tabular-nums">
+                  <td className="px-3 py-3 tabular-nums">
                     {formatKwacha(u.lifetimeWithdrawnTambala, { compact: true })}
                   </td>
-                
-                  <td className="px-3 py-2 text-xs">
+                  <td className="px-3 py-3 text-xs">
                     {u.adminLocked ? (
                       <span className="text-danger">Locked</span>
                     ) : u.role === "admin" ? (
@@ -603,15 +602,15 @@ function Console() {
                       <span className="text-primary">Active</span>
                     )}
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-3">
                     {u.role === "admin" ? (
                       <span className="text-xs text-muted">—</span>
                     ) : (
-                      <div className="flex flex-col gap-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <Button
                           type="button"
                           variant="secondary"
-                          className="h-8 text-xs"
+                          className="h-8 whitespace-nowrap px-2.5 text-xs"
                           onClick={() => {
                             const reason =
                               window.prompt(
@@ -638,7 +637,7 @@ function Console() {
                         <Button
                           type="button"
                           variant="secondary"
-                          className="h-8 text-xs"
+                          className="h-8 whitespace-nowrap px-2.5 text-xs"
                           onClick={() => {
                             const locked = Boolean((u as { adminWithdrawLocked?: boolean }).adminWithdrawLocked);
                             const reason =
@@ -670,7 +669,7 @@ function Console() {
                         <Button
                           type="button"
                           variant="secondary"
-                          className="h-8 text-xs text-danger"
+                          className="h-8 whitespace-nowrap px-2.5 text-xs text-danger"
                           onClick={() => {
                             const reason =
                               window.prompt(

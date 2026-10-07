@@ -817,8 +817,8 @@ function WithdrawLockPanel() {
       {open && !status?.active ? (
         <div className="space-y-3 border-t border-border pt-3">
           <p className="text-sm text-muted">
-            Max {5} years. After you confirm, a 48-hour cooling-off lets you cancel free. After that, early unlock costs a
-            fee based on remaining time (cap 5% of balance).
+            Max 5 years. After you confirm, a 48-hour cooling-off lets you cancel free. After that, early unlock costs a
+            fee based on remaining time (maximum {unlockCapPct}% of balance — set by the platform).
           </p>
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1.5">
