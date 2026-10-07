@@ -26,7 +26,6 @@ export async function listLanguages(sql: Sql): Promise<LangRow[]> {
       isDefault: Boolean(r.is_default),
     }));
   } catch {
-    // Table not migrated yet
     return [
       { code: "en", name: "English", enabled: true, isDefault: true },
       { code: "ny", name: "Chichewa", enabled: false, isDefault: false },
@@ -65,7 +64,7 @@ export async function getPublishedMap(sql: Sql, lang: string): Promise<Record<st
       if (r.published_value) map[r.msg_key] = r.published_value;
     }
   } catch {
-    /* ignore */
+    /* table missing */
   }
   return map;
 }
@@ -96,48 +95,55 @@ export async function saveDraft(
   if (lang === "en") throw new Error("Edit other languages; English is the source catalog.");
   let n = 0;
   try {
-  for (const [key, value] of Object.entries(entries)) {
-    if (!(key in EN_CATALOG) && !ALL_MESSAGE_KEYS.includes(key as never)) {
-      // allow unknown keys from older catalogs
+    for (const [key, value] of Object.entries(entries)) {
+      void ALL_MESSAGE_KEYS;
+      const v = value ?? "";
+      await sql`
+        insert into app_translations (lang_code, msg_key, draft_value, updated_at)
+        values (${lang}, ${key}, ${v}, now())
+        on conflict (lang_code, msg_key) do update set
+          draft_value = excluded.draft_value,
+          updated_at = now()
+      `;
+      n++;
     }
-    const v = value ?? "";
-    await sql`
-      insert into app_translations (lang_code, msg_key, draft_value, updated_at)
-      values (${lang}, ${key}, ${v}, now())
-      on conflict (lang_code, msg_key) do update set
-        draft_value = excluded.draft_value,
-        updated_at = now()
-    `;
-    n++;
+    return n;
+  } catch {
+    throw new Error(
+      "Could not save translations. Redeploy so database migration 0022 (app_languages / app_translations) runs, then try again.",
+    );
   }
-  return n;
 }
 
 export async function publishLanguage(sql: Sql, lang: string): Promise<number> {
   if (lang === "en") throw new Error("English is always live from the catalog.");
-  const result = await sql`
-    update app_translations
-    set published_value = coalesce(nullif(draft_value, ''), published_value),
-        published_at = now(),
-        updated_at = now()
-    where lang_code = ${lang}
-      and draft_value is not null
-      and draft_value <> ''
-  `;
-  // Also copy any draft-only rows
-  await sql`
-    update app_translations
-    set published_value = draft_value, published_at = now()
-    where lang_code = ${lang} and draft_value is not null and draft_value <> ''
-  `;
-  const count = await sql<{ n: number }>`
-    select count(*)::int as n from app_translations
-    where lang_code = ${lang} and published_value is not null and published_value <> ''
-  `;
-  return Number(count[0]?.n ?? 0);
+  try {
+    await sql`
+      update app_translations
+      set published_value = draft_value,
+          published_at = now(),
+          updated_at = now()
+      where lang_code = ${lang}
+        and draft_value is not null
+        and draft_value <> ''
+    `;
+    const count = await sql<{ n: number }>`
+      select count(*)::int as n from app_translations
+      where lang_code = ${lang} and published_value is not null and published_value <> ''
+    `;
+    return Number(count[0]?.n ?? 0);
+  } catch {
+    throw new Error(
+      "Could not publish translations. Redeploy so migration 0022 runs, then try again.",
+    );
+  }
 }
 
-export function translateKey(map: Record<string, string>, key: string, vars?: Record<string, string | number>): string {
+export function translateKey(
+  map: Record<string, string>,
+  key: string,
+  vars?: Record<string, string | number>,
+): string {
   let s = map[key] ?? en(key);
   if (vars) {
     for (const [k, v] of Object.entries(vars)) {
