@@ -110,6 +110,8 @@ const ApiCronReconcileRoute = ApiCronReconcileRouteImport.update({
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
   "/admin": typeof AdminRoute;
+  "/admin/translations": typeof AdminTranslationsRoute;
+  "/admin/translations/preview": typeof AdminTranslationsPreviewRoute;
   "/conditions": typeof ConditionsRoute;
   "/dashboard": typeof DashboardRoute;
   "/privacy": typeof PrivacyRoute;
@@ -127,6 +129,8 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
   "/admin": typeof AdminRoute;
+  "/admin/translations": typeof AdminTranslationsRoute;
+  "/admin/translations/preview": typeof AdminTranslationsPreviewRoute;
   "/conditions": typeof ConditionsRoute;
   "/dashboard": typeof DashboardRoute;
   "/privacy": typeof PrivacyRoute;
@@ -145,6 +149,8 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   "/": typeof IndexRoute;
   "/admin": typeof AdminRoute;
+  "/admin/translations": typeof AdminTranslationsRoute;
+  "/admin/translations/preview": typeof AdminTranslationsPreviewRoute;
   "/conditions": typeof ConditionsRoute;
   "/dashboard": typeof DashboardRoute;
   "/privacy": typeof PrivacyRoute;
@@ -164,6 +170,8 @@ export interface FileRouteTypes {
   fullPaths:
     | "/"
     | "/admin"
+    | "/admin/translations"
+    | "/admin/translations/preview"
     | "/conditions"
     | "/dashboard"
     | "/privacy"
@@ -181,6 +189,8 @@ export interface FileRouteTypes {
   to:
     | "/"
     | "/admin"
+    | "/admin/translations"
+    | "/admin/translations/preview"
     | "/conditions"
     | "/dashboard"
     | "/privacy"
@@ -198,6 +208,8 @@ export interface FileRouteTypes {
     | "__root__"
     | "/"
     | "/admin"
+    | "/admin/translations"
+    | "/admin/translations/preview"
     | "/conditions"
     | "/dashboard"
     | "/privacy"
@@ -216,6 +228,8 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
   AdminRoute: typeof AdminRoute;
+  AdminTranslationsRoute: typeof AdminTranslationsRoute;
+  AdminTranslationsPreviewRoute: typeof AdminTranslationsPreviewRoute;
   ConditionsRoute: typeof ConditionsRoute;
   DashboardRoute: typeof DashboardRoute;
   PrivacyRoute: typeof PrivacyRoute;
@@ -245,6 +259,20 @@ declare module "@tanstack/react-router" {
       path: "/admin";
       fullPath: "/admin";
       preLoaderRoute: typeof AdminRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/admin/translations": {
+      id: "/admin/translations";
+      path: "/admin/translations";
+      fullPath: "/admin/translations";
+      preLoaderRoute: typeof AdminTranslationsRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/admin/translations/preview": {
+      id: "/admin/translations/preview";
+      path: "/admin/translations/preview";
+      fullPath: "/admin/translations/preview";
+      preLoaderRoute: typeof AdminTranslationsPreviewRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/conditions": {

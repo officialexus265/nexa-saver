@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { SessionGate } from "@/components/session-gate";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -198,8 +198,9 @@ function Console() {
         </div>
         <Link
           to="/admin/translations"
-          className="inline-flex h-10 items-center justify-center rounded-full border border-border bg-surface-2 px-4 text-sm font-medium text-fg"
+          className="group inline-flex h-10 items-center justify-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-5 text-sm font-semibold text-primary shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary hover:bg-primary hover:text-primary-fg hover:shadow-md active:translate-y-0"
         >
+          <span aria-hidden className="text-base leading-none transition-transform duration-200 group-hover:scale-110">文A</span>
           Translate
         </Link>
       </div>
