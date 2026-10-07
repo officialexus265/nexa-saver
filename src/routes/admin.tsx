@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
+import { TranslationStudio } from "@/components/translation-studio";
 import { SessionGate } from "@/components/session-gate";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -120,7 +121,7 @@ function Console() {
   const [feeForm, setFeeForm] = useState({ deposit: "6", unlockBase: "3", unlockCap: "3" });
   const [feeMsg, setFeeMsg] = useState<string | null>(null);
   const [feeBusy, setFeeBusy] = useState(false);
-  const [adminTab, setAdminTab] = useState<"overview" | "accounts" | "money" | "tools">("overview");
+  const [adminTab, setAdminTab] = useState<"overview" | "accounts" | "money" | "tools" | "translations">("overview");
 
 
 
@@ -184,6 +185,7 @@ function Console() {
     { id: "accounts" as const, label: "Accounts" },
     { id: "money" as const, label: "Fees & payouts" },
     { id: "tools" as const, label: "Tools" },
+    { id: "translations" as const, label: "Translate" },
   ];
 
   return (
@@ -196,13 +198,14 @@ function Console() {
             <p className="mt-1 text-sm text-warn">Demo payments are ON. No real money moves.</p>
           ) : null}
         </div>
-        <Link
-          to="/admin/translations"
+        <button
+          type="button"
+          onClick={() => setAdminTab("translations")}
           className="group inline-flex h-10 items-center justify-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-5 text-sm font-semibold text-primary shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary hover:bg-primary hover:text-primary-fg hover:shadow-md active:translate-y-0"
         >
           <span aria-hidden className="text-base leading-none transition-transform duration-200 group-hover:scale-110">文A</span>
           Translate
-        </Link>
+        </button>
       </div>
 
       <div className="flex gap-1 overflow-x-auto rounded-2xl border border-border bg-surface-2 p-1">
@@ -770,6 +773,12 @@ function Console() {
         </ul>
       </section>
       </div>
+      ) : null}
+
+      {adminTab === "translations" ? (
+        <div className="space-y-5" data-nexa-translate-studio>
+          <TranslationStudio />
+        </div>
       ) : null}
 
       <SupportDesk />
