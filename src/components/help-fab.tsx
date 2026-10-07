@@ -80,12 +80,18 @@ export function HelpFab() {
         aria-expanded={open}
         aria-label={open ? "Close help" : "Open help"}
         onClick={() => setOpen((v) => !v)}
-        className="pointer-events-auto grid size-14 place-items-center overflow-hidden rounded-full bg-white shadow-lg ring-2 ring-primary/40 transition-transform duration-300"
+        className="pointer-events-auto relative size-14 shrink-0 overflow-hidden rounded-full bg-white shadow-lg ring-2 ring-primary/40 transition-transform duration-300"
       >
         {open ? (
-          <X className="size-6" />
+          <span className="grid size-full place-items-center bg-surface text-fg">
+            <X className="size-6" />
+          </span>
         ) : (
-          <img src="/help-agent.png" alt="Help" className="size-9 object-contain" />
+          <img
+            src="/help-agent.png"
+            alt="Help"
+            className="absolute inset-0 size-full object-cover object-center"
+          />
         )}
       </button>
     </div>
