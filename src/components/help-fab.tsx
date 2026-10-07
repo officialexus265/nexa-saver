@@ -44,28 +44,39 @@ export function HelpFab() {
 
   return (
     <div className="pointer-events-none fixed bottom-20 right-4 z-30 flex flex-col items-end gap-0 sm:bottom-8 sm:right-6">
-      {/* Expanded stack grows upward from the + */}
+      {/* Stack only receives clicks when open — opacity-0 links must NOT stay pointer-events-auto */}
       <div
         className={cn(
-          "pointer-events-none mb-3 flex flex-col-reverse items-end gap-2 transition-all duration-300",
-          open ? "opacity-100" : "pointer-events-none opacity-0",
+          "mb-3 flex flex-col-reverse items-end gap-2 transition-all duration-300",
+          open ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
         )}
         aria-hidden={!open}
+        {...(!open ? ({ inert: true } as React.HTMLAttributes<HTMLDivElement>) : {})}
       >
         {lines.map((line, i) => (
           <a
             key={line.id}
-            href={channelHref(line)}
+            href={open ? channelHref(line) : undefined}
             target={line.channel === "call" || line.channel === "sms" ? undefined : "_blank"}
             rel="noopener noreferrer"
+            tabIndex={open ? 0 : -1}
             className={cn(
-              "pointer-events-auto flex items-center gap-3 rounded-full border border-border bg-surface py-2 pl-4 pr-3 shadow-lg transition-all duration-300",
-              open ? "translate-y-0 scale-100 opacity-100" : "translate-y-4 scale-90 opacity-0",
+              "flex items-center gap-3 rounded-full border border-border bg-surface py-2 pl-4 pr-3 shadow-lg transition-all duration-300",
+              open
+                ? "pointer-events-auto translate-y-0 scale-100 opacity-100"
+                : "pointer-events-none translate-y-4 scale-90 opacity-0",
             )}
             style={{
               transitionDelay: open ? `${i * 50}ms` : `${(lines.length - 1 - i) * 30}ms`,
             }}
-            onClick={() => setOpen(false)}
+            onClick={(e) => {
+              if (!open) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+              }
+              setOpen(false);
+            }}
           >
             <span className="max-w-[10rem] truncate text-sm font-medium text-fg">{line.label}</span>
             <span className="grid size-10 place-items-center rounded-full bg-primary/15 text-primary">
