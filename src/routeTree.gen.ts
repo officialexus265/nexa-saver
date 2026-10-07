@@ -5,6 +5,8 @@
 import { Route as rootRouteImport } from "./routes/__root";
 import { Route as IndexRouteImport } from "./routes/index";
 import { Route as AdminRouteImport } from "./routes/admin";
+import { Route as AdminTranslationsRouteImport } from "./routes/admin.translations";
+import { Route as AdminTranslationsPreviewRouteImport } from "./routes/admin.translations.preview";
 import { Route as ConditionsRouteImport } from "./routes/conditions";
 import { Route as DashboardRouteImport } from "./routes/dashboard";
 import { Route as PrivacyRouteImport } from "./routes/privacy";
@@ -27,6 +29,16 @@ const IndexRoute = IndexRouteImport.update({
 const AdminRoute = AdminRouteImport.update({
   id: "/admin",
   path: "/admin",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const AdminTranslationsRoute = AdminTranslationsRouteImport.update({
+  id: "/admin/translations",
+  path: "/admin/translations",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const AdminTranslationsPreviewRoute = AdminTranslationsPreviewRouteImport.update({
+  id: "/admin/translations/preview",
+  path: "/admin/translations/preview",
   getParentRoute: () => rootRouteImport,
 } as any);
 const ConditionsRoute = ConditionsRouteImport.update({
@@ -332,6 +344,8 @@ declare module "@tanstack/react-router" {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute,
   AdminRoute,
+  AdminTranslationsRoute,
+  AdminTranslationsPreviewRoute,
   ConditionsRoute,
   DashboardRoute,
   PrivacyRoute,

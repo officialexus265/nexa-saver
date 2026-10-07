@@ -3633,3 +3633,127 @@ export const adminSetFeePolicy = createServerFn({ method: "POST" })
     });
     return policy;
   });
+
+
+export const listPublicLanguages = createServerFn({ method: "GET" }).handler(async () => {
+  try {
+    const { getSql } = await import("@/lib/db");
+    const { listLanguages } = await import("@/lib/i18n/i18n.server");
+    const sql = await getSql();
+    return listLanguages(sql);
+  } catch {
+    return [
+      { code: "en", name: "English", enabled: true, isDefault: true },
+      { code: "ny", name: "Chichewa", enabled: false, isDefault: false },
+    ];
+  }
+});
+
+export const getPublishedTranslations = createServerFn({ method: "POST" })
+  .validator(z.object({ lang: z.string().min(2).max(12) }))
+  .handler(async ({ data }) => {
+    const { getSql } = await import("@/lib/db");
+    const { getPublishedMap } = await import("@/lib/i18n/i18n.server");
+    const sql = await getSql();
+    return getPublishedMap(sql, data.lang);
+  });
+
+export const adminListLanguages = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { listLanguages } = await import("@/lib/i18n/i18n.server");
+    const sql = await getSql();
+    return listLanguages(sql);
+  });
+
+export const adminAddLanguage = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ code: z.string().min(2).max(12), name: z.string().min(2).max(80) }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { addLanguage, listLanguages } = await import("@/lib/i18n/i18n.server");
+    const sql = await getSql();
+    await addLanguage(sql, data.code, data.name);
+    return listLanguages(sql);
+  });
+
+export const adminSetLanguageEnabled = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ code: z.string().min(2).max(12), enabled: z.boolean() }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { setLanguageEnabled, listLanguages } = await import("@/lib/i18n/i18n.server");
+    const sql = await getSql();
+    await setLanguageEnabled(sql, data.code, data.enabled);
+    return listLanguages(sql);
+  });
+
+export const adminGetTranslationDraft = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ lang: z.string().min(2).max(12) }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { getDraftMap } = await import("@/lib/i18n/i18n.server");
+    const { ALL_MESSAGE_KEYS, EN_CATALOG } = await import("@/lib/i18n/catalog-en");
+    const sql = await getSql();
+    const draft = await getDraftMap(sql, data.lang);
+    return {
+      keys: ALL_MESSAGE_KEYS as string[],
+      english: EN_CATALOG as Record<string, string>,
+      draft,
+    };
+  });
+
+export const adminSaveTranslationDraft = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      lang: z.string().min(2).max(12),
+      entries: z.record(z.string(), z.string()),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { saveDraft } = await import("@/lib/i18n/i18n.server");
+    const sql = await getSql();
+    const n = await saveDraft(sql, data.lang, data.entries);
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "i18n_draft_save",
+      detail: `lang=${data.lang} keys=${n}`,
+    });
+    return { ok: true as const, saved: n };
+  });
+
+export const adminPublishTranslations = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      lang: z.string().min(2).max(12),
+      entries: z.record(z.string(), z.string()).optional(),
+      enable: z.boolean().optional(),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { saveDraft, publishLanguage, setLanguageEnabled } = await import("@/lib/i18n/i18n.server");
+    const sql = await getSql();
+    if (data.entries) await saveDraft(sql, data.lang, data.entries);
+    const n = await publishLanguage(sql, data.lang);
+    if (data.enable) await setLanguageEnabled(sql, data.lang, true);
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "i18n_publish",
+      detail: `lang=${data.lang} keys=${n} enable=${Boolean(data.enable)}`,
+    });
+    return { ok: true as const, published: n };
+  });

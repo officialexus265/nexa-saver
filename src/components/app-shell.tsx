@@ -4,6 +4,8 @@ import { BrandLockup } from "@/components/brand";
 import { signOut } from "@/lib/auth/client";
 import type { PublicProfile } from "@/lib/nexa/types";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { LanguageSwitcher } from "@/components/language-switcher";
+import { useT } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 export function AppShell({
@@ -15,13 +17,14 @@ export function AppShell({
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isAdmin = profile.role === "admin";
+  const { t } = useT();
 
   return (
     <div className="nexa-shell min-h-dvh pb-24 md:pb-8">
       <header className="sticky top-0 z-20 flex items-center justify-between border-b border-border bg-bg/90 px-4 py-3 backdrop-blur-md">
         <BrandLockup compact />
         <div className="flex items-center gap-2">
-          <ThemeToggle className="h-9 px-2.5" />
+          <LanguageSwitcher /><ThemeToggle className="h-9 px-2.5" />
           <div className="hidden items-center gap-1 md:flex">
             <NavLink to="/dashboard" current={pathname}>
               Home
@@ -47,10 +50,10 @@ export function AppShell({
       </header>
       <main className="mx-auto w-full max-w-3xl px-4 py-6 pb-28 md:pb-6">{children}</main>
       <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-3 border-t border-border bg-surface/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 md:hidden">
-        <TabLink to="/dashboard" current={pathname} icon={<LayoutDashboard className="size-5" />} label="Home" />
-        <TabLink to="/profile" current={pathname} icon={<UserRound className="size-5" />} label="Profile" />
+        <TabLink to="/dashboard" current={pathname} icon={<LayoutDashboard className="size-5" />} label={t("nav.home")} />
+        <TabLink to="/profile" current={pathname} icon={<UserRound className="size-5" />} label={t("nav.profile")} />
         {isAdmin ? (
-          <TabLink to="/admin" current={pathname} icon={<Shield className="size-5" />} label="Admin" />
+          <TabLink to="/admin" current={pathname} icon={<Shield className="size-5" />} label={t("nav.admin")} />
         ) : (
           <button
             type="button"
@@ -58,7 +61,7 @@ export function AppShell({
             className="grid place-items-center gap-1 py-2 text-[11px] text-muted"
           >
             <LogOut className="size-5" />
-            Sign out
+            {t("nav.signOut")}
           </button>
         )}
       </nav>

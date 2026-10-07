@@ -8,6 +8,7 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { signOut as clientSignOut } from "@/lib/auth/client";
 import { errMessage } from "@/lib/nexa/errors";
 import { changePasswordFn, getMe, heartbeat, recordPageVisit } from "@/lib/nexa/fns";
+import { I18nProvider } from "@/lib/i18n/client";
 import type { MeResponse, PublicProfile } from "@/lib/nexa/types";
 
 export function SessionGate({
@@ -142,7 +143,7 @@ export function SessionGate({
   if (admin && me.profile.role !== "admin") return <Navigate to="/dashboard" />;
   if (me.profile.adminLocked) {
     return (
-      <AppShell profile={me.profile}>
+      <I18nProvider><AppShell profile={me.profile}>
         <div className="mx-auto max-w-md space-y-4 p-6 text-center">
           <h1 className="font-display text-2xl font-semibold">Account locked</h1>
           <p className="text-sm text-muted">
@@ -157,7 +158,7 @@ export function SessionGate({
             Sign out
           </Button>
         </div>
-      </AppShell>
+      </AppShell></I18nProvider>
     );
   }
   if (locked === null) return <ShellSkeleton />;
@@ -181,7 +182,7 @@ export function SessionGate({
   }
 
   return (
-    <AppShell profile={profile}>
+    <I18nProvider><AppShell profile={profile}>
       {children({
         profile,
         demoPayments: me.demoPayments,
@@ -233,7 +234,7 @@ export function SessionGate({
           }}
         />
       ) : null}
-    </AppShell>
+    </AppShell></I18nProvider>
   );
 }
 

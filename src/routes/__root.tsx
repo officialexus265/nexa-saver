@@ -1,6 +1,7 @@
 import { createRootRoute, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router";
 import { PwaPrompt } from "@/components/pwa-prompt";
 import { THEME_BOOT_SCRIPT } from "@/components/theme-toggle";
+import { I18nProvider } from "@/lib/i18n/client";
 import { PwaRegister } from "@/components/pwa-register";
 import { APP_NAME } from "@/lib/nexa/constants";
 import appCss from "../styles.css?url";
@@ -53,9 +54,11 @@ export const Route = createRootRoute({
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
       </head>
       <body>
-        <Outlet />
-        <PwaPrompt />
-        <PwaRegister />
+        <I18nProvider>
+          <Outlet />
+          <PwaPrompt />
+          <PwaRegister />
+        </I18nProvider>
         <Scripts />
       </body>
     </html>
