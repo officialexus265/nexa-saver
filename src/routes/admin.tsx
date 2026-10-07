@@ -120,6 +120,8 @@ function Console() {
   const [feeForm, setFeeForm] = useState({ deposit: "6", unlockBase: "3", unlockCap: "3" });
   const [feeMsg, setFeeMsg] = useState<string | null>(null);
   const [feeBusy, setFeeBusy] = useState(false);
+  const [adminTab, setAdminTab] = useState<"overview" | "accounts" | "money" | "tools">("overview");
+
 
 
 
@@ -177,22 +179,50 @@ function Console() {
     profit: tambalaToKwacha(row.profit),
   }));
 
+  const tabs = [
+    { id: "overview" as const, label: "Overview" },
+    { id: "accounts" as const, label: "Accounts" },
+    { id: "money" as const, label: "Fees & payouts" },
+    { id: "tools" as const, label: "Tools" },
+  ];
+
   return (
     <div className="space-y-5">
-      <div>
-        <p className="text-sm text-muted">Platform</p>
-        <h1 className="font-display text-3xl font-semibold">Performance</h1>
-        <p className="mt-2">
-          <Link to="/admin/translations" className="text-sm font-medium text-primary underline">
-            Translate · language studio
-          </Link>
-        </p>
-        {overview.demoPayments ? (
-          <p className="mt-1 text-sm text-warn">
-            Demo payments are ON (development only). No real money moves.
-          </p>
-        ) : null}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm text-muted">Platform</p>
+          <h1 className="font-display text-3xl font-semibold">Admin</h1>
+          {overview.demoPayments ? (
+            <p className="mt-1 text-sm text-warn">Demo payments are ON. No real money moves.</p>
+          ) : null}
+        </div>
+        <Link
+          to="/admin/translations"
+          className="inline-flex h-10 items-center justify-center rounded-full border border-border bg-surface-2 px-4 text-sm font-medium text-fg"
+        >
+          Translate
+        </Link>
       </div>
+
+      <div className="flex gap-1 overflow-x-auto rounded-2xl border border-border bg-surface-2 p-1">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setAdminTab(tab.id)}
+            className={
+              adminTab === tab.id
+                ? "shrink-0 rounded-xl bg-surface px-4 py-2.5 text-sm font-medium text-fg shadow-sm"
+                : "shrink-0 rounded-xl px-4 py-2.5 text-sm text-muted"
+            }
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {adminTab === "overview" ? (
+      <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         <Stat label="Deposits" value={formatKwacha(overview.totalDepositsTambala, { compact: true })} />
         <Stat label="Withdrawals" value={formatKwacha(overview.totalWithdrawalsTambala, { compact: true })} />
@@ -229,6 +259,21 @@ function Console() {
         />
       </Card>
 
+      <Card className="h-64 p-4">
+        {chart.length ? (
+          <Suspense fallback={<p className="grid h-full place-items-center text-sm text-muted">Loading chart…</p>}>
+            <AdminChart data={chart} />
+          </Suspense>
+        ) : (
+          <p className="grid h-full place-items-center text-sm text-muted">No activity in the last two weeks yet.</p>
+        )}
+      </Card>
+
+      </div>
+      ) : null}
+
+      {adminTab === "money" ? (
+      <div className="space-y-5">
       <Card className="space-y-3 p-4">
         <h2 className="font-display text-lg font-semibold">Large-withdrawal support number</h2>
         <p className="text-sm text-muted">
@@ -373,6 +418,11 @@ function Console() {
         )}
       </Card>
 
+      </div>
+      ) : null}
+
+      {adminTab === "tools" ? (
+      <div className="space-y-5">
       <Card className="space-y-3 p-4">
         <h2 className="font-display text-lg font-semibold">Security survey</h2>
         <p className="text-sm text-muted">
@@ -470,15 +520,6 @@ function Console() {
         </div>
       </Card>
 
-      <Card className="h-64 p-4">
-        {chart.length ? (
-          <Suspense fallback={<p className="grid h-full place-items-center text-sm text-muted">Loading chart…</p>}>
-            <AdminChart data={chart} />
-          </Suspense>
-        ) : (
-          <p className="grid h-full place-items-center text-sm text-muted">No activity in the last two weeks yet.</p>
-        )}
-      </Card>
 
       <Card className="space-y-3 p-4">
         <h2 className="font-display text-lg font-semibold">Usage analytics</h2>
@@ -541,8 +582,14 @@ function Console() {
         )}
       </Card>
 
+        <HelpLinesManager />
+      </div>
+      ) : null}
+
+      {adminTab === "accounts" ? (
+      <div className="space-y-5">
       <section>
-        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="font-display text-lg font-semibold">Accounts</h2>
           <div className="w-full space-y-1.5 sm:max-w-sm">
             <Label htmlFor="user-search">Search accounts</Label>
@@ -557,16 +604,16 @@ function Console() {
         </div>
         {userActionMsg ? <p className="mb-2 text-sm text-muted">{userActionMsg}</p> : null}
         <div className="overflow-x-auto rounded-2xl border border-border">
-          <table className="w-full min-w-[52rem] table-fixed text-left text-sm">
+          <table className="w-full min-w-[640px] text-left text-sm">
             <thead className="bg-surface-2 text-muted">
               <tr>
-                <th className="w-[14%] px-3 py-2.5 font-medium">User</th>
-                <th className="w-[14%] px-3 py-2.5 font-medium">Phone</th>
-                <th className="w-[12%] px-3 py-2.5 font-medium">Balance</th>
-                <th className="w-[12%] px-3 py-2.5 font-medium">In</th>
-                <th className="w-[12%] px-3 py-2.5 font-medium">Out</th>
-                <th className="w-[10%] px-3 py-2.5 font-medium">Status</th>
-                <th className="w-[26%] px-3 py-2.5 font-medium">Actions</th>
+                <th className="px-4 py-3 font-medium">User</th>
+                <th className="px-4 py-3 font-medium">Phone</th>
+                <th className="px-4 py-3 font-medium text-right">Balance</th>
+                <th className="px-4 py-3 font-medium text-right">In</th>
+                <th className="px-4 py-3 font-medium text-right">Out</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -580,20 +627,20 @@ function Console() {
                   u.firstName.toLowerCase().includes(q)
                 );
               })).map((u) => (
-                <tr key={u.userId} className="border-t border-border align-middle">
-                  <td className="px-3 py-3">
+                <tr key={u.userId} className="border-t border-border">
+                  <td className="px-4 py-3 align-middle">
                     <span className="font-medium">{u.username}</span>
                     {u.role === "admin" ? <span className="ml-2 text-xs text-primary">admin</span> : null}
                   </td>
-                  <td className="px-3 py-3 tabular-nums text-muted">{u.phone}</td>
-                  <td className="px-3 py-3 tabular-nums">{formatKwacha(u.balanceTambala, { compact: true })}</td>
-                  <td className="px-3 py-3 tabular-nums">
+                  <td className="px-4 py-3 align-middle tabular-nums text-muted whitespace-nowrap">{u.phone}</td>
+                  <td className="px-4 py-3 align-middle text-right tabular-nums whitespace-nowrap">{formatKwacha(u.balanceTambala, { compact: true })}</td>
+                  <td className="px-4 py-3 align-middle text-right tabular-nums whitespace-nowrap">
                     {formatKwacha(u.lifetimeDepositedTambala, { compact: true })}
                   </td>
-                  <td className="px-3 py-3 tabular-nums">
+                  <td className="px-4 py-3 align-middle text-right tabular-nums whitespace-nowrap">
                     {formatKwacha(u.lifetimeWithdrawnTambala, { compact: true })}
                   </td>
-                  <td className="px-3 py-3 text-xs">
+                  <td className="px-4 py-3 align-middle text-xs whitespace-nowrap">
                     {u.adminLocked ? (
                       <span className="text-danger">Locked</span>
                     ) : u.role === "admin" ? (
@@ -602,11 +649,11 @@ function Console() {
                       <span className="text-primary">Active</span>
                     )}
                   </td>
-                  <td className="px-3 py-3">
+                  <td className="px-4 py-3 align-middle">
                     {u.role === "admin" ? (
                       <span className="text-xs text-muted">—</span>
                     ) : (
-                      <div className="flex flex-wrap items-center gap-1.5">
+                      <div className="flex flex-row flex-wrap items-center justify-end gap-2">
                         <Button
                           type="button"
                           variant="secondary"
@@ -721,8 +768,8 @@ function Console() {
           ))}
         </ul>
       </section>
-
-      <HelpLinesManager />
+      </div>
+      ) : null}
 
       <SupportDesk />
     </div>
