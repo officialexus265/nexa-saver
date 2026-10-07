@@ -731,41 +731,36 @@ function WithdrawLockPanel() {
 
   return (
     <Card className="space-y-3 p-4">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
           <h2 className="font-display text-lg font-semibold">Withdrawal lock</h2>
           <p className="text-sm text-muted">
             Optional commitment: deposit anytime, no withdrawals until the date you set.
           </p>
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={locked || open}
-          aria-label={locked ? "Withdrawal lock is on" : open ? "Close lock form" : "Open lock form"}
-          className={
-            locked || open
-              ? "relative h-7 w-12 shrink-0 rounded-full bg-primary transition-colors"
-              : "relative h-7 w-12 shrink-0 rounded-full bg-surface-2 transition-colors"
-          }
-          onClick={() => {
-            setErr(null);
-            setMsg(null);
-            if (locked) {
-              // Already locked — scroll attention to unlock section; do not flip off via toggle
-              return;
-            }
-            setOpen((v) => !v);
-          }}
-        >
-          <span
+        {!locked ? (
+          <button
+            type="button"
             className={
-              locked || open
-                ? "absolute left-6 top-0.5 size-6 rounded-full bg-white shadow transition-all"
-                : "absolute left-0.5 top-0.5 size-6 rounded-full bg-muted shadow transition-all"
+              open
+                ? "shrink-0 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-fg"
+                : "shrink-0 rounded-full border border-border bg-surface-2 px-4 py-2 text-sm font-medium text-fg"
             }
-          />
-        </button>
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setErr(null);
+              setMsg(null);
+              setOpen((v) => !v);
+            }}
+          >
+            {open ? "Hide lock form" : "Set lock"}
+          </button>
+        ) : (
+          <span className="shrink-0 rounded-full bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary">
+            Lock active
+          </span>
+        )}
       </div>
 
       {statusError ? (
@@ -910,7 +905,7 @@ function WithdrawLockPanel() {
       ) : null}
 
       {!locked && !open ? (
-        <p className="text-xs text-muted">Turn the switch on to choose how long withdrawals stay locked.</p>
+        <p className="text-xs text-muted">Tap &quot;Set lock&quot; to choose how long withdrawals stay locked.</p>
       ) : null}
 
       {err ? <p className="text-sm text-danger">{err}</p> : null}
