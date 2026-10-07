@@ -3,6 +3,7 @@ import { LayoutDashboard, Shield, UserRound, LogOut } from "lucide-react";
 import { BrandLockup } from "@/components/brand";
 import { signOut } from "@/lib/auth/client";
 import type { PublicProfile } from "@/lib/nexa/types";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { cn } from "@/lib/utils";
 
 export function AppShell({
@@ -19,26 +20,29 @@ export function AppShell({
     <div className="nexa-shell min-h-dvh pb-24 md:pb-8">
       <header className="sticky top-0 z-20 flex items-center justify-between border-b border-border bg-bg/90 px-4 py-3 backdrop-blur-md">
         <BrandLockup compact />
-        <div className="hidden items-center gap-1 md:flex">
-          <NavLink to="/dashboard" current={pathname}>
-            Home
-          </NavLink>
-          <NavLink to="/profile" current={pathname}>
-            Profile
-          </NavLink>
-          {isAdmin ? (
-            <NavLink to="/admin" current={pathname}>
-              Admin
+        <div className="flex items-center gap-2">
+          <ThemeToggle className="h-9 px-2.5" />
+          <div className="hidden items-center gap-1 md:flex">
+            <NavLink to="/dashboard" current={pathname}>
+              Home
             </NavLink>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => signOut("/")}
-            className="ml-2 inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm text-muted hover:text-fg"
-          >
-            <LogOut className="size-4" />
-            Sign out
-          </button>
+            <NavLink to="/profile" current={pathname}>
+              Profile
+            </NavLink>
+            {isAdmin ? (
+              <NavLink to="/admin" current={pathname}>
+                Admin
+              </NavLink>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => signOut("/")}
+              className="ml-2 inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm text-muted hover:text-fg"
+            >
+              <LogOut className="size-4" />
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
       <main className="mx-auto w-full max-w-3xl px-4 py-6 pb-28 md:pb-6">{children}</main>

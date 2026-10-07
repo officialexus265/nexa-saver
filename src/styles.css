@@ -24,11 +24,32 @@
 }
 
 @layer base {
+  html.light {
+    --color-bg: #f4f7f5;
+    --color-surface: #ffffff;
+    --color-surface-2: #e8efeb;
+    --color-fg: #0c1a14;
+    --color-muted: #4a6358;
+    --color-faint: #7a9186;
+    --color-primary: #1fa86a;
+    --color-primary-fg: #ffffff;
+    --color-border: #c5d4cc;
+    --color-danger: #c43c3c;
+    --color-warn: #b56a2e;
+    --color-ring: #1fa86a;
+    --shadow-soft: 0 18px 40px -24px rgb(0 0 0 / 0.18);
+  }
+
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     background: var(--color-bg);
     color: var(--color-fg);
+    color-scheme: dark;
+  }
+
+  html.light {
+    color-scheme: light;
   }
 
   body {

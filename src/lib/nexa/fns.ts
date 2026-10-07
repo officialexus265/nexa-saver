@@ -654,7 +654,13 @@ export const startDeposit = createServerFn({ method: "POST" })
 
     try {
       const gross = kwachaToTambala(data.amountKwacha);
-      const split = splitDeposit(gross);
+      const { getFeePolicy } = await import("./fee-policy.server");
+      const policy = await getFeePolicy(sql);
+      const split = splitDeposit(gross, {
+        depositFeeRate: policy.depositFeeRate,
+        platformProfitRate: policy.platformProfitRate,
+        payoutReserveRate: policy.payoutReserveRate,
+      });
       const reference = newReference("DEP");
 
       await sql`
@@ -3303,7 +3309,12 @@ export const getWithdrawLockStatus = createServerFn({ method: "GET" })
     const bal = await sql<{ balance_tambala: number }>`
       select balance_tambala from wallets where user_id = ${context.userId} limit 1
     `;
-    return loadLockStatus(sql, context.userId, Number(bal[0]?.balance_tambala ?? 0));
+    const { getFeePolicy } = await import("./fee-policy.server");
+    const policy = await getFeePolicy(sql);
+    return loadLockStatus(sql, context.userId, Number(bal[0]?.balance_tambala ?? 0), {
+      baseRate: policy.earlyUnlockBaseRate,
+      capRate: policy.earlyUnlockCapRate,
+    });
   });
 
 export const setWithdrawTimeLock = createServerFn({ method: "POST" })
@@ -3381,7 +3392,12 @@ export const cancelWithdrawTimeLock = createServerFn({ method: "POST" })
     const bal = await sql<{ balance_tambala: number }>`
       select balance_tambala from wallets where user_id = ${context.userId} limit 1
     `;
-    const status = await loadLockStatus(sql, context.userId, Number(bal[0]?.balance_tambala ?? 0));
+    const { getFeePolicy } = await import("./fee-policy.server");
+    const policy = await getFeePolicy(sql);
+    const status = await loadLockStatus(sql, context.userId, Number(bal[0]?.balance_tambala ?? 0), {
+      baseRate: policy.earlyUnlockBaseRate,
+      capRate: policy.earlyUnlockCapRate,
+    });
     if (!status.active) throw new Error("No active withdrawal lock.");
 
     if (status.inCoolingOff) {
@@ -3562,4 +3578,58 @@ export const adminSetWithdrawLock = createServerFn({ method: "POST" })
       detail: data.reason,
     });
     return { ok: true as const, locked: data.locked };
+  });
+
+
+export const getPublicFeePolicy = createServerFn({ method: "GET" }).handler(async () => {
+  const { getSql } = await import("@/lib/db");
+  const { getFeePolicy } = await import("./fee-policy.server");
+  const sql = await getSql();
+  const p = await getFeePolicy(sql);
+  return {
+    depositFeePercent: Math.round(p.depositFeeRate * 1000) / 10,
+    depositFeeRate: p.depositFeeRate,
+    earlyUnlockBasePercent: Math.round(p.earlyUnlockBaseRate * 1000) / 10,
+    earlyUnlockCapPercent: Math.round(p.earlyUnlockCapRate * 1000) / 10,
+    earlyUnlockBaseRate: p.earlyUnlockBaseRate,
+    earlyUnlockCapRate: p.earlyUnlockCapRate,
+  };
+});
+
+export const adminGetFeePolicy = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { getFeePolicy } = await import("./fee-policy.server");
+    const sql = await getSql();
+    return getFeePolicy(sql);
+  });
+
+export const adminSetFeePolicy = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      depositFeePercent: z.number().min(0).max(20),
+      earlyUnlockBasePercent: z.number().min(0).max(10),
+      earlyUnlockCapPercent: z.number().min(0).max(10),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { setFeePolicy } = await import("./fee-policy.server");
+    const sql = await getSql();
+    const policy = await setFeePolicy(sql, {
+      depositFeeRate: data.depositFeePercent / 100,
+      earlyUnlockBaseRate: data.earlyUnlockBasePercent / 100,
+      earlyUnlockCapRate: data.earlyUnlockCapPercent / 100,
+    });
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "fee_policy_set",
+      detail: `deposit=${data.depositFeePercent}% unlockBase=${data.earlyUnlockBasePercent}% unlockCap=${data.earlyUnlockCapPercent}%`,
+    });
+    return policy;
   });

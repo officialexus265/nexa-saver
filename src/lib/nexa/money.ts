@@ -26,10 +26,19 @@ export function formatKwacha(tambala: Tambala, opts?: { compact?: boolean }): st
   return opts?.compact ? `MWK ${formatted}` : `${formatted} kwacha`;
 }
 
-export function splitDeposit(grossTambala: Tambala) {
-  const fee = Math.round(grossTambala * DEPOSIT_FEE_RATE);
-  const profit = Math.round(grossTambala * PLATFORM_PROFIT_RATE);
-  const reserve = Math.round(grossTambala * PAYOUT_FEE_RATE);
+export type DepositRateOverride = {
+  depositFeeRate?: number;
+  platformProfitRate?: number;
+  payoutReserveRate?: number;
+};
+
+export function splitDeposit(grossTambala: Tambala, rates?: DepositRateOverride) {
+  const feeRate = rates?.depositFeeRate ?? DEPOSIT_FEE_RATE;
+  const profitRate = rates?.platformProfitRate ?? PLATFORM_PROFIT_RATE;
+  const reserveRate = rates?.payoutReserveRate ?? PAYOUT_FEE_RATE;
+  const fee = Math.round(grossTambala * feeRate);
+  const profit = Math.round(grossTambala * profitRate);
+  const reserve = Math.round(grossTambala * reserveRate);
   const credited = grossTambala - fee;
   return { gross: grossTambala, fee, profit, reserve, credited };
 }

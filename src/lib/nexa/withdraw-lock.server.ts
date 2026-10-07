@@ -33,12 +33,15 @@ export function earlyUnlockFeeTambala(
   balanceTambala: number,
   remainingMs: number,
   originalDurationMs: number,
+  rates?: { baseRate?: number; capRate?: number },
 ): { feeTambala: number; rate: number } {
   if (balanceTambala <= 0 || remainingMs <= 0 || originalDurationMs <= 0) {
     return { feeTambala: 0, rate: 0 };
   }
+  const base = rates?.baseRate ?? EARLY_UNLOCK_FEE_BASE_RATE;
+  const cap = rates?.capRate ?? EARLY_UNLOCK_FEE_CAP_RATE;
   const fraction = Math.min(1, remainingMs / originalDurationMs);
-  const rate = Math.min(EARLY_UNLOCK_FEE_CAP_RATE, EARLY_UNLOCK_FEE_BASE_RATE * fraction);
+  const rate = Math.min(cap, base * fraction);
   const fee = Math.round(balanceTambala * rate);
   return { feeTambala: fee, rate };
 }
@@ -47,6 +50,7 @@ export async function loadLockStatus(
   sql: Sql,
   userId: string,
   balanceTambala: number,
+  feeRates?: { baseRate?: number; capRate?: number },
 ): Promise<LockStatus> {
   const rows = await sql<{
     withdraw_lock_until: Date | string | null;
@@ -73,8 +77,9 @@ export async function loadLockStatus(
     started && originalUntil
       ? Math.max(1, originalUntil.getTime() - started.getTime())
       : remainingMs || 1;
+  // Rates injected by caller when available; defaults used here for status display.
   const fee = active && !inCoolingOff
-    ? earlyUnlockFeeTambala(balanceTambala, remainingMs, originalDurationMs)
+    ? earlyUnlockFeeTambala(balanceTambala, remainingMs, originalDurationMs, feeRates)
     : { feeTambala: 0, rate: 0 };
 
   return {

@@ -24,6 +24,8 @@ import {
   adminAnalytics,
   adminGetPayoutMethods,
   adminSetPayoutMethods,
+  adminGetFeePolicy,
+  adminSetFeePolicy,
   adminTreasuryWithdraw,
   adminExportSurveyCsv,
   adminDeleteUser,
@@ -115,12 +117,16 @@ function Console() {
   const [payoutMethods, setPayoutMethods] = useState<{ momo: boolean; bank: boolean } | null>(null);
   const [payoutMsg, setPayoutMsg] = useState<string | null>(null);
   const [payoutBusy, setPayoutBusy] = useState(false);
+  const [feeForm, setFeeForm] = useState({ deposit: "6", unlockBase: "3", unlockCap: "3" });
+  const [feeMsg, setFeeMsg] = useState<string | null>(null);
+  const [feeBusy, setFeeBusy] = useState(false);
+
 
 
 
   useEffect(() => {
-    Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone(), adminSecuritySurveyStatus(), adminAnalytics(), adminGetPayoutMethods()])
-      .then(([o, u, t, s, sv, an, pm]) => {
+    Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone(), adminSecuritySurveyStatus(), adminAnalytics(), adminGetPayoutMethods(), adminGetFeePolicy()])
+      .then(([o, u, t, s, sv, an, pm, fp]) => {
         setOverview(o);
         setUsers(u);
         setTxs(t);
@@ -128,6 +134,13 @@ function Console() {
         setSurveyStatus(sv);
         setAnalytics(an);
         setPayoutMethods(pm);
+        if (fp) {
+          setFeeForm({
+            deposit: String(Math.round(fp.depositFeeRate * 1000) / 10),
+            unlockBase: String(Math.round(fp.earlyUnlockBaseRate * 1000) / 10),
+            unlockCap: String(Math.round(fp.earlyUnlockCapRate * 1000) / 10),
+          });
+        }
       })
       .catch((err) => setError(errMessage(err)));
   }, []);
@@ -243,6 +256,65 @@ function Console() {
         {supportMsg ? <p className="text-sm text-muted">{supportMsg}</p> : null}
       </Card>
 
+
+      <Card className="space-y-3 p-4">
+        <h2 className="font-display text-lg font-semibold">Platform fees</h2>
+        <p className="text-sm text-muted">
+          These percentages drive deposits, early unlock, Terms, and Privacy. Deposit fee is split half profit / half
+          payout reserve for bookkeeping. Early unlock uses base × remaining fraction, capped at the max you set (default
+          max 3%).
+        </p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="fee-dep">Deposit fee %</Label>
+            <Input
+              id="fee-dep"
+              inputMode="decimal"
+              value={feeForm.deposit}
+              onChange={(e) => setFeeForm((f) => ({ ...f, deposit: e.target.value }))}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="fee-ub">Early unlock base %</Label>
+            <Input
+              id="fee-ub"
+              inputMode="decimal"
+              value={feeForm.unlockBase}
+              onChange={(e) => setFeeForm((f) => ({ ...f, unlockBase: e.target.value }))}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="fee-uc">Early unlock max %</Label>
+            <Input
+              id="fee-uc"
+              inputMode="decimal"
+              value={feeForm.unlockCap}
+              onChange={(e) => setFeeForm((f) => ({ ...f, unlockCap: e.target.value }))}
+            />
+          </div>
+        </div>
+        <Button
+          type="button"
+          disabled={feeBusy}
+          onClick={() => {
+            setFeeBusy(true);
+            setFeeMsg(null);
+            void adminSetFeePolicy({
+              data: {
+                depositFeePercent: Number(feeForm.deposit),
+                earlyUnlockBasePercent: Number(feeForm.unlockBase),
+                earlyUnlockCapPercent: Number(feeForm.unlockCap),
+              },
+            })
+              .then(() => setFeeMsg("Fee policy saved. Terms and Privacy will show the new figures."))
+              .catch((err) => setFeeMsg(errMessage(err)))
+              .finally(() => setFeeBusy(false));
+          }}
+        >
+          {feeBusy ? "Saving…" : "Save fee policy"}
+        </Button>
+        {feeMsg ? <p className="text-sm text-muted">{feeMsg}</p> : null}
+      </Card>
 
       <Card className="space-y-3 p-4">
         <h2 className="font-display text-lg font-semibold">Payout methods</h2>

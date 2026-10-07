@@ -1,5 +1,6 @@
 import { createRootRoute, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router";
 import { PwaPrompt } from "@/components/pwa-prompt";
+import { THEME_BOOT_SCRIPT } from "@/components/theme-toggle";
 import { PwaRegister } from "@/components/pwa-register";
 import { APP_NAME } from "@/lib/nexa/constants";
 import appCss from "../styles.css?url";
@@ -49,6 +50,7 @@ export const Route = createRootRoute({
     <html lang="en" className="antialiased" suppressHydrationWarning>
       <head>
         <HeadContent />
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
       </head>
       <body>
         <Outlet />

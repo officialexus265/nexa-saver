@@ -24,6 +24,7 @@ import {
   cancelWithdrawTimeLock,
   extendWithdrawTimeLock,
   getPlatformSupportPhone,
+  getPublicFeePolicy,
   verifyPin,
   resendVerificationEmailFn,
 } from "@/lib/nexa/fns";
@@ -70,6 +71,8 @@ function Vault({
   const [success, setSuccess] = useState<{ title: string; body: string } | null>(null);
   // Hidden until the user explicitly reveals with PIN (never auto-show on load).
   const [balanceVisible, setBalanceVisible] = useState(false);
+  const [depositFeeRate, setDepositFeeRate] = useState(DEPOSIT_FEE_RATE);
+
   const [selectedTx, setSelectedTx] = useState<PublicTx | null>(null);
 
   const revealed = Boolean(balanceVisible && balance && !balance.locked);
@@ -88,6 +91,10 @@ function Vault({
     void getBalance()
       .then(setBalance)
       .catch(() => setBalance(null));
+    void getPublicFeePolicy()
+      .then((p) => setDepositFeeRate(p.depositFeeRate))
+      .catch(() => undefined);
+
   }, []);
 
   return (
@@ -225,6 +232,7 @@ function Vault({
       <DepositModal
         open={depositOpen}
         demo={demoPayments}
+        depositFeeRate={depositFeeRate}
         onClose={() => setDepositOpen(false)}
         onSuccess={(title, body) => {
           setDepositOpen(false);
@@ -232,7 +240,7 @@ function Vault({
           void reloadMoney();
         }}
       />
-            <WithdrawModal
+      <WithdrawModal
         open={withdrawOpen}
         phone={profile.phone}
         phoneVerified={Boolean(profile.phoneVerified)}
@@ -482,11 +490,13 @@ function CheckBalanceModal({ open, onClose, onDone }: { open: boolean; onClose: 
 }
 
 function DepositModal({
+  depositFeeRate = DEPOSIT_FEE_RATE,
   open,
   demo,
   onClose,
   onSuccess,
 }: {
+  depositFeeRate?: number;
   open: boolean;
   demo: boolean;
   onClose: () => void;
@@ -499,7 +509,7 @@ function DepositModal({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const kwacha = parseKwachaInput(amount);
-  const split = kwacha ? splitDeposit(kwachaToTambala(kwacha)) : null;
+  const split = kwacha ? splitDeposit(kwachaToTambala(kwacha), { depositFeeRate, platformProfitRate: depositFeeRate / 2, payoutReserveRate: depositFeeRate / 2 }) : null;
 
   function reset() {
     setStage("form");
@@ -579,7 +589,7 @@ function DepositModal({
         <div className="space-y-4">
           <div className="rounded-xl bg-surface-2 p-4 text-sm">
             <p>
-              The system will keep {(DEPOSIT_FEE_RATE * 100).toFixed(0)}% of whatever amount you are depositing as a
+              The system will keep {(depositFeeRate * 100).toFixed(1).replace(/\.0$/, '')}% of whatever amount you are depositing as a
               withdrawal fee.
             </p>
             <p className="mt-3 text-muted">

@@ -91,6 +91,6 @@ export const WITHDRAW_LOCK_COOLING_OFF_MS = 48 * 60 * 60 * 1000;
 export const WITHDRAW_LOCK_MAX_YEARS = 5;
 export const WITHDRAW_LOCK_LONG_YEARS = 2;
 /** Max early-unlock fee as fraction of vault balance. */
-export const EARLY_UNLOCK_FEE_CAP_RATE = 0.05;
+export const EARLY_UNLOCK_FEE_CAP_RATE = 0.03;
 /** Base early-unlock fee rate scaled by remaining lock fraction. */
 export const EARLY_UNLOCK_FEE_BASE_RATE = 0.03;
