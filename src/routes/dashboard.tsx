@@ -731,8 +731,8 @@ function WithdrawLockPanel() {
 
   return (
     <Card className="space-y-3 p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 flex-1">
+      <div className="space-y-3">
+        <div>
           <h2 className="font-display text-lg font-semibold">Withdrawal lock</h2>
           <p className="text-sm text-muted">
             Optional commitment: deposit anytime, no withdrawals until the date you set.
@@ -743,8 +743,8 @@ function WithdrawLockPanel() {
             type="button"
             className={
               open
-                ? "shrink-0 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-fg"
-                : "shrink-0 rounded-full border border-border bg-surface-2 px-4 py-2 text-sm font-medium text-fg"
+                ? "flex w-full items-center justify-center rounded-full border border-border bg-surface-2 py-3 text-sm font-medium text-fg"
+                : "flex w-full items-center justify-center rounded-full bg-primary py-3 text-sm font-medium text-primary-fg"
             }
             onClick={(e) => {
               e.preventDefault();
@@ -754,12 +754,12 @@ function WithdrawLockPanel() {
               setOpen((v) => !v);
             }}
           >
-            {open ? "Hide lock form" : "Set lock"}
+            {open ? "Hide lock form" : "Set withdrawal lock"}
           </button>
         ) : (
-          <span className="shrink-0 rounded-full bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary">
-            Lock active
-          </span>
+          <p className="rounded-full bg-primary/15 px-3 py-2 text-center text-xs font-medium text-primary">
+            Lock active — use the section below to cancel or unlock
+          </p>
         )}
       </div>
 
@@ -905,7 +905,7 @@ function WithdrawLockPanel() {
       ) : null}
 
       {!locked && !open ? (
-        <p className="text-xs text-muted">Tap &quot;Set lock&quot; to choose how long withdrawals stay locked.</p>
+        <p className="text-xs text-muted">Use the button above to choose how long withdrawals stay locked. This never opens the phone dialer.</p>
       ) : null}
 
       {err ? <p className="text-sm text-danger">{err}</p> : null}
