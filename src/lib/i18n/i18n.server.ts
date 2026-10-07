@@ -9,21 +9,29 @@ export type LangRow = {
 };
 
 export async function listLanguages(sql: Sql): Promise<LangRow[]> {
-  const rows = await sql<{ code: string; name: string; enabled: boolean; is_default: boolean }>`
-    select code, name, enabled, is_default from app_languages order by is_default desc, name asc
-  `;
-  if (!rows.length) {
+  try {
+    const rows = await sql<{ code: string; name: string; enabled: boolean; is_default: boolean }>`
+      select code, name, enabled, is_default from app_languages order by is_default desc, name asc
+    `;
+    if (!rows.length) {
+      return [
+        { code: "en", name: "English", enabled: true, isDefault: true },
+        { code: "ny", name: "Chichewa", enabled: false, isDefault: false },
+      ];
+    }
+    return rows.map((r) => ({
+      code: r.code,
+      name: r.name,
+      enabled: Boolean(r.enabled),
+      isDefault: Boolean(r.is_default),
+    }));
+  } catch {
+    // Table not migrated yet
     return [
       { code: "en", name: "English", enabled: true, isDefault: true },
       { code: "ny", name: "Chichewa", enabled: false, isDefault: false },
     ];
   }
-  return rows.map((r) => ({
-    code: r.code,
-    name: r.name,
-    enabled: Boolean(r.enabled),
-    isDefault: Boolean(r.is_default),
-  }));
 }
 
 export async function addLanguage(sql: Sql, code: string, name: string): Promise<void> {
@@ -47,13 +55,17 @@ export async function setLanguageEnabled(sql: Sql, code: string, enabled: boolea
 /** Published map for a language (fallback en). */
 export async function getPublishedMap(sql: Sql, lang: string): Promise<Record<string, string>> {
   if (lang === "en") return { ...EN_CATALOG };
-  const rows = await sql<{ msg_key: string; published_value: string | null }>`
-    select msg_key, published_value from app_translations
-    where lang_code = ${lang} and published_value is not null and published_value <> ''
-  `;
   const map: Record<string, string> = { ...EN_CATALOG };
-  for (const r of rows) {
-    if (r.published_value) map[r.msg_key] = r.published_value;
+  try {
+    const rows = await sql<{ msg_key: string; published_value: string | null }>`
+      select msg_key, published_value from app_translations
+      where lang_code = ${lang} and published_value is not null and published_value <> ''
+    `;
+    for (const r of rows) {
+      if (r.published_value) map[r.msg_key] = r.published_value;
+    }
+  } catch {
+    /* ignore */
   }
   return map;
 }
@@ -61,13 +73,17 @@ export async function getPublishedMap(sql: Sql, lang: string): Promise<Record<st
 /** Draft preferred, else published, else en — for admin studio. */
 export async function getDraftMap(sql: Sql, lang: string): Promise<Record<string, string>> {
   if (lang === "en") return { ...EN_CATALOG };
-  const rows = await sql<{ msg_key: string; draft_value: string | null; published_value: string | null }>`
-    select msg_key, draft_value, published_value from app_translations where lang_code = ${lang}
-  `;
   const map: Record<string, string> = { ...EN_CATALOG };
-  for (const r of rows) {
-    const v = (r.draft_value && r.draft_value.length ? r.draft_value : r.published_value) || "";
-    if (v) map[r.msg_key] = v;
+  try {
+    const rows = await sql<{ msg_key: string; draft_value: string | null; published_value: string | null }>`
+      select msg_key, draft_value, published_value from app_translations where lang_code = ${lang}
+    `;
+    for (const r of rows) {
+      const v = (r.draft_value && r.draft_value.length ? r.draft_value : r.published_value) || "";
+      if (v) map[r.msg_key] = v;
+    }
+  } catch {
+    /* no table yet — return English catalog as starting point */
   }
   return map;
 }
@@ -79,6 +95,7 @@ export async function saveDraft(
 ): Promise<number> {
   if (lang === "en") throw new Error("Edit other languages; English is the source catalog.");
   let n = 0;
+  try {
   for (const [key, value] of Object.entries(entries)) {
     if (!(key in EN_CATALOG) && !ALL_MESSAGE_KEYS.includes(key as never)) {
       // allow unknown keys from older catalogs

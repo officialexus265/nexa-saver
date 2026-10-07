@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { SessionGate } from "@/components/session-gate";
 import { Button } from "@/components/ui/button";
@@ -14,53 +14,84 @@ import {
   adminSaveTranslationDraft,
   adminSetLanguageEnabled,
 } from "@/lib/nexa/fns";
-import { ALL_MESSAGE_KEYS } from "@/lib/i18n/catalog-en";
+import { ALL_MESSAGE_KEYS, EN_CATALOG } from "@/lib/i18n/catalog-en";
 
 export const Route = createFileRoute("/admin/translations")({
-  component: () => (
-    <SessionGate>
-      {(ctx) =>
-        ctx.profile.role === "admin" ? <Studio /> : <p className="p-6 text-sm text-danger">Admin only</p>
-      }
-    </SessionGate>
-  ),
+  component: AdminTranslationsPage,
 });
+
+function AdminTranslationsPage() {
+  return (
+    <SessionGate admin>
+      {() => <Studio />}
+    </SessionGate>
+  );
+}
 
 function Studio() {
   const navigate = useNavigate();
-  const [langs, setLangs] = useState<Array<{ code: string; name: string; enabled: boolean }>>([]);
+  const [langs, setLangs] = useState<Array<{ code: string; name: string; enabled: boolean }>>([
+    { code: "ny", name: "Chichewa", enabled: false },
+  ]);
   const [lang, setLang] = useState("ny");
-  const [english, setEnglish] = useState<Record<string, string>>({});
-  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [english, setEnglish] = useState<Record<string, string>>({ ...EN_CATALOG });
+  const [draft, setDraft] = useState<Record<string, string>>({ ...EN_CATALOG });
   const [q, setQ] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [booting, setBooting] = useState(true);
   const [newCode, setNewCode] = useState("");
   const [newName, setNewName] = useState("");
 
-  function reloadLangs() {
-    return adminListLanguages()
-      .then(setLangs)
-      .catch((e) => setErr(errMessage(e)));
-  }
-
-  function loadDraft(code: string) {
+  const loadDraft = useCallback(async (code: string) => {
     setBusy(true);
     setErr(null);
-    void adminGetTranslationDraft({ data: { lang: code } })
-      .then((res) => {
-        setEnglish(res.english);
-        setDraft(res.draft);
-        setLang(code);
-      })
-      .catch((e) => setErr(errMessage(e)))
-      .finally(() => setBusy(false));
-  }
+    try {
+      const res = await adminGetTranslationDraft({ data: { lang: code } });
+      setEnglish(res.english);
+      setDraft(res.draft);
+      setLang(code);
+    } catch (e) {
+      // Still show catalog so the page is usable
+      setEnglish({ ...EN_CATALOG });
+      setDraft({ ...EN_CATALOG });
+      setLang(code);
+      setErr(
+        errMessage(e) +
+          " — Showing English catalog. If tables are missing, redeploy so migration 0022 runs, then refresh.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   useEffect(() => {
-    void reloadLangs().then(() => loadDraft("ny"));
-  }, []);
+    let cancelled = false;
+    (async () => {
+      setBooting(true);
+      try {
+        const list = await adminListLanguages();
+        if (cancelled) return;
+        const nonEn = list.filter((l) => l.code !== "en");
+        setLangs(nonEn.length ? nonEn : [{ code: "ny", name: "Chichewa", enabled: false }]);
+        const start = nonEn[0]?.code ?? "ny";
+        await loadDraft(start);
+      } catch (e) {
+        if (!cancelled) {
+          setErr(errMessage(e));
+          setLangs([{ code: "ny", name: "Chichewa", enabled: false }]);
+          setEnglish({ ...EN_CATALOG });
+          setDraft({ ...EN_CATALOG });
+        }
+      } finally {
+        if (!cancelled) setBooting(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadDraft]);
 
   const keys = useMemo(() => {
     const qq = q.trim().toLowerCase();
@@ -74,6 +105,14 @@ function Studio() {
 
   const current = langs.find((l) => l.code === lang);
 
+  if (booting) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-4 px-4 py-10">
+        <p className="text-sm text-muted">Loading translation studio…</p>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-3xl space-y-5 px-4 py-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -82,8 +121,8 @@ function Studio() {
           <h1 className="font-display text-3xl font-semibold">Translation studio</h1>
           <p className="mt-1 text-sm text-muted">
             Translate <strong className="text-fg">whole phrases as users see them</strong> — not word by word. Example:
-            English &quot;I want tea&quot; → Chichewa &quot;Ndikufuna tiyi&quot; (one natural line), never separate boxes for I / want /
-            tea. Save draft is private; Save & deploy publishes to users.
+            English &quot;I want tea&quot; → Chichewa &quot;Ndikufuna tiyi&quot;. Save draft is private; Save &amp; deploy
+            publishes to users.
           </p>
         </div>
         <Link to="/admin" className="text-sm text-primary">
@@ -91,25 +130,26 @@ function Studio() {
         </Link>
       </div>
 
-      {err ? <p className="text-sm text-danger">{err}</p> : null}
+      {err ? <p className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{err}</p> : null}
       {msg ? <p className="text-sm text-primary">{msg}</p> : null}
+      {busy ? <p className="text-xs text-muted">Working…</p> : null}
 
       <Card className="space-y-3 p-4">
         <Label>Language</Label>
         <div className="flex flex-wrap gap-2">
-          {langs
-            .filter((l) => l.code !== "en")
-            .map((l) => (
-              <Button
-                key={l.code}
-                type="button"
-                variant={lang === l.code ? "default" : "secondary"}
-                size="sm"
-                onClick={() => loadDraft(l.code)}
-              >
-                {l.name} ({l.code}){l.enabled ? " · live" : ""}
-              </Button>
-            ))}
+          {langs.map((l) => (
+            <Button
+              key={l.code}
+              type="button"
+              variant={lang === l.code ? "default" : "secondary"}
+              size="sm"
+              disabled={busy}
+              onClick={() => void loadDraft(l.code)}
+            >
+              {l.name} ({l.code})
+              {l.enabled ? " · live" : ""}
+            </Button>
+          ))}
         </div>
         <div className="grid gap-2 sm:grid-cols-3">
           <Input placeholder="Code e.g. pt" value={newCode} onChange={(e) => setNewCode(e.target.value)} />
@@ -117,15 +157,15 @@ function Studio() {
           <Button
             type="button"
             variant="secondary"
-            disabled={!newCode || !newName}
+            disabled={!newCode || !newName || busy}
             onClick={() => {
               void adminAddLanguage({ data: { code: newCode, name: newName } })
                 .then((list) => {
-                  setLangs(list);
+                  setLangs(list.filter((l) => l.code !== "en"));
                   setNewCode("");
                   setNewName("");
                   setMsg("Language added. Fill phrases, then deploy.");
-                  loadDraft(newCode.trim().toLowerCase());
+                  return loadDraft(newCode.trim().toLowerCase());
                 })
                 .catch((e) => setErr(errMessage(e)));
             }}
@@ -133,18 +173,18 @@ function Studio() {
             Add language
           </Button>
         </div>
-        {current && current.code !== "en" ? (
+        {current ? (
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
               checked={current.enabled}
               onChange={(e) => {
                 void adminSetLanguageEnabled({ data: { code: lang, enabled: e.target.checked } })
-                  .then(setLangs)
+                  .then((list) => setLangs(list.filter((l) => l.code !== "en")))
                   .catch((er) => setErr(errMessage(er)));
               }}
             />
-            Language enabled for users (they can select it; still needs published phrases)
+            Language enabled for users (needs published phrases to be useful)
           </label>
         ) : null}
       </Card>
@@ -154,10 +194,11 @@ function Studio() {
           <Button
             type="button"
             variant="secondary"
-            disabled={busy || lang === "en"}
+            disabled={busy}
             onClick={() => {
               setBusy(true);
               setMsg(null);
+              setErr(null);
               void adminSaveTranslationDraft({ data: { lang, entries: draft } })
                 .then(() => setMsg("Draft saved (not live yet)."))
                 .catch((e) => setErr(errMessage(e)))
@@ -168,26 +209,27 @@ function Studio() {
           </Button>
           <Button
             type="button"
-            disabled={busy || lang === "en"}
+            disabled={busy}
             onClick={() => {
               setBusy(true);
               setMsg(null);
+              setErr(null);
               void adminPublishTranslations({ data: { lang, entries: draft, enable: true } })
                 .then((r) => {
                   setMsg(`Save & deploy: ${r.published} phrases live. Language enabled.`);
-                  return reloadLangs();
+                  return adminListLanguages();
                 })
+                .then((list) => setLangs(list.filter((l) => l.code !== "en")))
                 .catch((e) => setErr(errMessage(e)))
                 .finally(() => setBusy(false));
             }}
           >
-            Save & deploy
+            Save &amp; deploy
           </Button>
           <Button
             type="button"
             variant="outline"
             onClick={() => {
-              // stash draft in sessionStorage for preview route
               try {
                 sessionStorage.setItem("nexa-i18n-preview", JSON.stringify({ lang, map: draft }));
               } catch {
@@ -206,8 +248,7 @@ function Studio() {
           className="w-full"
         />
         <p className="text-xs text-muted">
-          {keys.length} full UI phrases · top = English as on screen · bottom = your natural translation of that whole
-          line
+          {keys.length} full UI phrases · top = English as on screen · bottom = your natural translation
         </p>
         <ul className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">
           {keys.map((key) => (

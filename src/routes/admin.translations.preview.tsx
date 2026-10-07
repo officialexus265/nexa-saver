@@ -6,14 +6,16 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/admin/translations/preview")({
-  component: () => (
-    <SessionGate>
-      {(ctx) =>
-        ctx.profile.role === "admin" ? <PreviewBoot /> : <p className="p-6 text-sm text-danger">Admin only</p>
-      }
-    </SessionGate>
-  ),
+  component: AdminTranslationsPreviewPage,
 });
+
+function AdminTranslationsPreviewPage() {
+  return (
+    <SessionGate admin>
+      {() => <PreviewBoot />}
+    </SessionGate>
+  );
+}
 
 function PreviewBoot() {
   const [map, setMap] = useState<Record<string, string> | null>(null);

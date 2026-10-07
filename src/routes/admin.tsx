@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { SessionGate } from "@/components/session-gate";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -183,9 +183,9 @@ function Console() {
         <p className="text-sm text-muted">Platform</p>
         <h1 className="font-display text-3xl font-semibold">Performance</h1>
         <p className="mt-2">
-          <a href="/admin/translations" className="text-sm font-medium text-primary underline">
+          <Link to="/admin/translations" className="text-sm font-medium text-primary underline">
             Translate · language studio
-          </a>
+          </Link>
         </p>
         {overview.demoPayments ? (
           <p className="mt-1 text-sm text-warn">
