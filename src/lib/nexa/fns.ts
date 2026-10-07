@@ -112,6 +112,13 @@ type ProfileRow = {
   anchor_bank_account_name?: string | null;
   admin_locked_at?: unknown;
   admin_lock_reason?: string | null;
+  admin_withdraw_locked_at?: unknown;
+  admin_withdraw_lock_reason?: string | null;
+  withdraw_lock_until?: unknown;
+  withdraw_lock_started_at?: unknown;
+  withdraw_lock_cooling_ends_at?: unknown;
+  withdraw_lock_original_until?: unknown;
+  gender?: string | null;
 };
 
 function toPublic(row: ProfileRow): PublicProfile {
@@ -131,6 +138,14 @@ function toPublic(row: ProfileRow): PublicProfile {
     bankHoldUntil: iso(row.bank_hold_until),
     hasBankDetails: Boolean(row.bank_uuid && row.bank_account_number),
     adminLocked: Boolean(row.admin_locked_at),
+    adminWithdrawLocked: Boolean(row.admin_withdraw_locked_at),
+    adminWithdrawLockReason: row.admin_withdraw_lock_reason
+      ? String(row.admin_withdraw_lock_reason)
+      : null,
+    withdrawLockUntil: row.withdraw_lock_until
+      ? new Date(row.withdraw_lock_until as string | Date).toISOString()
+      : null,
+
     adminLockReason: row.admin_lock_reason ?? null,
     lockMode:
       row.lock_mode === "instant" ? "instant" : row.lock_mode === "off" ? "off" : "idle",
@@ -582,7 +597,7 @@ export const listTransactions = createServerFn({ method: "GET" })
     `;
     return rows.map((r) => ({
       id: asInt(r.id),
-      kind: r.kind === "withdrawal" ? "withdrawal" : "deposit",
+      kind: r.kind === "withdrawal" ? "withdrawal" : r.kind === "fee" ? "fee" : "deposit",
       status:
         r.status === "success"
           ? "success"
@@ -790,6 +805,17 @@ export const startWithdraw = createServerFn({ method: "POST" })
       if (!profile) throw new Error("Complete your profile first");
       if (profile.admin_locked_at) {
         throw new Error("This account is locked by support. Withdrawals are disabled until it is unlocked.");
+      }
+      if (profile.admin_withdraw_locked_at) {
+        throw new Error(
+          "Withdrawals are locked by the platform. Contact support via WhatsApp using the platform number. Deposits still work.",
+        );
+      }
+      if (profile.withdraw_lock_until && new Date(profile.withdraw_lock_until as string | Date).getTime() > Date.now()) {
+        const until = new Date(profile.withdraw_lock_until as string | Date).toLocaleString();
+        throw new Error(
+          `Your withdrawals are time-locked until ${until}. You can still deposit. Early unlock may cost a fee after the free cooling-off window.`,
+        );
       }
 
       const pinOk = await verifySecret(profile.pin_hash, data.pin);
@@ -1295,17 +1321,32 @@ export const adminOverview = createServerFn({ method: "GET" })
       paidOut = 0;
     }
     const bookProfit = asInt(money[0]?.profit);
+    let unlockFees = 0;
+    try {
+      const feeRows = await sql<{ fees: number }>`
+        select coalesce(sum(gross_tambala), 0)::bigint as fees
+        from transactions
+        where kind = ${"fee"} and status = ${"success"}
+          and note ilike ${"%Early withdrawal unlock%"}
+      `;
+      unlockFees = asInt(feeRows[0]?.fees);
+    } catch {
+      unlockFees = 0;
+    }
+    // Withdrawable = deposit book profit + unlock fees − treasury already paid out
+    const available = Math.max(0, bookProfit + unlockFees - paidOut);
     return {
       userCount: asInt(users[0]?.n),
       totalDepositsTambala: asInt(money[0]?.deposits),
       totalWithdrawalsTambala: asInt(money[0]?.withdrawals),
       userBalancesTambala: asInt(wallet[0]?.bal),
       platformProfitTambala: bookProfit,
+      earlyUnlockFeesTambala: unlockFees,
       payoutReserveTambala: asInt(wallet[0]?.res),
       pendingCount: asInt(money[0]?.pending),
       demoPayments: demoPaymentsEnabled(),
       treasuryPaidOutTambala: paidOut,
-      treasuryAvailableTambala: Math.max(0, bookProfit - paidOut),
+      treasuryAvailableTambala: available,
       series: seriesRows.map((r) => ({
         day: String(r.day).slice(0, 10),
         deposits: asInt(r.deposits),
@@ -1366,7 +1407,7 @@ export const adminTransactions = createServerFn({ method: "GET" })
     `;
     return rows.map((r) => ({
       id: asInt(r.id),
-      kind: r.kind === "withdrawal" ? "withdrawal" : "deposit",
+      kind: r.kind === "withdrawal" ? "withdrawal" : r.kind === "fee" ? "fee" : "deposit",
       status:
         r.status === "success"
           ? "success"
@@ -1474,9 +1515,7 @@ export const changeRegisteredPhone = createServerFn({ method: "POST" })
 
 export const getPlatformSupportPhone = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .handler(async ({ context }) => {
-    const profile = await loadProfile(context.userId);
-    if (!profile || profile.role !== "admin") throw new Error("Admin only");
+  .handler(async () => {
     const { getSql } = await import("@/lib/db");
     const { getSupportPhone } = await import("./withdraw-limits.server");
     const sql = await getSql();
@@ -3252,4 +3291,275 @@ export const adminTreasuryWithdraw = createServerFn({ method: "POST" })
       detail: `ref=${reference} gross=${gross} net=${net}`,
     });
     return result;
+  });
+
+
+export const getWithdrawLockStatus = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { getSql } = await import("@/lib/db");
+    const { loadLockStatus } = await import("./withdraw-lock.server");
+    const sql = await getSql();
+    const bal = await sql<{ balance_tambala: number }>`
+      select balance_tambala from wallets where user_id = ${context.userId} limit 1
+    `;
+    return loadLockStatus(sql, context.userId, Number(bal[0]?.balance_tambala ?? 0));
+  });
+
+export const setWithdrawTimeLock = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      amount: z.number().int().min(1).max(366 * 5),
+      unit: z.enum(["days", "months", "years"]),
+      confirmLong: z.boolean().optional(),
+      pin: pinSchema,
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Complete your profile first");
+    if (profile.role === "admin") throw new Error("Admin accounts cannot use commitment locks.");
+    const { verifySecret } = await import("./crypto");
+    if (!(await verifySecret(profile.pin_hash, data.pin))) throw new Error("Incorrect PIN");
+
+    const { parseLockDuration, coolingEndsFrom, logLockEvent } = await import("./withdraw-lock.server");
+    const { WITHDRAW_LOCK_LONG_YEARS } = await import("./constants");
+    const { until, ms } = parseLockDuration({ amount: data.amount, unit: data.unit });
+    const yearsApprox = ms / (365.25 * 24 * 60 * 60 * 1000);
+    if (yearsApprox >= WITHDRAW_LOCK_LONG_YEARS && !data.confirmLong) {
+      throw new Error(
+        `Locks of ${WITHDRAW_LOCK_LONG_YEARS}+ years need an extra confirmation. Tick the long-period box and try again.`,
+      );
+    }
+
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const existing = await sql<{ withdraw_lock_until: Date | string | null }>`
+      select withdraw_lock_until from profiles where user_id = ${context.userId} limit 1
+    `;
+    if (existing[0]?.withdraw_lock_until && new Date(existing[0].withdraw_lock_until).getTime() > Date.now()) {
+      throw new Error("You already have an active withdrawal lock. Cancel or edit it from the lock panel.");
+    }
+
+    const started = new Date();
+    const cooling = coolingEndsFrom(started);
+    await sql`
+      update profiles
+      set withdraw_lock_until = ${until},
+          withdraw_lock_started_at = ${started},
+          withdraw_lock_cooling_ends_at = ${cooling},
+          withdraw_lock_original_until = ${until},
+          updated_at = now()
+      where user_id = ${context.userId}
+    `;
+    await logLockEvent(sql, {
+      userId: context.userId,
+      eventType: "set",
+      lockUntil: until,
+      detail: `${data.amount} ${data.unit}; unlock ${until.toISOString()}`,
+    });
+    return {
+      ok: true as const,
+      until: until.toISOString(),
+      coolingEndsAt: cooling.toISOString(),
+    };
+  });
+
+export const cancelWithdrawTimeLock = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ pin: pinSchema, acceptFee: z.boolean().optional() }))
+  .handler(async ({ context, data }) => {
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Complete your profile first");
+    const { verifySecret } = await import("./crypto");
+    if (!(await verifySecret(profile.pin_hash, data.pin))) throw new Error("Incorrect PIN");
+
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { loadLockStatus, logLockEvent } = await import("./withdraw-lock.server");
+    const sql = await getSql();
+    const bal = await sql<{ balance_tambala: number }>`
+      select balance_tambala from wallets where user_id = ${context.userId} limit 1
+    `;
+    const status = await loadLockStatus(sql, context.userId, Number(bal[0]?.balance_tambala ?? 0));
+    if (!status.active) throw new Error("No active withdrawal lock.");
+
+    if (status.inCoolingOff) {
+      await sql`
+        update profiles
+        set withdraw_lock_until = null,
+            withdraw_lock_started_at = null,
+            withdraw_lock_cooling_ends_at = null,
+            withdraw_lock_original_until = null,
+            updated_at = now()
+        where user_id = ${context.userId}
+      `;
+      await logLockEvent(sql, {
+        userId: context.userId,
+        eventType: "cancel_cooling",
+        detail: "free cancel during cooling-off",
+      });
+      return { ok: true as const, feeTambala: 0, free: true as const };
+    }
+
+    const fee = status.earlyUnlockFeeTambala;
+    if (fee > 0 && !data.acceptFee) {
+      throw new Error(
+        `Early unlock fee is ${fee / 100} kwacha (${(status.earlyUnlockFeeRate * 100).toFixed(1)}% of balance). Accept the fee to continue.`,
+      );
+    }
+    if (fee > Number(bal[0]?.balance_tambala ?? 0)) {
+      throw new Error("Balance is too low to cover the early-unlock fee.");
+    }
+
+    await withTransaction(async (tx) => {
+      if (fee > 0) {
+        await tx`
+          update wallets
+          set balance_tambala = balance_tambala - ${fee},
+              updated_at = now()
+          where user_id = ${context.userId} and balance_tambala >= ${fee}
+        `;
+        const ref = `ULK_${context.userId.slice(0, 8)}_${Date.now().toString(36)}`;
+        await tx`
+          insert into transactions (
+            user_id, kind, status, gross_tambala, credited_tambala,
+            platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
+          ) values (
+            ${context.userId}, ${"fee"}, ${"success"}, ${fee}, ${0},
+            ${fee}, ${0}, ${ref},
+            ${"Early withdrawal unlock fee"}, now()
+          )
+        `;
+        // Book fee as platform profit / treasury
+        try {
+          await tx`
+            insert into platform_treasury (id, balance_tambala, lifetime_in_tambala, updated_at)
+            values (1, ${fee}, ${fee}, now())
+            on conflict (id) do update set
+              balance_tambala = platform_treasury.balance_tambala + ${fee},
+              lifetime_in_tambala = platform_treasury.lifetime_in_tambala + ${fee},
+              updated_at = now()
+          `;
+        } catch { /* optional */ }
+      }
+      await tx`
+        update profiles
+        set withdraw_lock_until = null,
+            withdraw_lock_started_at = null,
+            withdraw_lock_cooling_ends_at = null,
+            withdraw_lock_original_until = null,
+            updated_at = now()
+        where user_id = ${context.userId}
+      `;
+    });
+    await logLockEvent(sql, {
+      userId: context.userId,
+      eventType: "early_unlock",
+      feeTambala: fee,
+      detail: `fee=${fee}`,
+    });
+    return { ok: true as const, feeTambala: fee, free: false as const };
+  });
+
+export const extendWithdrawTimeLock = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      amount: z.number().int().min(1).max(366 * 5),
+      unit: z.enum(["days", "months", "years"]),
+      pin: pinSchema,
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Complete your profile first");
+    const { verifySecret } = await import("./crypto");
+    if (!(await verifySecret(profile.pin_hash, data.pin))) throw new Error("Incorrect PIN");
+
+    const { getSql } = await import("@/lib/db");
+    const { parseLockDuration, logLockEvent } = await import("./withdraw-lock.server");
+    const sql = await getSql();
+    const rows = await sql<{ withdraw_lock_until: Date | string | null }>`
+      select withdraw_lock_until from profiles where user_id = ${context.userId} limit 1
+    `;
+    const current = rows[0]?.withdraw_lock_until
+      ? new Date(rows[0].withdraw_lock_until)
+      : null;
+    if (!current || current.getTime() <= Date.now()) {
+      throw new Error("No active lock to extend. Set a new lock instead.");
+    }
+    const extra = parseLockDuration({ amount: data.amount, unit: data.unit });
+    const newUntil = new Date(current.getTime() + extra.ms);
+    const maxMs = 5 * 366 * 24 * 60 * 60 * 1000;
+    const startedRow = await sql<{ withdraw_lock_started_at: Date | string | null }>`
+      select withdraw_lock_started_at from profiles where user_id = ${context.userId} limit 1
+    `;
+    const started = startedRow[0]?.withdraw_lock_started_at
+      ? new Date(startedRow[0].withdraw_lock_started_at)
+      : new Date();
+    if (newUntil.getTime() - started.getTime() > maxMs) {
+      throw new Error("Extended lock would exceed the 5-year maximum.");
+    }
+    await sql`
+      update profiles
+      set withdraw_lock_until = ${newUntil},
+          withdraw_lock_original_until = greatest(coalesce(withdraw_lock_original_until, ${newUntil}), ${newUntil}),
+          updated_at = now()
+      where user_id = ${context.userId}
+    `;
+    await logLockEvent(sql, {
+      userId: context.userId,
+      eventType: "extend",
+      lockUntil: newUntil,
+      detail: `+${data.amount} ${data.unit}`,
+    });
+    return { ok: true as const, until: newUntil.toISOString() };
+  });
+
+export const adminSetWithdrawLock = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      userId: z.string().min(1),
+      locked: z.boolean(),
+      reason: z.string().min(3).max(300),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { logLockEvent } = await import("./withdraw-lock.server");
+    const sql = await getSql();
+    if (data.locked) {
+      await sql`
+        update profiles
+        set admin_withdraw_locked_at = now(),
+            admin_withdraw_lock_reason = ${data.reason},
+            updated_at = now()
+        where user_id = ${data.userId}
+      `;
+    } else {
+      await sql`
+        update profiles
+        set admin_withdraw_locked_at = null,
+            admin_withdraw_lock_reason = null,
+            updated_at = now()
+        where user_id = ${data.userId}
+      `;
+    }
+    await logLockEvent(sql, {
+      userId: data.userId,
+      eventType: data.locked ? "admin_withdraw_lock" : "admin_withdraw_unlock",
+      detail: data.reason,
+      actorUserId: context.userId,
+    });
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      userId: data.userId,
+      action: data.locked ? "admin_withdraw_lock" : "admin_withdraw_unlock",
+      detail: data.reason,
+    });
+    return { ok: true as const, locked: data.locked };
   });

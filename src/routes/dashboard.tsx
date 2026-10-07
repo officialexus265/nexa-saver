@@ -19,6 +19,11 @@ import {
   startDeposit,
   startWithdraw,
   getPayoutMethodsPublic,
+  getWithdrawLockStatus,
+  setWithdrawTimeLock,
+  cancelWithdrawTimeLock,
+  extendWithdrawTimeLock,
+  getPlatformSupportPhone,
   verifyPin,
   resendVerificationEmailFn,
 } from "@/lib/nexa/fns";
@@ -173,6 +178,8 @@ function Vault({
       </div>
 
       <section>
+        <WithdrawLockPanel />
+
         <h2 className="mb-3 font-display text-lg font-semibold">Activity</h2>
         {txs === null ? (
           <p className="text-sm text-muted">Loading activity…</p>
@@ -604,6 +611,263 @@ function DepositModal({
         </div>
       ) : null}
     </Modal>
+  );
+}
+
+
+function WithdrawLockPanel() {
+  const [status, setStatus] = useState<Awaited<ReturnType<typeof getWithdrawLockStatus>> | null>(null);
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState("30");
+  const [unit, setUnit] = useState<"days" | "months" | "years">("days");
+  const [pin, setPin] = useState("");
+  const [confirmLong, setConfirmLong] = useState(false);
+  const [acceptFee, setAcceptFee] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [supportPhone, setSupportPhone] = useState<string | null>(null);
+
+  function refresh() {
+    void getWithdrawLockStatus()
+      .then(setStatus)
+      .catch(() => setStatus(null));
+  }
+
+  useEffect(() => {
+    refresh();
+    void getPlatformSupportPhone()
+      .then((p) => setSupportPhone(p?.phone ?? null))
+      .catch(() => null);
+  }, []);
+
+  const yearsApprox =
+    unit === "years"
+      ? Number(amount)
+      : unit === "months"
+        ? Number(amount) / 12
+        : Number(amount) / 365;
+
+  async function applyLock() {
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      const res = await setWithdrawTimeLock({
+        data: {
+          amount: Number(amount),
+          unit,
+          pin,
+          confirmLong: yearsApprox >= 2 ? confirmLong : true,
+        },
+      });
+      setMsg(
+        `Withdrawals locked until ${new Date(res.until).toLocaleString()}. Free changes until ${new Date(res.coolingEndsAt).toLocaleString()}.`,
+      );
+      setPin("");
+      setOpen(false);
+      refresh();
+    } catch (e) {
+      setErr(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unlock() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await cancelWithdrawTimeLock({
+        data: { pin, acceptFee: acceptFee || undefined },
+      });
+      setMsg(
+        res.free
+          ? "Lock cancelled free during cooling-off."
+          : `Lock removed. Early-unlock fee ${formatKwacha(res.feeTambala)} taken from your vault.`,
+      );
+      setPin("");
+      setAcceptFee(false);
+      refresh();
+    } catch (e) {
+      setErr(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const adminLocked = status?.adminWithdrawLocked;
+
+  return (
+    <Card className="space-y-3 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-display text-lg font-semibold">Withdrawal lock</h2>
+          <p className="text-sm text-muted">
+            Optional commitment: deposit anytime, no withdrawals until the date you set.
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={Boolean(status?.active) || open}
+          className={
+            status?.active || open
+              ? "relative h-7 w-12 shrink-0 rounded-full bg-primary"
+              : "relative h-7 w-12 shrink-0 rounded-full bg-surface-2"
+          }
+          onClick={() => {
+            if (status?.active) return;
+            setOpen((v) => !v);
+          }}
+        >
+          <span
+            className={
+              status?.active || open
+                ? "absolute left-6 top-0.5 size-6 rounded-full bg-white transition"
+                : "absolute left-0.5 top-0.5 size-6 rounded-full bg-muted transition"
+            }
+          />
+        </button>
+      </div>
+
+      {adminLocked ? (
+        <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm">
+          <p className="font-medium text-danger">Withdrawals locked by the platform</p>
+          <p className="mt-1 text-muted">
+            {status?.adminWithdrawLockReason || "Contact support for details. Deposits still work."}
+          </p>
+          {supportPhone ? (
+            <a
+              className="mt-2 inline-flex text-primary underline"
+              href={`https://wa.me/${supportPhone.replace(/\D/g, "").replace(/^0/, "265")}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Contact admin on WhatsApp
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+
+      {status?.active ? (
+        <div className="space-y-2 text-sm">
+          <p>
+            Locked until{" "}
+            <span className="font-medium text-fg">
+              {status.until ? new Date(status.until).toLocaleString() : "—"}
+            </span>
+          </p>
+          {status.inCoolingOff ? (
+            <p className="text-primary">
+              Free cooling-off until{" "}
+              {status.coolingEndsAt ? new Date(status.coolingEndsAt).toLocaleString() : "—"}. Cancel or edit free.
+            </p>
+          ) : (
+            <p className="text-muted">
+              Early unlock fee about {(status.earlyUnlockFeeRate * 100).toFixed(1)}% of balance (
+              {formatKwacha(status.earlyUnlockFeeTambala)}). Extending the lock is free. Shortening after cooling-off
+              costs the same as unlocking early.
+            </p>
+          )}
+          <div className="space-y-2">
+            <Label>PIN to cancel / unlock</Label>
+            <Input
+              inputMode="numeric"
+              maxLength={4}
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            />
+            {!status.inCoolingOff && status.earlyUnlockFeeTambala > 0 ? (
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={acceptFee}
+                  onChange={(e) => setAcceptFee(e.target.checked)}
+                />
+                <span>
+                  I accept the early-unlock fee of {formatKwacha(status.earlyUnlockFeeTambala)} taken from my vault
+                  (not a surprise admin fee — calculated by the system).
+                </span>
+              </label>
+            ) : null}
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={busy || pin.length !== 4 || (!status.inCoolingOff && status.earlyUnlockFeeTambala > 0 && !acceptFee)}
+              onClick={() => void unlock()}
+            >
+              {status.inCoolingOff ? "Cancel lock free" : "Unlock early"}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {open && !status?.active ? (
+        <div className="space-y-3 border-t border-border pt-3">
+          <p className="text-sm text-muted">
+            Max {5} years. After you confirm, a 48-hour cooling-off lets you cancel free. After that, early unlock costs a
+            fee based on remaining time (cap 5% of balance).
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1.5">
+              <Label>Period</Label>
+              <Input
+                inputMode="numeric"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Unit</Label>
+              <select
+                className="flex h-11 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm"
+                value={unit}
+                onChange={(e) => setUnit(e.target.value as "days" | "months" | "years")}
+              >
+                <option value="days">Days</option>
+                <option value="months">Months</option>
+                <option value="years">Years</option>
+              </select>
+            </div>
+          </div>
+          {yearsApprox >= 2 ? (
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={confirmLong}
+                onChange={(e) => setConfirmLong(e.target.checked)}
+              />
+              <span>
+                I understand this is a long lock (about {yearsApprox.toFixed(1)} years) and I cannot withdraw until it
+                ends without an early-unlock fee after cooling-off.
+              </span>
+            </label>
+          ) : null}
+          <div className="space-y-1.5">
+            <Label>Confirm with PIN</Label>
+            <Input
+              inputMode="numeric"
+              maxLength={4}
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            />
+          </div>
+          <Button
+            type="button"
+            disabled={busy || pin.length !== 4 || !Number(amount) || (yearsApprox >= 2 && !confirmLong)}
+            onClick={() => void applyLock()}
+          >
+            {busy ? "Saving…" : "Lock withdrawals"}
+          </Button>
+        </div>
+      ) : null}
+
+      {err ? <p className="text-sm text-danger">{err}</p> : null}
+      {msg ? <p className="text-sm text-primary">{msg}</p> : null}
+    </Card>
   );
 }
 

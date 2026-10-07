@@ -51,7 +51,7 @@ export type BalanceResponse =
       dailyWithdrawRemainingTambala: number;
     };
 
-export type TxKind = "deposit" | "withdrawal";
+export type TxKind = "deposit" | "withdrawal" | "fee";
 export type TxStatus = "pending" | "processing" | "success" | "failed";
 
 export type PublicTx = {
@@ -87,6 +87,7 @@ export type AdminOverview = {
   totalWithdrawalsTambala: number;
   userBalancesTambala: number;
   platformProfitTambala: number;
+  earlyUnlockFeesTambala: number;
   payoutReserveTambala: number;
   pendingCount: number;
   demoPayments: boolean;

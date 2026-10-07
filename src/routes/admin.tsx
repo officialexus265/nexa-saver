@@ -28,6 +28,7 @@ import {
   adminExportSurveyCsv,
   adminDeleteUser,
   adminLockUser,
+  adminSetWithdrawLock,
 } from "@/lib/nexa/fns";
 import { formatKwacha, tambalaToKwacha } from "@/lib/nexa/money";
 import type { AdminOverview, AdminUserRow, PublicTx } from "@/lib/nexa/types";
@@ -187,11 +188,12 @@ function Console() {
         <h2 className="font-display text-lg font-semibold">Treasury (platform profit)</h2>
         <p className="text-sm text-muted">
           Book profit is fee income from deposits. Saver balances are liabilities — never withdrawn here.
-          Treasury cash-out only uses available profit and pays ~1.8% on the mobile-money rail.
+          Treasury cash-out uses deposit book profit plus early-unlock fees collected from users, minus what you already paid out. ~1.8% applies on the mobile-money rail.
         </p>
         {overview ? (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <SurveyStat label="System profit (book)" value={formatKwacha(overview.platformProfitTambala)} />
+            <SurveyStat label="Early unlock fees" value={formatKwacha(overview.earlyUnlockFeesTambala ?? 0)} />
             <SurveyStat label="Saver balances (liability)" value={formatKwacha(overview.userBalancesTambala)} />
             <SurveyStat label="Withdrawable profit" value={formatKwacha(overview.treasuryAvailableTambala)} />
           </div>
@@ -554,7 +556,39 @@ function Console() {
                               .catch((err) => setUserActionMsg(errMessage(err)));
                           }}
                         >
-                          {u.adminLocked ? "Unlock" : "Lock"}
+                          {u.adminLocked ? "Unlock account" : "Lock account"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="h-8 text-xs"
+                          onClick={() => {
+                            const locked = Boolean((u as { adminWithdrawLocked?: boolean }).adminWithdrawLocked);
+                            const reason =
+                              window.prompt(
+                                locked
+                                  ? "Reason for unlocking withdrawals (audit):"
+                                  : "Reason for withdraw-only lock (legal / report):",
+                              ) || "";
+                            if (reason.trim().length < 3) return;
+                            void adminSetWithdrawLock({
+                              data: { userId: u.userId, reason: reason.trim(), locked: !locked },
+                            })
+                              .then(() => {
+                                setUserActionMsg(
+                                  locked
+                                    ? `Withdrawals unlocked for ${u.username}`
+                                    : `Withdrawals locked for ${u.username}`,
+                                );
+                                return adminUsers();
+                              })
+                              .then(setUsers)
+                              .catch((err) => setUserActionMsg(errMessage(err)));
+                          }}
+                        >
+                          {(u as { adminWithdrawLocked?: boolean }).adminWithdrawLocked
+                            ? "Unlock withdraw"
+                            : "Lock withdraw"}
                         </Button>
                         <Button
                           type="button"

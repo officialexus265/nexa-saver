@@ -20,6 +20,7 @@ type FormState = {
   firstName: string;
   lastName: string;
   dateOfBirth: string;
+  gender: Gender | "";
   email: string;
   phone: string;
   username: string;
@@ -50,12 +51,52 @@ const empty: FormState = {
 function SignupPage() {
   const { user, isPending } = useCurrentUserState();
   const navigate = useNavigate();
-  const [step, setStep] = useState(0);
-  const [form, setForm] = useState<FormState>(empty);
+  const [form, setForm] = useState<FormState>(() => {
+    if (typeof window === "undefined") return empty;
+    try {
+      const raw = localStorage.getItem("nexa-signup-draft-v1");
+      if (!raw) return empty;
+      const parsed = JSON.parse(raw) as Partial<FormState> & { step?: number };
+      return { ...empty, ...parsed, password: "", pin: "" };
+    } catch {
+      return empty;
+    }
+  });
+  const [step, setStepState] = useState(() => {
+    if (typeof window === "undefined") return 0;
+    try {
+      const raw = localStorage.getItem("nexa-signup-draft-v1");
+      if (!raw) return 0;
+      const parsed = JSON.parse(raw) as { step?: number };
+      const s = Number(parsed.step ?? 0);
+      return Number.isFinite(s) && s >= 0 && s <= 3 ? s : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const setStep = (n: number | ((prev: number) => number)) => {
+    setStepState((prev) => {
+      const next = typeof n === "function" ? n(prev) : n;
+      return next;
+    });
+  };
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [hasProfile, setHasProfile] = useState(false);
   const authed = Boolean(user);
+
+  // Persist draft (never store password or PIN)
+  useEffect(() => {
+    try {
+      const { password: _p, pin: _pin, ...safe } = form;
+      localStorage.setItem(
+        "nexa-signup-draft-v1",
+        JSON.stringify({ ...safe, step }),
+      );
+    } catch {
+      /* ignore quota */
+    }
+  }, [form, step]);
 
   useEffect(() => {
     if (!user) return;
@@ -278,7 +319,7 @@ function SignupPage() {
                 />
                 <span>
                   I accept the{" "}
-                  <Link to="/terms" className="text-primary">
+                  <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-primary">
                     Terms of use
                   </Link>{" "}
                   and{" "}
@@ -297,7 +338,7 @@ function SignupPage() {
                 />
                 <span>
                   I accept the{" "}
-                  <Link to="/privacy" className="text-primary">
+                  <Link to="/privacy" target="_blank" rel="noopener noreferrer" target="_blank" rel="noopener noreferrer" className="text-primary">
                     Privacy policy
                   </Link>
                   .
