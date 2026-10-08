@@ -5117,3 +5117,52 @@ export const adminSetSignupIntroVideo = createServerFn({ method: "POST" })
     `;
     return { ok: true as const, videoId: parseYoutubeVideoId(trimmed) };
   });
+
+
+export const adminUploadOgImage = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      kind: z.enum(["share", "referral"]),
+      /** raw base64 without data: prefix */
+      base64: z.string().min(100).max(2_500_000),
+      mime: z.string().min(3).max(64),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    if (!allowed.includes(data.mime)) {
+      throw new Error("Use JPEG, PNG, WebP, or GIF (max about 1.5 MB).");
+    }
+    // rough size check: base64 length * 0.75
+    if (data.base64.length * 0.75 > 1.6 * 1024 * 1024) {
+      throw new Error("Image is too large. Compress to under about 1.5 MB.");
+    }
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const dataKey = data.kind === "referral" ? "og_referral_image_data" : "og_share_image_data";
+    const typeKey = data.kind === "referral" ? "og_referral_image_type" : "og_share_image_type";
+    const pathKey = data.kind === "referral" ? "og_referral_image" : "og_share_image";
+    const publicPath = data.kind === "referral" ? "/api/og-image/referral" : "/api/og-image/share";
+
+    const set = async (key: string, value: string) => {
+      await sql`
+        insert into platform_settings (key, value, updated_at)
+        values (${key}, ${value}, now())
+        on conflict (key) do update set value = excluded.value, updated_at = now()
+      `;
+    };
+    await set(dataKey, data.base64);
+    await set(typeKey, data.mime);
+    await set(pathKey, publicPath);
+
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "og_image_upload",
+      detail: `kind=${data.kind} mime=${data.mime}`,
+    });
+
+    return { ok: true as const, path: publicPath };
+  });

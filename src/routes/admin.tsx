@@ -40,6 +40,7 @@ import {
   adminSetReferralSettings,
   adminGetSignupIntroVideo,
   adminSetSignupIntroVideo,
+  adminUploadOgImage,
   adminTreasuryWithdraw,
   adminExportSurveyCsv,
   adminDeleteUser,
@@ -525,17 +526,97 @@ function Console() {
             <Input value={refFee} onChange={(e) => setRefFee(e.target.value)} />
           </div>
         </div>
-        <p className="text-xs font-medium text-muted">Share app OG (path under /public, e.g. /og.jpg)</p>
+        <p className="text-xs font-medium text-muted">Share app OG</p>
         <Input placeholder="Title" value={ogShareTitle} onChange={(e) => setOgShareTitle(e.target.value)} />
         <Input placeholder="Description" value={ogShareDesc} onChange={(e) => setOgShareDesc(e.target.value)} />
-        <Input placeholder="Image path" value={ogShareImage} onChange={(e) => setOgShareImage(e.target.value)} />
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            className="min-w-[10rem] flex-1"
+            placeholder="Image URL path"
+            value={ogShareImage}
+            onChange={(e) => setOgShareImage(e.target.value)}
+          />
+          <label className="inline-flex min-h-11 cursor-pointer items-center rounded-xl border border-border bg-surface-2 px-3 text-sm font-medium">
+            Upload
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              className="sr-only"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const result = String(reader.result || "");
+                  const m = /^data:([^;]+);base64,(.+)$/.exec(result);
+                  if (!m) {
+                    setRefMsg("Could not read that image.");
+                    return;
+                  }
+                  void adminUploadOgImage({ data: { kind: "share", mime: m[1], base64: m[2] } })
+                    .then((r) => {
+                      setOgShareImage(r.path);
+                      setRefMsg("Share OG image uploaded.");
+                    })
+                    .catch((err) => setRefMsg(errMessage(err)));
+                };
+                reader.readAsDataURL(file);
+              }}
+            />
+          </label>
+        </div>
+        {ogShareImage.startsWith("/api/og-image") ? (
+          <img src={ogShareImage} alt="Share OG preview" className="max-h-28 rounded-lg border border-border object-cover" />
+        ) : null}
+
         <p className="text-xs font-medium text-muted">Referral invite OG</p>
         <Input placeholder="Title" value={ogRefTitle} onChange={(e) => setOgRefTitle(e.target.value)} />
         <Input placeholder="Description" value={ogRefDesc} onChange={(e) => setOgRefDesc(e.target.value)} />
-        <Input placeholder="Image path" value={ogRefImage} onChange={(e) => setOgRefImage(e.target.value)} />
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            className="min-w-[10rem] flex-1"
+            placeholder="Image URL path"
+            value={ogRefImage}
+            onChange={(e) => setOgRefImage(e.target.value)}
+          />
+          <label className="inline-flex min-h-11 cursor-pointer items-center rounded-xl border border-border bg-surface-2 px-3 text-sm font-medium">
+            Upload
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              className="sr-only"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const result = String(reader.result || "");
+                  const m = /^data:([^;]+);base64,(.+)$/.exec(result);
+                  if (!m) {
+                    setRefMsg("Could not read that image.");
+                    return;
+                  }
+                  void adminUploadOgImage({ data: { kind: "referral", mime: m[1], base64: m[2] } })
+                    .then((r) => {
+                      setOgRefImage(r.path);
+                      setRefMsg("Referral OG image uploaded.");
+                    })
+                    .catch((err) => setRefMsg(errMessage(err)));
+                };
+                reader.readAsDataURL(file);
+              }}
+            />
+          </label>
+        </div>
+        {ogRefImage.startsWith("/api/og-image") ? (
+          <img src={ogRefImage} alt="Referral OG preview" className="max-h-28 rounded-lg border border-border object-cover" />
+        ) : null}
         <p className="text-xs text-muted">
-          Put images in the repo <code className="text-fg">public/</code> folder (e.g. og-share.jpg). Changing the path
-          points to a new file — replace the file in Git when you update art.
+          Upload replaces the previous image for that slot. Images are stored in the database (not Git) so they survive
+          deploys on Vercel. Max ~1.5 MB — JPEG/PNG/WebP. You can still type a path like <code className="text-fg">/og.jpg</code> if you prefer a file in{" "}
+          <code className="text-fg">public/</code>.
         </p>
         <Button
           type="button"
