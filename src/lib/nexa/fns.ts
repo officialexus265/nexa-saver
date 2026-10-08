@@ -5123,29 +5123,26 @@ export const adminUploadOgImage = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator(
     z.object({
-      kind: z.enum(["share", "referral"]),
-      /** raw base64 without data: prefix */
-      base64: z.string().min(100).max(2_500_000),
+      /** raw base64 without data: prefix — client should compress first */
+      base64: z.string().min(80).max(3_500_000),
       mime: z.string().min(3).max(64),
     }),
   )
   .handler(async ({ context, data }) => {
     await requireAdmin(context.userId);
-    const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-    if (!allowed.includes(data.mime)) {
-      throw new Error("Use JPEG, PNG, WebP, or GIF (max about 1.5 MB).");
+    const mime = data.mime.split(";")[0].trim().toLowerCase();
+    const allowed = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"];
+    if (!allowed.includes(mime)) {
+      throw new Error("Use JPEG, PNG, WebP, or GIF.");
     }
-    // rough size check: base64 length * 0.75
-    if (data.base64.length * 0.75 > 1.6 * 1024 * 1024) {
-      throw new Error("Image is too large. Compress to under about 1.5 MB.");
+    const normalizedMime = mime === "image/jpg" ? "image/jpeg" : mime;
+    if (data.base64.length * 0.75 > 2.2 * 1024 * 1024) {
+      throw new Error("Image is still too large after read. Try a smaller file (under 1 MB).");
     }
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
-    const dataKey = data.kind === "referral" ? "og_referral_image_data" : "og_share_image_data";
-    const typeKey = data.kind === "referral" ? "og_referral_image_type" : "og_share_image_type";
-    const pathKey = data.kind === "referral" ? "og_referral_image" : "og_share_image";
-    const publicPath = data.kind === "referral" ? "/api/og-image/referral" : "/api/og-image/share";
 
+    // One platform OG image for site + share + referral (no competing assets).
     const set = async (key: string, value: string) => {
       await sql`
         insert into platform_settings (key, value, updated_at)
@@ -5153,16 +5150,30 @@ export const adminUploadOgImage = createServerFn({ method: "POST" })
         on conflict (key) do update set value = excluded.value, updated_at = now()
       `;
     };
-    await set(dataKey, data.base64);
-    await set(typeKey, data.mime);
-    await set(pathKey, publicPath);
+    await set("og_platform_image_data", data.base64);
+    await set("og_platform_image_type", normalizedMime);
+    // Keep legacy keys in sync so old paths still work
+    await set("og_share_image_data", data.base64);
+    await set("og_share_image_type", normalizedMime);
+    await set("og_referral_image_data", data.base64);
+    await set("og_referral_image_type", normalizedMime);
+    await set("og_share_image", "/api/og-image/share");
+    await set("og_referral_image", "/api/og-image/referral");
 
-    const { writeAudit } = await import("./audit.server");
-    await writeAudit(sql, {
-      actorUserId: context.userId,
-      action: "og_image_upload",
-      detail: `kind=${data.kind} mime=${data.mime}`,
-    });
+    try {
+      const { writeAudit } = await import("./audit.server");
+      await writeAudit(sql, {
+        actorUserId: context.userId,
+        action: "og_image_upload",
+        detail: `mime=${normalizedMime} bytes≈${Math.round(data.base64.length * 0.75)}`,
+      });
+    } catch {
+      /* audit optional */
+    }
 
-    return { ok: true as const, path: publicPath };
+    return {
+      ok: true as const,
+      path: "/api/og-image/share",
+      paths: { share: "/api/og-image/share", referral: "/api/og-image/referral" },
+    };
   });

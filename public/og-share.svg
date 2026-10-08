@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="70%">
+      <stop offset="0%" stop-color="#0e1a16"/>
+      <stop offset="55%" stop-color="#07110e"/>
+      <stop offset="100%" stop-color="#040a08"/>
+    </radialGradient>
+    <linearGradient id="green" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5dffb0"/>
+      <stop offset="50%" stop-color="#3dcf8e"/>
+      <stop offset="100%" stop-color="#1fa86a"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="18" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <!-- soft primary bloom -->
+  <ellipse cx="600" cy="220" rx="320" ry="140" fill="#3dcf8e" opacity="0.12" filter="url(#soft)"/>
+  <!-- accent rays -->
+  <line x1="180" y1="210" x2="420" y2="210" stroke="#3dcf8e" stroke-width="2" opacity="0.45"/>
+  <line x1="780" y1="210" x2="1020" y2="210" stroke="#3dcf8e" stroke-width="2" opacity="0.45"/>
+  <!-- shield -->
+  <g transform="translate(600, 175)" filter="url(#glow)">
+    <path d="M0,-78 C42,-78 78,-52 78,-18 L78,18 C78,58 42,88 0,102 C-42,88 -78,58 -78,18 L-78,-18 C-78,-52 -42,-78 0,-78 Z"
+          fill="none" stroke="url(#green)" stroke-width="6"/>
+    <path d="M0,-48 C26,-48 48,-32 48,-10 L48,14 C48,40 26,60 0,70 C-26,60 -48,40 -48,14 L-48,-10 C-48,-32 -26,-48 0,-48 Z"
+          fill="none" stroke="#3dcf8e" stroke-width="3" opacity="0.7"/>
+    <!-- keyhole -->
+    <circle cx="0" cy="-2" r="12" fill="none" stroke="#3dcf8e" stroke-width="3"/>
+    <path d="M0,8 L0,28" stroke="#3dcf8e" stroke-width="5" stroke-linecap="round"/>
+  </g>
+  <!-- wordmark -->
+  <text x="600" y="370" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif"
+        font-size="92" font-weight="800" fill="#e8f0ec" letter-spacing="4">NEXA-SAVER</text>
+  <text x="600" y="430" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif"
+        font-size="28" font-weight="500" fill="#3dcf8e" letter-spacing="1">Quiet money. Clear control.</text>
+  <!-- divider -->
+  <line x1="480" y1="470" x2="580" y2="470" stroke="#3dcf8e" stroke-width="1.5" opacity="0.5"/>
+  <circle cx="600" cy="470" r="4" fill="#3dcf8e" opacity="0.8"/>
+  <line x1="620" y1="470" x2="720" y2="470" stroke="#3dcf8e" stroke-width="1.5" opacity="0.5"/>
+  <text x="600" y="530" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif"
+        font-size="20" fill="#8aa396">Deposit · Lock · Withdraw</text>
+</svg>
