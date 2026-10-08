@@ -12,6 +12,7 @@ import { SECURITY_QUESTIONS } from "@/lib/nexa/constants";
 import { errMessage } from "@/lib/nexa/errors";
 import { GENDER_OPTIONS, type Gender } from "@/lib/nexa/constants";
 import { checkHandle, completeProfile, getMe } from "@/lib/nexa/fns";
+import { SignupIntroGate } from "@/components/signup-intro";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/signup")({ component: SignupPage });
@@ -24,6 +25,7 @@ type FormState = {
   email: string;
   phone: string;
   username: string;
+  referralCode: string;
   password: string;
   pin: string;
   securityQuestion: (typeof SECURITY_QUESTIONS)[number];
@@ -40,6 +42,7 @@ const empty: FormState = {
   email: "",
   phone: "",
   username: "",
+  referralCode: "",
   password: "",
   pin: "",
   securityQuestion: SECURITY_QUESTIONS[0],
@@ -60,6 +63,14 @@ function SignupPage() {
       return { ...empty, ...parsed, password: "", pin: "" };
     } catch {
       return empty;
+    }
+  });
+  const [introDone, setIntroDone] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return sessionStorage.getItem("nexa-signup-intro-done") === "1";
+    } catch {
+      return false;
     }
   });
   const [step, setStepState] = useState(() => {
@@ -179,6 +190,7 @@ function SignupPage() {
           lastName: form.lastName,
           phone: form.phone,
           username: form.username,
+          referralCode: form.referralCode || undefined,
           dateOfBirth: form.dateOfBirth,
           gender: form.gender as Gender,
           pin: form.pin,
@@ -200,8 +212,16 @@ function SignupPage() {
 
   const steps = ["You", "Contact", "Security", "Legal"];
 
+  // Returning users completing profile after auth can skip the explainer.
+  const skipIntro = Boolean(user) || introDone;
+
   return (
     <AuthFrame aside="Open a vault. Deposits keep 94%. Withdrawals return to the number you register today.">
+      {!skipIntro ? (
+        <SignupIntroGate
+          onProceed={() => setIntroDone(true)}
+        />
+      ) : null}
       <div className="mb-4 flex gap-2">
         {steps.map((label, i) => (
           <div key={label} className="flex-1">
@@ -263,6 +283,16 @@ function SignupPage() {
               <p className="text-xs text-muted">Withdrawals only go to this number. Deposits can use any Malawi mobile number.</p>
               <Field label="Username" id="un">
                 <Input id="un" value={form.username} onChange={(e) => patch("username", e.target.value)} required />
+                <p className="text-xs text-muted">Letters, numbers, underscores, and emojis are allowed (no spaces).</p>
+              </Field>
+              <Field label="Referral code (optional)" id="refcode">
+                <Input
+                  id="refcode"
+                  value={form.referralCode}
+                  onChange={(e) => patch("referralCode", e.target.value.toUpperCase())}
+                  placeholder="If someone invited you"
+                />
+                <p className="text-xs text-muted">Filled automatically when you open an invite link.</p>
               </Field>
             </>
           ) : null}

@@ -33,6 +33,10 @@ import {
   getMyLoans,
   applyLoan,
   repayLoan,
+  getAffiliateStatus,
+  becomeAffiliate,
+  withdrawAffiliateEarnings,
+  getReferralPublicConfig,
   verifyPin,
   resendVerificationEmailFn,
 } from "@/lib/nexa/fns";
@@ -199,6 +203,8 @@ function Vault({
       <section>
         <WithdrawLockPanel />
         <LoanPanel />
+        <AffiliatePanel />
+        <ShareAppCard />
 
         <h2 className="mb-3 font-display text-lg font-semibold">Activity</h2>
         {txs === null ? (
@@ -1019,6 +1025,238 @@ function LoanPanel() {
 
       {err ? <p className="text-sm text-danger">{err}</p> : null}
       {msg ? <p className="text-sm text-primary">{msg}</p> : null}
+    </Card>
+  );
+}
+
+
+function AffiliatePanel() {
+  const [st, setSt] = useState<Awaited<ReturnType<typeof getAffiliateStatus>> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [accept, setAccept] = useState(false);
+  const [pin, setPin] = useState("");
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+
+  function refresh() {
+    void getAffiliateStatus()
+      .then(setSt)
+      .catch(() => setSt(null));
+  }
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  if (!st) return null;
+
+  const link =
+    typeof window !== "undefined" && st.code
+      ? `${window.location.origin}/signup?ref=${encodeURIComponent(st.code)}`
+      : st.code
+        ? `/signup?ref=${st.code}`
+        : "";
+
+  async function join() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await becomeAffiliate({ data: { acceptTerms: true as const } });
+      setMsg(res.already ? "You are already an affiliate." : "Welcome — your invite link is ready.");
+      refresh();
+    } catch (e) {
+      setErr(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function shareInvite() {
+    if (!link || !st) return;
+    const title = st.og.referral.title;
+    const text = `${st.og.referral.description}\n${link}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title, text, url: link });
+      } else {
+        await navigator.clipboard.writeText(link);
+        setMsg("Invite link copied.");
+      }
+    } catch {
+      try {
+        await navigator.clipboard.writeText(link);
+        setMsg("Invite link copied.");
+      } catch {
+        window.prompt("Copy your invite link:", link);
+      }
+    }
+  }
+
+  async function doWithdraw() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await withdrawAffiliateEarnings({ data: { pin } });
+      setMsg(res.message);
+      setWithdrawOpen(false);
+      setPin("");
+      refresh();
+    } catch (e) {
+      setErr(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="mt-4 space-y-3 p-4">
+      <h2 className="font-display text-lg font-semibold">Affiliate / referral</h2>
+      {!st.programEnabled ? (
+        <p className="text-sm text-warn">
+          Referral program is paused by the platform. You cannot join or earn on new first deposits right now.
+          {st.isAffiliate ? " You can still withdraw earnings you already have." : ""}
+        </p>
+      ) : null}
+
+      {!st.isAffiliate ? (
+        <div className="space-y-3">
+          <p className="text-sm text-muted">
+            Earn {(st.rates.commissionRate * 100).toFixed(0)}% of a friend&apos;s <strong>first deposit only</strong>. After
+            that, no further commission from them. Withdraw earnings from {st.rates.withdrawMinKwacha} kwacha (platform takes{" "}
+            {(st.rates.withdrawFeeRate * 100).toFixed(0)}% on withdrawal).
+          </p>
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-1" checked={accept} onChange={(e) => setAccept(e.target.checked)} />
+            <span>
+              I accept the affiliate terms: commission only on each referred user&apos;s first deposit; withdrawal fee
+              applies as shown.
+            </span>
+          </label>
+          <Button
+            type="button"
+            disabled={!accept || busy || !st.programEnabled}
+            onClick={() => void join()}
+          >
+            {busy ? "…" : "Become an affiliate"}
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-3 text-sm">
+          <p>
+            Your code: <span className="font-mono font-semibold">{st.code}</span>
+          </p>
+          <p className="break-all text-muted">{link}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" onClick={() => void shareInvite()} disabled={!st.programEnabled}>
+              Share invite link
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(link);
+                  setMsg("Link copied.");
+                } catch {
+                  window.prompt("Copy:", link);
+                }
+              }}
+            >
+              Copy link
+            </Button>
+          </div>
+          <p>
+            Referral balance:{" "}
+            <span className="font-semibold tabular-nums">{formatKwacha(st.wallet.balanceTambala)}</span>
+            <span className="text-muted">
+              {" "}
+              · earned {formatKwacha(st.wallet.lifetimeEarnedTambala)} · withdrawn{" "}
+              {formatKwacha(st.wallet.lifetimeWithdrawnTambala)}
+            </span>
+          </p>
+          {withdrawOpen ? (
+            <div className="space-y-2">
+              <p className="text-xs text-muted">
+                Fee {(st.rates.withdrawFeeRate * 100).toFixed(0)}% moves net to your main vault (min{" "}
+                {st.rates.withdrawMinKwacha} kwacha).
+              </p>
+              <PinPad value={pin} onChange={setPin} disabled={busy} />
+              <Button type="button" disabled={busy || pin.length !== 4} onClick={() => void doWithdraw()}>
+                Confirm withdraw
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => setWithdrawOpen(false)}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={st.wallet.balanceTambala < st.rates.withdrawMinKwacha * 100}
+              onClick={() => setWithdrawOpen(true)}
+            >
+              Withdraw referral earnings
+            </Button>
+          )}
+          {st.earnings.length ? (
+            <ul className="max-h-32 space-y-1 overflow-y-auto text-xs text-muted">
+              {st.earnings.map((e) => (
+                <li key={e.depositReference}>
+                  +{formatKwacha(e.commissionTambala)} from first deposit {e.depositReference} ·{" "}
+                  {new Date(e.createdAt).toLocaleDateString()}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      )}
+      {err ? <p className="text-sm text-danger">{err}</p> : null}
+      {msg ? <p className="text-sm text-primary">{msg}</p> : null}
+    </Card>
+  );
+}
+
+function ShareAppCard() {
+  const [cfg, setCfg] = useState<Awaited<ReturnType<typeof getReferralPublicConfig>> | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => {
+    void getReferralPublicConfig()
+      .then(setCfg)
+      .catch(() => null);
+  }, []);
+  const url = typeof window !== "undefined" ? window.location.origin : "https://nexa-saver.vercel.app";
+
+  async function share() {
+    const title = cfg?.og.share.title ?? "NEXA-SAVER";
+    const text = cfg?.og.share.description ?? "Save with NEXA-SAVER";
+    try {
+      if (navigator.share) {
+        await navigator.share({ title, text, url });
+      } else {
+        await navigator.clipboard.writeText(url);
+        setMsg("Link copied.");
+      }
+    } catch {
+      try {
+        await navigator.clipboard.writeText(url);
+        setMsg("Link copied.");
+      } catch {
+        window.prompt("Copy:", url);
+      }
+    }
+  }
+
+  return (
+    <Card className="mt-4 flex flex-wrap items-center justify-between gap-3 p-4">
+      <div>
+        <h2 className="font-display text-lg font-semibold">Share NEXA-SAVER</h2>
+        <p className="text-sm text-muted">Tell a friend — no referral code required.</p>
+        {msg ? <p className="text-xs text-primary">{msg}</p> : null}
+      </div>
+      <Button type="button" variant="secondary" onClick={() => void share()}>
+        Share app
+      </Button>
     </Card>
   );
 }

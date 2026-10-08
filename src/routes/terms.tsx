@@ -151,7 +151,21 @@ function TermsPage() {
         your remaining balance and email you a full breakdown. Disbursement is typically to your registered mobile money;
         collateral remains subject to your time-lock rules.
       </p>
+      
+      <h2 className="font-display text-xl font-semibold">Affiliate / referral program</h2>
+      <p>
+        When the program is enabled, you may become an affiliate, receive a unique code and invite link, and earn a
+        configured percentage (default 1%) of each invited user&apos;s <strong>first successful deposit only</strong>.
+        Later deposits by that person do not pay commission. The operator may pause the program: no new affiliates and no
+        new commissions, while existing referral balances can still be withdrawn.
+      </p>
+      <p>
+        Referral earnings sit in a separate balance. Withdrawals to your main vault require a minimum (default 500 kwacha)
+        and a platform fee on the withdrawn amount (default 3%). You must not spam, mislead, or promise returns you cannot
+        control.
+      </p>
       <h2 className="font-display text-xl font-semibold">9. Closing your account</h2>
+
 
       <p>
         Account deletion requires multiple confirmations and your PIN. Withdraw available funds first. After deletion,

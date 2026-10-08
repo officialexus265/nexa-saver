@@ -1,4 +1,7 @@
 export const APP_NAME = "NEXA-SAVER";
+/** YouTube video id for pre-signup explainer (the ID after watch?v=). */
+export const SIGNUP_INTRO_YOUTUBE_ID = "";
+
 export const APP_TAGLINE = "Quiet money. Clear control.";
 
 export const IDLE_LOCK_MS = 5 * 60 * 1000;

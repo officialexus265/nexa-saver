@@ -57,23 +57,47 @@ export async function creditDeposit(reference: string): Promise<CreditResult> {
         where user_id = ${txRow.user_id}
       `;
 
+      // Referral commission is carved from platform profit only (not user credit or payout reserve).
+      let referralCommission = 0;
+      try {
+        const { maybePayReferralCommission } = await import("./referral.server");
+        referralCommission = await maybePayReferralCommission(tx, {
+          depositorUserId: txRow.user_id,
+          depositReference: reference,
+          depositTxId: txRow.id,
+          grossTambala: gross,
+          availableProfitTambala: profit,
+        });
+      } catch {
+        referralCommission = 0;
+      }
+      const netProfit = Math.max(0, profit - referralCommission);
+
       await tx`
         insert into platform_ledger (transaction_id, entry_type, amount_tambala)
         values
           (${txRow.id}, ${"deposit_gross"}, ${gross}),
           (${txRow.id}, ${"user_credit"}, ${credited}),
-          (${txRow.id}, ${"platform_profit"}, ${profit}),
+          (${txRow.id}, ${"platform_profit"}, ${netProfit}),
           (${txRow.id}, ${"payout_reserve"}, ${reserve})
       `;
+      if (referralCommission > 0) {
+        // already inserted referral_commission inside maybePayReferralCommission; keep net profit on tx row
+        await tx`
+          update transactions
+          set platform_profit_tambala = ${netProfit}
+          where id = ${txRow.id}
+        `;
+      }
 
-      // Book profit into platform treasury (admin withdrawable pool — not saver funds).
-      if (profit > 0) {
+      // Book net true profit into treasury (after referral carve-out).
+      if (netProfit > 0) {
         await tx`
           insert into platform_treasury (id, balance_tambala, lifetime_in_tambala, updated_at)
-          values (1, ${profit}, ${profit}, now())
+          values (1, ${netProfit}, ${netProfit}, now())
           on conflict (id) do update set
-            balance_tambala = platform_treasury.balance_tambala + ${profit},
-            lifetime_in_tambala = platform_treasury.lifetime_in_tambala + ${profit},
+            balance_tambala = platform_treasury.balance_tambala + ${netProfit},
+            lifetime_in_tambala = platform_treasury.lifetime_in_tambala + ${netProfit},
             updated_at = now()
         `;
       }

@@ -36,6 +36,10 @@ import {
   adminGetLoanPolicy,
   adminSetLoanPolicy,
   adminListLoans,
+  adminGetReferralSettings,
+  adminSetReferralSettings,
+  adminGetSignupIntroVideo,
+  adminSetSignupIntroVideo,
   adminTreasuryWithdraw,
   adminExportSurveyCsv,
   adminDeleteUser,
@@ -173,6 +177,20 @@ function Console() {
     }>
   >([]);
   const [loanQuery, setLoanQuery] = useState("");
+  const [refEnabled, setRefEnabled] = useState(true);
+  const [refCommission, setRefCommission] = useState("1");
+  const [refMin, setRefMin] = useState("500");
+  const [refFee, setRefFee] = useState("3");
+  const [ogShareTitle, setOgShareTitle] = useState("");
+  const [ogShareDesc, setOgShareDesc] = useState("");
+  const [ogShareImage, setOgShareImage] = useState("/og.jpg");
+  const [ogRefTitle, setOgRefTitle] = useState("");
+  const [ogRefDesc, setOgRefDesc] = useState("");
+  const [ogRefImage, setOgRefImage] = useState("/og.jpg");
+  const [refMsg, setRefMsg] = useState<string | null>(null);
+  const [signupVideoUrl, setSignupVideoUrl] = useState("");
+  const [signupVideoMsg, setSignupVideoMsg] = useState<string | null>(null);
+
   const [loanFilter, setLoanFilter] = useState<"all" | "active" | "closed">("all");
 
 
@@ -184,8 +202,8 @@ function Console() {
 
 
   useEffect(() => {
-    Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone(), adminSecuritySurveyStatus(), adminAnalytics(), adminGetPayoutMethods(), adminGetFeePolicy(), adminGetSendFeeTiers(), adminListTransferReversals(), adminGetLoanPolicy(), adminListLoans({ data: {} })])
-      .then(([o, u, t, s, sv, an, pm, fp, sft, rev, lp, loansList]) => {
+    Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone(), adminSecuritySurveyStatus(), adminAnalytics(), adminGetPayoutMethods(), adminGetFeePolicy(), adminGetSendFeeTiers(), adminListTransferReversals(), adminGetLoanPolicy(), adminListLoans({ data: {} }), adminGetReferralSettings(), adminGetSignupIntroVideo()])
+      .then(([o, u, t, s, sv, an, pm, fp, sft, rev, lp, loansList, refS, introVid]) => {
         setOverview(o);
         setUsers(u);
         setTxs(t);
@@ -207,6 +225,19 @@ function Console() {
           setLoanLtv(String(Math.round(lp.ltvRate * 1000) / 10));
         }
         if (loansList) setLoanRows(loansList);
+        if (refS) {
+          setRefEnabled(refS.enabled);
+          setRefCommission(String(Math.round(refS.rates.commissionRate * 1000) / 10));
+          setRefMin(String(refS.rates.withdrawMinKwacha));
+          setRefFee(String(Math.round(refS.rates.withdrawFeeRate * 1000) / 10));
+          setOgShareTitle(refS.og.share.title);
+          setOgShareDesc(refS.og.share.description);
+          setOgShareImage(refS.og.share.image);
+          setOgRefTitle(refS.og.referral.title);
+          setOgRefDesc(refS.og.referral.description);
+          setOgRefImage(refS.og.referral.image);
+        }
+        if (introVid) setSignupVideoUrl(introVid.urlOrId ?? "");
       })
       .catch((err) => setError(errMessage(err)));
   }, []);
@@ -437,6 +468,101 @@ function Console() {
       </Card>
 
 
+
+
+
+      <Card className="space-y-3 p-4">
+        <h2 className="font-display text-lg font-semibold">Signup explainer video</h2>
+        <p className="text-sm text-muted">
+          YouTube link or video id shown when a new user is not familiar with the system. Leave empty to skip the video
+          and send them straight to sign up.
+        </p>
+        <div className="space-y-1.5">
+          <Label>YouTube URL or video id</Label>
+          <Input
+            value={signupVideoUrl}
+            onChange={(e) => setSignupVideoUrl(e.target.value)}
+            placeholder="https://www.youtube.com/watch?v=… or plain id"
+          />
+        </div>
+        <Button
+          type="button"
+          onClick={() => {
+            setSignupVideoMsg(null);
+            void adminSetSignupIntroVideo({ data: { urlOrId: signupVideoUrl } })
+              .then((r) =>
+                setSignupVideoMsg(
+                  r.videoId
+                    ? `Saved. Embed id: ${r.videoId}`
+                    : "Cleared — sign-up will not show a video until you set a link.",
+                ),
+              )
+              .catch((err) => setSignupVideoMsg(errMessage(err)));
+          }}
+        >
+          Save explainer video
+        </Button>
+        {signupVideoMsg ? <p className="text-sm text-muted">{signupVideoMsg}</p> : null}
+      </Card>
+
+      <Card className="space-y-3 p-4">
+        <h2 className="font-display text-lg font-semibold">Referral program</h2>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={refEnabled} onChange={(e) => setRefEnabled(e.target.checked)} />
+          Program enabled (off = no new affiliates / no new first-deposit commissions; withdrawals still allowed)
+        </label>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="space-y-1">
+            <Label>Commission % (first deposit)</Label>
+            <Input value={refCommission} onChange={(e) => setRefCommission(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label>Min withdraw (MWK)</Label>
+            <Input value={refMin} onChange={(e) => setRefMin(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label>Withdraw fee %</Label>
+            <Input value={refFee} onChange={(e) => setRefFee(e.target.value)} />
+          </div>
+        </div>
+        <p className="text-xs font-medium text-muted">Share app OG (path under /public, e.g. /og.jpg)</p>
+        <Input placeholder="Title" value={ogShareTitle} onChange={(e) => setOgShareTitle(e.target.value)} />
+        <Input placeholder="Description" value={ogShareDesc} onChange={(e) => setOgShareDesc(e.target.value)} />
+        <Input placeholder="Image path" value={ogShareImage} onChange={(e) => setOgShareImage(e.target.value)} />
+        <p className="text-xs font-medium text-muted">Referral invite OG</p>
+        <Input placeholder="Title" value={ogRefTitle} onChange={(e) => setOgRefTitle(e.target.value)} />
+        <Input placeholder="Description" value={ogRefDesc} onChange={(e) => setOgRefDesc(e.target.value)} />
+        <Input placeholder="Image path" value={ogRefImage} onChange={(e) => setOgRefImage(e.target.value)} />
+        <p className="text-xs text-muted">
+          Put images in the repo <code className="text-fg">public/</code> folder (e.g. og-share.jpg). Changing the path
+          points to a new file — replace the file in Git when you update art.
+        </p>
+        <Button
+          type="button"
+          onClick={() => {
+            setRefMsg(null);
+            void adminSetReferralSettings({
+              data: {
+                enabled: refEnabled,
+                commissionPercent: Number(refCommission),
+                withdrawMinKwacha: Number(refMin),
+                withdrawFeePercent: Number(refFee),
+                ogShareTitle,
+                ogShareDescription: ogShareDesc,
+                ogShareImage,
+                ogReferralTitle: ogRefTitle,
+                ogReferralDescription: ogRefDesc,
+                ogReferralImage: ogRefImage,
+              },
+            })
+              .then(() => setRefMsg("Referral settings saved."))
+              .catch((err) => setRefMsg(errMessage(err)));
+          }}
+        >
+          Save referral settings
+        </Button>
+        {refMsg ? <p className="text-sm text-muted">{refMsg}</p> : null}
+      </Card>
 
       <Card className="space-y-3 p-4">
         <h2 className="font-display text-lg font-semibold">Loan policy</h2>

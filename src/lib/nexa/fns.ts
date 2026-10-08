@@ -34,9 +34,17 @@ const pinSchema = z.string().regex(/^\d{4}$/, "PIN must be 4 digits");
 const usernameSchema = z
   .string()
   .trim()
-  .min(3)
-  .max(24)
-  .regex(/^[a-zA-Z0-9_]+$/, "Username may use letters, numbers, and underscores");
+  .min(2)
+  .max(32)
+  .refine((s) => !/\s/.test(s), { message: "Username cannot contain spaces" })
+  .refine(
+    (s) =>
+      // Letters, numbers, underscore, and emoji (including ZWJ sequences / variation selectors)
+      /^[\p{L}\p{N}_\p{Extended_Pictographic}\uFE0F\u200D]+$/u.test(s),
+    {
+      message: "Username may use letters, numbers, underscores, and emojis",
+    },
+  );
 
 function iso(value: unknown): string | null {
   if (value == null || value === "") return null;
@@ -296,6 +304,7 @@ const completeSchema = z.object({
   acceptPrivacy: z.literal(true),
   password: z.string().min(8).max(128).optional(),
   loginIdentifierPref: z.enum(["username", "email", "phone"]).optional(),
+  referralCode: z.string().trim().max(24).optional(),
 });
 
 export const completeProfile = createServerFn({ method: "POST" })
@@ -342,16 +351,35 @@ export const completeProfile = createServerFn({ method: "POST" })
     const pinHash = await hashSecret(data.pin);
     const answerHash = await hashSecret(normalizeAnswer(data.securityAnswer));
 
+    let referredBy: string | null = null;
+    let referralCodeUsed: string | null = null;
+    const codeRaw = (data.referralCode ?? "").trim().toUpperCase();
+    if (codeRaw) {
+      try {
+        const aff = await sql<{ user_id: string; affiliate_code: string }>`
+          select user_id, affiliate_code from profiles
+          where upper(affiliate_code) = ${codeRaw} and affiliate_joined_at is not null
+          limit 1
+        `;
+        if (aff[0] && aff[0].user_id !== context.userId) {
+          referredBy = aff[0].user_id;
+          referralCodeUsed = aff[0].affiliate_code;
+        }
+      } catch {
+        /* columns may not exist yet */
+      }
+    }
+
     await sql`
       insert into profiles (
         user_id, first_name, last_name, email, phone, username, date_of_birth, gender,
         pin_hash, security_question, security_answer_hash, role, login_identifier_pref,
-        anchor_email, anchor_phone
+        anchor_email, anchor_phone, referred_by_user_id, referral_code_used
       ) values (
         ${context.userId}, ${data.firstName}, ${data.lastName}, ${email}, ${phone},
         ${data.username}, ${data.dateOfBirth}, ${data.gender}, ${pinHash}, ${data.securityQuestion},
         ${answerHash}, ${"user"}, ${data.loginIdentifierPref ?? "username"},
-        ${email}, ${phone}
+        ${email}, ${phone}, ${referredBy}, ${referralCodeUsed}
       )
     `;
     await sql`insert into wallets (user_id) values (${context.userId})`;
@@ -4793,4 +4821,299 @@ export const adminListLoans = createServerFn({ method: "GET" })
     } catch {
       return [];
     }
+  });
+
+
+export const getReferralPublicConfig = createServerFn({ method: "GET" }).handler(async () => {
+  const { getSql } = await import("@/lib/db");
+  const { isReferralProgramEnabled, getReferralRates, getOgSettings } = await import("./referral.server");
+  const sql = await getSql();
+  const enabled = await isReferralProgramEnabled(sql);
+  const rates = await getReferralRates(sql);
+  const og = await getOgSettings(sql);
+  return { enabled, ...rates, og };
+});
+
+export const getAffiliateStatus = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { getSql } = await import("@/lib/db");
+    const { isReferralProgramEnabled, getReferralRates, getOgSettings } = await import("./referral.server");
+    const sql = await getSql();
+    const enabled = await isReferralProgramEnabled(sql);
+    const rates = await getReferralRates(sql);
+    const og = await getOgSettings(sql);
+    const prof = await sql<{
+      affiliate_code: string | null;
+      affiliate_joined_at: unknown;
+    }>`
+      select affiliate_code, affiliate_joined_at from profiles where user_id = ${context.userId} limit 1
+    `.catch(() => []);
+    const isAffiliate = Boolean(prof[0]?.affiliate_joined_at && prof[0]?.affiliate_code);
+    let wallet = { balanceTambala: 0, lifetimeEarnedTambala: 0, lifetimeWithdrawnTambala: 0 };
+    let earnings: Array<{ commissionTambala: number; grossDepositTambala: number; createdAt: string; depositReference: string }> = [];
+    if (isAffiliate) {
+      const w = await sql<{ balance_tambala: number; lifetime_earned_tambala: number; lifetime_withdrawn_tambala: number }>`
+        select balance_tambala, lifetime_earned_tambala, lifetime_withdrawn_tambala
+        from affiliate_wallets where user_id = ${context.userId} limit 1
+      `.catch(() => []);
+      if (w[0]) {
+        wallet = {
+          balanceTambala: Number(w[0].balance_tambala),
+          lifetimeEarnedTambala: Number(w[0].lifetime_earned_tambala),
+          lifetimeWithdrawnTambala: Number(w[0].lifetime_withdrawn_tambala),
+        };
+      }
+      const e = await sql<{ commission_tambala: number; gross_deposit_tambala: number; created_at: unknown; deposit_reference: string }>`
+        select commission_tambala, gross_deposit_tambala, created_at, deposit_reference
+        from affiliate_earnings where affiliate_user_id = ${context.userId}
+        order by created_at desc limit 30
+      `.catch(() => []);
+      earnings = e.map((r) => ({
+        commissionTambala: Number(r.commission_tambala),
+        grossDepositTambala: Number(r.gross_deposit_tambala),
+        createdAt: new Date(r.created_at as string | Date).toISOString(),
+        depositReference: r.deposit_reference,
+      }));
+    }
+    return {
+      programEnabled: enabled,
+      isAffiliate,
+      code: prof[0]?.affiliate_code ?? null,
+      joinedAt: prof[0]?.affiliate_joined_at
+        ? new Date(prof[0].affiliate_joined_at as string | Date).toISOString()
+        : null,
+      rates,
+      og,
+      wallet,
+      earnings,
+    };
+  });
+
+export const becomeAffiliate = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ acceptTerms: z.literal(true) }))
+  .handler(async ({ context, data }) => {
+    void data;
+    const { getSql } = await import("@/lib/db");
+    const { isReferralProgramEnabled, generateAffiliateCode } = await import("./referral.server");
+    const sql = await getSql();
+    if (!(await isReferralProgramEnabled(sql))) {
+      throw new Error("The referral program is paused. Try again when the platform turns it back on.");
+    }
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Complete your profile first");
+    if (profile.role === "admin") throw new Error("Admin accounts cannot join the affiliate program.");
+    const existing = await sql<{ affiliate_code: string | null; affiliate_joined_at: unknown }>`
+      select affiliate_code, affiliate_joined_at from profiles where user_id = ${context.userId} limit 1
+    `;
+    if (existing[0]?.affiliate_joined_at && existing[0]?.affiliate_code) {
+      return { code: existing[0].affiliate_code, already: true as const };
+    }
+    let code = generateAffiliateCode(profile.username);
+    for (let i = 0; i < 5; i++) {
+      const clash = await sql<{ n: number }>`
+        select count(*)::int as n from profiles where upper(affiliate_code) = ${code}
+      `;
+      if (Number(clash[0]?.n ?? 0) === 0) break;
+      code = generateAffiliateCode(profile.username);
+    }
+    await sql`
+      update profiles
+      set affiliate_code = ${code}, affiliate_joined_at = now(), updated_at = now()
+      where user_id = ${context.userId}
+    `;
+    await sql`
+      insert into affiliate_wallets (user_id) values (${context.userId})
+      on conflict (user_id) do nothing
+    `;
+    return { code, already: false as const };
+  });
+
+export const withdrawAffiliateEarnings = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ pin: pinSchema }))
+  .handler(async ({ context, data }) => {
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Complete your profile first");
+    const { verifySecret } = await import("./crypto");
+    if (!(await verifySecret(profile.pin_hash, data.pin))) throw new Error("Incorrect PIN");
+
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { getReferralRates } = await import("./referral.server");
+    const { kwachaToTambala, formatKwacha } = await import("./money");
+    const sql = await getSql();
+    const rates = await getReferralRates(sql);
+    const minTambala = kwachaToTambala(rates.withdrawMinKwacha);
+
+    const result = await withTransaction(async (tx) => {
+      const w = await tx<{ balance_tambala: number }>`
+        select balance_tambala from affiliate_wallets where user_id = ${context.userId} for update
+      `;
+      const bal = Number(w[0]?.balance_tambala ?? 0);
+      if (bal < minTambala) {
+        throw new Error(`Minimum referral withdrawal is ${rates.withdrawMinKwacha} kwacha.`);
+      }
+      const fee = Math.floor(bal * rates.withdrawFeeRate);
+      const net = bal - fee;
+      if (net <= 0) throw new Error("Nothing left after the withdrawal fee.");
+
+      await tx`
+        update affiliate_wallets
+        set balance_tambala = 0,
+            lifetime_withdrawn_tambala = lifetime_withdrawn_tambala + ${bal},
+            updated_at = now()
+        where user_id = ${context.userId}
+      `;
+      await tx`
+        update wallets
+        set balance_tambala = balance_tambala + ${net}, updated_at = now()
+        where user_id = ${context.userId}
+      `;
+      const ref = `AFFW_${context.userId.slice(0, 8)}_${Date.now().toString(36)}`;
+      await tx`
+        insert into transactions (
+          user_id, kind, status, gross_tambala, credited_tambala,
+          platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
+        ) values (
+          ${context.userId}, ${"deposit"}, ${"success"}, ${net}, ${net},
+          ${0}, ${0}, ${ref},
+          ${"Referral earnings withdrawal (net after fee)"}, now()
+        )
+      `;
+      if (fee > 0) {
+        await tx`
+          insert into transactions (
+            user_id, kind, status, gross_tambala, credited_tambala,
+            platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
+          ) values (
+            ${context.userId}, ${"fee"}, ${"success"}, ${fee}, ${0},
+            ${fee}, ${0}, ${ref + "_FEE"},
+            ${"Referral withdrawal fee"}, now()
+          )
+        `;
+        try {
+          await tx`
+            insert into platform_treasury (id, balance_tambala, lifetime_in_tambala, updated_at)
+            values (1, ${fee}, ${fee}, now())
+            on conflict (id) do update set
+              balance_tambala = platform_treasury.balance_tambala + ${fee},
+              lifetime_in_tambala = platform_treasury.lifetime_in_tambala + ${fee},
+              updated_at = now()
+          `;
+        } catch {
+          /* optional */
+        }
+      }
+      return { net, fee, gross: bal, ref };
+    });
+
+    return {
+      ok: true as const,
+      netTambala: result.net,
+      feeTambala: result.fee,
+      grossTambala: result.gross,
+      reference: result.ref,
+      message: `${formatKwacha(result.net)} added to your vault (${formatKwacha(result.fee)} platform fee).`,
+    };
+  });
+
+export const adminGetReferralSettings = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { isReferralProgramEnabled, getReferralRates, getOgSettings } = await import("./referral.server");
+    const sql = await getSql();
+    return {
+      enabled: await isReferralProgramEnabled(sql),
+      rates: await getReferralRates(sql),
+      og: await getOgSettings(sql),
+    };
+  });
+
+export const adminSetReferralSettings = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      enabled: z.boolean(),
+      commissionPercent: z.number().min(0).max(20).optional(),
+      withdrawMinKwacha: z.number().min(0).optional(),
+      withdrawFeePercent: z.number().min(0).max(50).optional(),
+      ogShareTitle: z.string().max(120).optional(),
+      ogShareDescription: z.string().max(300).optional(),
+      ogShareImage: z.string().max(200).optional(),
+      ogReferralTitle: z.string().max(120).optional(),
+      ogReferralDescription: z.string().max(300).optional(),
+      ogReferralImage: z.string().max(200).optional(),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const set = async (key: string, value: string) => {
+      await sql`
+        insert into platform_settings (key, value, updated_at)
+        values (${key}, ${value}, now())
+        on conflict (key) do update set value = excluded.value, updated_at = now()
+      `;
+    };
+    await set("referral_program_enabled", data.enabled ? "true" : "false");
+    if (data.commissionPercent != null) await set("referral_commission_rate", String(data.commissionPercent / 100));
+    if (data.withdrawMinKwacha != null) await set("referral_withdraw_min_kwacha", String(data.withdrawMinKwacha));
+    if (data.withdrawFeePercent != null) await set("referral_withdraw_fee_rate", String(data.withdrawFeePercent / 100));
+    if (data.ogShareTitle != null) await set("og_share_title", data.ogShareTitle);
+    if (data.ogShareDescription != null) await set("og_share_description", data.ogShareDescription);
+    if (data.ogShareImage != null) await set("og_share_image", data.ogShareImage.startsWith("/") ? data.ogShareImage : `/${data.ogShareImage}`);
+    if (data.ogReferralTitle != null) await set("og_referral_title", data.ogReferralTitle);
+    if (data.ogReferralDescription != null) await set("og_referral_description", data.ogReferralDescription);
+    if (data.ogReferralImage != null)
+      await set("og_referral_image", data.ogReferralImage.startsWith("/") ? data.ogReferralImage : `/${data.ogReferralImage}`);
+    return { ok: true as const };
+  });
+
+
+export const getSignupIntroVideo = createServerFn({ method: "GET" }).handler(async () => {
+  const { getSql } = await import("@/lib/db");
+  const { getSignupIntroYoutubeId } = await import("./referral.server");
+  const sql = await getSql();
+  const videoId = await getSignupIntroYoutubeId(sql);
+  return { videoId };
+});
+
+export const adminGetSignupIntroVideo = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    try {
+      const rows = await sql<{ value: string }>`
+        select value from platform_settings where key = ${"signup_intro_youtube"} limit 1
+      `;
+      return { urlOrId: rows[0]?.value ?? "" };
+    } catch {
+      return { urlOrId: "" };
+    }
+  });
+
+export const adminSetSignupIntroVideo = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ urlOrId: z.string().max(300) }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { parseYoutubeVideoId } = await import("./referral.server");
+    const sql = await getSql();
+    const trimmed = data.urlOrId.trim();
+    if (trimmed && !parseYoutubeVideoId(trimmed)) {
+      throw new Error("Enter a valid YouTube link or video id.");
+    }
+    await sql`
+      insert into platform_settings (key, value, updated_at)
+      values (${"signup_intro_youtube"}, ${trimmed}, now())
+      on conflict (key) do update set value = excluded.value, updated_at = now()
+    `;
+    return { ok: true as const, videoId: parseYoutubeVideoId(trimmed) };
   });
