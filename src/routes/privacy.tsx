@@ -23,7 +23,7 @@ function PrivacyPage() {
         <li>Identity: name, date of birth, gender (if provided), username</li>
         <li>Contact: email, mobile number, optional bank payout details</li>
         <li>Security: password hash, PIN hash, security question and answer hash, lock preferences</li>
-        <li>Money movement: deposits, withdrawals, peer transfers (send), fees (including the current deposit fee of about {dep}%), references</li>
+        <li>Money movement: deposits, withdrawals, peer transfers (send), loans against self-locks, fees (including the current deposit fee of about {dep}%), references</li>
         <li>Device/session data and authenticated page-visit counts for operations</li>
         <li>Support messages and survey responses you submit</li>
       </ul>

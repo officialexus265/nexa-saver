@@ -1348,8 +1348,20 @@ export const adminOverview = createServerFn({ method: "GET" })
     } catch {
       unlockFees = 0;
     }
-    // Withdrawable = deposit book profit + unlock fees − treasury already paid out
-    const available = Math.max(0, bookProfit + unlockFees - paidOut);
+    let loanInterest = 0;
+    try {
+      const li = await sql<{ fees: number }>`
+        select coalesce(sum(gross_tambala), 0)::bigint as fees
+        from transactions
+        where kind = ${"fee"} and status = ${"success"}
+          and note = ${"Loan interest"}
+      `;
+      loanInterest = asInt(li[0]?.fees);
+    } catch {
+      loanInterest = 0;
+    }
+    // Withdrawable = deposit book profit + unlock fees + loan interest − treasury already paid out
+    const available = Math.max(0, bookProfit + unlockFees + loanInterest - paidOut);
     return {
       userCount: asInt(users[0]?.n),
       totalDepositsTambala: asInt(money[0]?.deposits),
@@ -1357,6 +1369,7 @@ export const adminOverview = createServerFn({ method: "GET" })
       userBalancesTambala: asInt(wallet[0]?.bal),
       platformProfitTambala: bookProfit,
       earlyUnlockFeesTambala: unlockFees,
+      loanInterestTambala: loanInterest,
       payoutReserveTambala: asInt(wallet[0]?.res),
       pendingCount: asInt(money[0]?.pending),
       demoPayments: demoPaymentsEnabled(),
@@ -4356,4 +4369,428 @@ export const adminResolveTransfer = createServerFn({ method: "POST" })
       detail: `ref=${data.reference} amount=${amount}`,
     });
     return { ok: true as const, action: "reverse" as const };
+  });
+
+
+export const getLoanPolicyPublic = createServerFn({ method: "GET" }).handler(async () => {
+  const { getSql } = await import("@/lib/db");
+  const { getLoanInterestRate, getLoanLtvRate } = await import("./loan.server");
+  const sql = await getSql();
+  return {
+    interestMonthly: await getLoanInterestRate(sql),
+    ltvRate: await getLoanLtvRate(sql),
+  };
+});
+
+export const adminGetLoanPolicy = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { getLoanInterestRate, getLoanLtvRate } = await import("./loan.server");
+    const sql = await getSql();
+    return {
+      interestMonthly: await getLoanInterestRate(sql),
+      ltvRate: await getLoanLtvRate(sql),
+    };
+  });
+
+export const adminSetLoanPolicy = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      interestPercent: z.number().min(0).max(50),
+      ltvPercent: z.number().min(1).max(100),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { setLoanPolicy, getLoanInterestRate, getLoanLtvRate } = await import("./loan.server");
+    const sql = await getSql();
+    await setLoanPolicy(sql, {
+      interestMonthly: data.interestPercent / 100,
+      ltvRate: data.ltvPercent / 100,
+    });
+    return {
+      interestMonthly: await getLoanInterestRate(sql),
+      ltvRate: await getLoanLtvRate(sql),
+    };
+  });
+
+export const getMyLoans = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { getSql } = await import("@/lib/db");
+    const { processLoansForUser } = await import("./loan.server");
+    const sql = await getSql();
+    try {
+      await processLoansForUser(sql, context.userId);
+    } catch {
+      /* table may not exist yet */
+    }
+    try {
+      const rows = await sql<{
+        id: number;
+        reference: string;
+        principal_tambala: number;
+        balance_due_tambala: number;
+        interest_rate_monthly: number;
+        collateral_tambala: number;
+        repayment_mode: string;
+        status: string;
+        started_at: unknown;
+        next_period_at: unknown;
+        periods_elapsed: number;
+      }>`
+        select id, reference, principal_tambala, balance_due_tambala, interest_rate_monthly,
+               collateral_tambala, repayment_mode, status, started_at, next_period_at, periods_elapsed
+        from loans where user_id = ${context.userId}
+        order by created_at desc
+        limit 20
+      `;
+      return rows.map((r) => ({
+        id: Number(r.id),
+        reference: r.reference,
+        principalTambala: Number(r.principal_tambala),
+        balanceDueTambala: Number(r.balance_due_tambala),
+        interestRateMonthly: Number(r.interest_rate_monthly),
+        collateralTambala: Number(r.collateral_tambala),
+        repaymentMode: r.repayment_mode as "auto" | "manual",
+        status: r.status,
+        startedAt: new Date(r.started_at as string | Date).toISOString(),
+        nextPeriodAt: new Date(r.next_period_at as string | Date).toISOString(),
+        periodsElapsed: Number(r.periods_elapsed),
+      }));
+    } catch {
+      return [];
+    }
+  });
+
+export const getLoanEligibility = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Complete your profile first");
+    const { getSql } = await import("@/lib/db");
+    const { getLoanInterestRate, getLoanLtvRate } = await import("./loan.server");
+    const sql = await getSql();
+    const interest = await getLoanInterestRate(sql);
+    const ltv = await getLoanLtvRate(sql);
+
+    if (profile.admin_locked_at) {
+      return { eligible: false as const, reason: "Account is locked by the platform. Loans are not available.", maxTambala: 0, interest, ltv };
+    }
+    if (profile.admin_withdraw_locked_at) {
+      return { eligible: false as const, reason: "Withdrawals are locked by the platform. Loans need a self time-lock only.", maxTambala: 0, interest, ltv };
+    }
+    const lockUntil = profile.withdraw_lock_until
+      ? new Date(profile.withdraw_lock_until as string | Date).getTime()
+      : 0;
+    if (!lockUntil || lockUntil <= Date.now()) {
+      return {
+        eligible: false as const,
+        reason: "Loans are only available while you have a voluntary withdrawal time-lock active.",
+        maxTambala: 0,
+        interest,
+        ltv,
+      };
+    }
+    const active = await sql<{ n: number }>`
+      select count(*)::int as n from loans where user_id = ${context.userId} and status = ${"active"}
+    `.catch(() => [{ n: 0 }]);
+    if (Number(active[0]?.n ?? 0) > 0) {
+      return { eligible: false as const, reason: "You already have an active loan. Repay or close it first.", maxTambala: 0, interest, ltv };
+    }
+    const bal = await sql<{ balance_tambala: number }>`
+      select balance_tambala from wallets where user_id = ${context.userId} limit 1
+    `;
+    const collateral = Number(bal[0]?.balance_tambala ?? 0);
+    const maxTambala = Math.floor(collateral * ltv);
+    return {
+      eligible: maxTambala >= 10000, // min 100 kwacha in tambala
+      reason: maxTambala < 10000 ? "Locked balance is too low for a loan." : null,
+      maxTambala,
+      collateralTambala: collateral,
+      interest,
+      ltv,
+      lockUntil: new Date(lockUntil).toISOString(),
+    };
+  });
+
+/**
+ * Disburse loan: principal paid out like a withdrawal (or demo), collateral stays in vault.
+ * First period due = principal * (1 + rate), due after one month.
+ */
+export const applyLoan = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      amountKwacha: z.number().positive(),
+      repaymentMode: z.enum(["auto", "manual"]),
+      pin: pinSchema,
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Complete your profile first");
+    if (profile.role === "admin") throw new Error("Admin accounts cannot take user loans.");
+    if (profile.admin_locked_at) throw new Error("Platform-locked accounts cannot take loans.");
+    if (profile.admin_withdraw_locked_at) {
+      throw new Error("Platform withdraw-lock blocks loans. Only a self time-lock qualifies.");
+    }
+    const lockUntil = profile.withdraw_lock_until
+      ? new Date(profile.withdraw_lock_until as string | Date).getTime()
+      : 0;
+    if (!lockUntil || lockUntil <= Date.now()) {
+      throw new Error("Set a voluntary withdrawal lock first. Loans are only against a self time-lock.");
+    }
+
+    const { verifySecret } = await import("./crypto");
+    if (!(await verifySecret(profile.pin_hash, data.pin))) throw new Error("Incorrect PIN");
+
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { getLoanInterestRate, getLoanLtvRate, addOneMonth, logLoanEvent } = await import("./loan.server");
+    const { newReference } = await import("./crypto");
+    const { kwachaToTambala, formatKwacha } = await import("./money");
+    const sql = await getSql();
+
+    const interest = await getLoanInterestRate(sql);
+    const ltv = await getLoanLtvRate(sql);
+    const amountTambala = kwachaToTambala(Math.floor(data.amountKwacha));
+    if (amountTambala < 10000) throw new Error("Minimum loan is 100 kwacha.");
+
+    const bal = await sql<{ balance_tambala: number }>`
+      select balance_tambala from wallets where user_id = ${context.userId} limit 1
+    `;
+    const collateral = Number(bal[0]?.balance_tambala ?? 0);
+    const maxTambala = Math.floor(collateral * ltv);
+    if (amountTambala > maxTambala) {
+      throw new Error(
+        `Maximum loan is ${formatKwacha(maxTambala)} (${(ltv * 100).toFixed(0)}% of your locked balance ${formatKwacha(collateral)}).`,
+      );
+    }
+
+    const active = await sql<{ n: number }>`
+      select count(*)::int as n from loans where user_id = ${context.userId} and status = ${"active"}
+    `;
+    if (Number(active[0]?.n ?? 0) > 0) throw new Error("You already have an active loan.");
+
+    // First month due = principal + interest
+    const firstDue = Math.ceil(amountTambala * (1 + interest));
+    const started = new Date();
+    const nextPeriod = addOneMonth(started);
+    const reference = newReference("LOAN");
+
+    // Disburse: payout to MoMo if possible; demo marks success without rail
+    const demo = process.env.NEXA_DEMO_PAYMENTS === "true" || process.env.NODE_ENV === "development";
+    let disburseTxId: number | null = null;
+
+    await withTransaction(async (tx) => {
+      // Collateral stays; create payout-shaped withdrawal for principal
+      const txRows = await tx<{ id: number }>`
+        insert into transactions (
+          user_id, kind, status, gross_tambala, credited_tambala,
+          platform_profit_tambala, payout_reserve_tambala, phone, reference, note, completed_at
+        ) values (
+          ${context.userId}, ${"withdrawal"}, ${demo ? "success" : "pending"}, ${amountTambala}, ${0},
+          ${0}, ${0}, ${profile.phone}, ${reference},
+          ${"Loan disbursement"}, ${demo ? new Date() : null}
+        ) returning id
+      `;
+      disburseTxId = txRows[0]?.id ?? null;
+
+      await tx`
+        insert into loans (
+          reference, user_id, principal_tambala, balance_due_tambala,
+          interest_rate_monthly, ltv_rate, collateral_tambala, repayment_mode,
+          status, started_at, next_period_at, periods_elapsed, disbursement_tx_id
+        ) values (
+          ${reference}, ${context.userId}, ${amountTambala}, ${firstDue},
+          ${interest}, ${ltv}, ${collateral}, ${data.repaymentMode},
+          ${"active"}, ${started}, ${nextPeriod}, ${0}, ${disburseTxId}
+        )
+      `;
+    });
+
+    if (!demo) {
+      try {
+        const { initiateMomoPayout, demoPaymentsEnabled } = await import("./paychangu.server");
+        if (demoPaymentsEnabled()) {
+          await sql`
+            update transactions set status = ${"success"}, completed_at = now() where reference = ${reference}
+          `;
+        } else {
+          await initiateMomoPayout({
+            phone: profile.phone,
+            amountKwacha: Math.round(amountTambala / 100),
+            chargeId: reference,
+            email: profile.email,
+            firstName: profile.first_name,
+            lastName: profile.last_name,
+          });
+          await sql`
+            update transactions set status = ${"success"}, completed_at = now() where reference = ${reference}
+          `;
+        }
+      } catch (err) {
+        await sql`update loans set status = ${"cancelled"}, updated_at = now() where reference = ${reference}`;
+        await sql`
+          update transactions set status = ${"failed"}, note = ${"Loan disbursement failed"} where reference = ${reference}
+        `;
+        throw new Error(
+          "Could not disburse the loan to your mobile money. Loan cancelled. " +
+            String((err as Error).message ?? "").slice(0, 120),
+        );
+      }
+    }
+
+    const loanId = await sql<{ id: number }>`select id from loans where reference = ${reference} limit 1`;
+    if (loanId[0]) {
+      await logLoanEvent(
+        sql,
+        Number(loanId[0].id),
+        "opened",
+        `Principal ${amountTambala} due first period ${firstDue} mode ${data.repaymentMode}`,
+        firstDue,
+      );
+    }
+
+    return {
+      ok: true as const,
+      reference,
+      principalTambala: amountTambala,
+      firstDueTambala: firstDue,
+      nextPeriodAt: nextPeriod.toISOString(),
+      interest,
+      repaymentMode: data.repaymentMode,
+    };
+  });
+
+export const repayLoan = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ reference: z.string().min(4), pin: pinSchema }))
+  .handler(async ({ context, data }) => {
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Complete your profile first");
+    const { verifySecret } = await import("./crypto");
+    if (!(await verifySecret(profile.pin_hash, data.pin))) throw new Error("Incorrect PIN");
+
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { logLoanEvent } = await import("./loan.server");
+    const sql = await getSql();
+    const rows = await sql<{
+      id: number;
+      balance_due_tambala: number;
+      principal_tambala: number;
+      status: string;
+      user_id: string;
+    }>`
+      select id, balance_due_tambala, principal_tambala, status, user_id from loans where reference = ${data.reference} limit 1
+    `;
+    if (!rows.length || rows[0].user_id !== context.userId) throw new Error("Loan not found.");
+    if (rows[0].status !== "active") throw new Error("This loan is not active.");
+    const due = Number(rows[0].balance_due_tambala);
+    const principal = Number(rows[0].principal_tambala);
+
+    await withTransaction(async (tx) => {
+      const bal = await tx<{ balance_tambala: number }>`
+        select balance_tambala from wallets where user_id = ${context.userId} for update
+      `;
+      if (Number(bal[0]?.balance_tambala ?? 0) < due) {
+        throw new Error("Insufficient vault balance to repay the full amount due.");
+      }
+      await tx`
+        update wallets set balance_tambala = balance_tambala - ${due}, updated_at = now()
+        where user_id = ${context.userId}
+      `;
+      await tx`
+        insert into transactions (
+          user_id, kind, status, gross_tambala, credited_tambala,
+          platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
+        ) values (
+          ${context.userId}, ${"fee"}, ${"success"}, ${due}, ${0},
+          ${0}, ${0}, ${data.reference + "_PAY"},
+          ${"Loan repayment (manual)"}, now()
+        )
+      `;
+      await tx`
+        update loans set status = ${"paid"}, balance_due_tambala = ${0}, closed_at = now(), updated_at = now()
+        where id = ${rows[0].id}
+      `;
+    });
+    const { recordLoanInterestEarned } = await import("./loan.server");
+    await recordLoanInterestEarned(sql, context.userId, data.reference, principal, due, due);
+    await logLoanEvent(sql, Number(rows[0].id), "paid_manual", `Repaid ${due}`, 0);
+    return { ok: true as const, paidTambala: due };
+  });
+
+
+export const adminListLoans = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator(z.object({ q: z.string().max(80).optional() }).optional())
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const q = (data?.q ?? "").trim().toLowerCase();
+    try {
+      const rows = await sql<{
+        id: number;
+        reference: string;
+        principal_tambala: number;
+        balance_due_tambala: number;
+        interest_rate_monthly: number;
+        collateral_tambala: number;
+        repayment_mode: string;
+        status: string;
+        started_at: unknown;
+        next_period_at: unknown;
+        periods_elapsed: number;
+        closed_at: unknown;
+        username: string;
+        phone: string;
+        first_name: string;
+        last_name: string;
+      }>`
+        select l.id, l.reference, l.principal_tambala, l.balance_due_tambala, l.interest_rate_monthly,
+               l.collateral_tambala, l.repayment_mode, l.status, l.started_at, l.next_period_at,
+               l.periods_elapsed, l.closed_at,
+               p.username, p.phone, p.first_name, p.last_name
+        from loans l
+        join profiles p on p.user_id = l.user_id
+        order by l.created_at desc
+        limit 200
+      `;
+      let list = rows.map((r) => ({
+        id: Number(r.id),
+        reference: r.reference,
+        principalTambala: Number(r.principal_tambala),
+        balanceDueTambala: Number(r.balance_due_tambala),
+        interestRateMonthly: Number(r.interest_rate_monthly),
+        collateralTambala: Number(r.collateral_tambala),
+        repaymentMode: r.repayment_mode,
+        status: r.status,
+        startedAt: new Date(r.started_at as string | Date).toISOString(),
+        nextPeriodAt: new Date(r.next_period_at as string | Date).toISOString(),
+        periodsElapsed: Number(r.periods_elapsed),
+        closedAt: r.closed_at ? new Date(r.closed_at as string | Date).toISOString() : null,
+        username: r.username,
+        phone: r.phone,
+        fullName: `${r.first_name} ${r.last_name}`.trim(),
+      }));
+      if (q) {
+        list = list.filter(
+          (r) =>
+            r.reference.toLowerCase().includes(q) ||
+            r.username.toLowerCase().includes(q) ||
+            r.phone.replace(/\s/g, "").includes(q.replace(/\s/g, "")) ||
+            r.fullName.toLowerCase().includes(q) ||
+            r.status.toLowerCase().includes(q),
+        );
+      }
+      return list;
+    } catch {
+      return [];
+    }
   });

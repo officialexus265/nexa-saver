@@ -33,6 +33,9 @@ import {
   adminLookupTransfer,
   adminFreezeTransfer,
   adminResolveTransfer,
+  adminGetLoanPolicy,
+  adminSetLoanPolicy,
+  adminListLoans,
   adminTreasuryWithdraw,
   adminExportSurveyCsv,
   adminDeleteUser,
@@ -147,16 +150,42 @@ function Console() {
   >([]);
   const [lookupRef, setLookupRef] = useState("");
   const [lookupMsg, setLookupMsg] = useState<string | null>(null);
+  const [loanInterest, setLoanInterest] = useState("3");
+  const [loanLtv, setLoanLtv] = useState("90");
+  const [loanPolicyMsg, setLoanPolicyMsg] = useState<string | null>(null);
+  const [loanRows, setLoanRows] = useState<
+    Array<{
+      id: number;
+      reference: string;
+      principalTambala: number;
+      balanceDueTambala: number;
+      interestRateMonthly: number;
+      collateralTambala: number;
+      repaymentMode: string;
+      status: string;
+      startedAt: string;
+      nextPeriodAt: string;
+      periodsElapsed: number;
+      closedAt: string | null;
+      username: string;
+      phone: string;
+      fullName: string;
+    }>
+  >([]);
+  const [loanQuery, setLoanQuery] = useState("");
+  const [loanFilter, setLoanFilter] = useState<"all" | "active" | "closed">("all");
 
-  const [adminTab, setAdminTab] = useState<"overview" | "accounts" | "money" | "tools" | "reversals" | "translations">("overview");
+
+
+  const [adminTab, setAdminTab] = useState<"overview" | "accounts" | "money" | "tools" | "reversals" | "loans" | "translations">("overview");
 
 
 
 
 
   useEffect(() => {
-    Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone(), adminSecuritySurveyStatus(), adminAnalytics(), adminGetPayoutMethods(), adminGetFeePolicy(), adminGetSendFeeTiers(), adminListTransferReversals()])
-      .then(([o, u, t, s, sv, an, pm, fp, sft, rev]) => {
+    Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone(), adminSecuritySurveyStatus(), adminAnalytics(), adminGetPayoutMethods(), adminGetFeePolicy(), adminGetSendFeeTiers(), adminListTransferReversals(), adminGetLoanPolicy(), adminListLoans({ data: {} })])
+      .then(([o, u, t, s, sv, an, pm, fp, sft, rev, lp, loansList]) => {
         setOverview(o);
         setUsers(u);
         setTxs(t);
@@ -173,6 +202,11 @@ function Console() {
         }
         if (sft) setSendFeeTiers(sft);
         if (rev) setReversals(rev);
+        if (lp) {
+          setLoanInterest(String(Math.round(lp.interestMonthly * 1000) / 10));
+          setLoanLtv(String(Math.round(lp.ltvRate * 1000) / 10));
+        }
+        if (loansList) setLoanRows(loansList);
       })
       .catch((err) => setError(errMessage(err)));
   }, []);
@@ -215,6 +249,7 @@ function Console() {
     { id: "money" as const, label: "Fees & payouts" },
     { id: "tools" as const, label: "Tools" },
     { id: "reversals" as const, label: "Send reversals" },
+    { id: "loans" as const, label: "Loans" },
     { id: "translations" as const, label: "Translate" },
   ];
 
@@ -262,6 +297,7 @@ function Console() {
         <Stat label="Withdrawals" value={formatKwacha(overview.totalWithdrawalsTambala, { compact: true })} />
         <Stat label="User balances" value={formatKwacha(overview.userBalancesTambala, { compact: true })} />
         <Stat label="Platform profit" value={formatKwacha(overview.platformProfitTambala, { compact: true })} />
+        <Stat label="Loan interest" value={formatKwacha(overview.loanInterestTambala ?? 0, { compact: true })} />
         <Stat label="Payout reserve" value={formatKwacha(overview.payoutReserveTambala, { compact: true })} />
         <Stat label="Savers" value={String(overview.userCount)} />
       </div>
@@ -270,7 +306,7 @@ function Console() {
         <h2 className="font-display text-lg font-semibold">Treasury (platform profit)</h2>
         <p className="text-sm text-muted">
           Book profit is fee income from deposits. Saver balances are liabilities — never withdrawn here.
-          Treasury cash-out uses deposit book profit plus early-unlock fees collected from users, minus what you already paid out. ~1.8% applies on the mobile-money rail.
+          Treasury cash-out uses deposit book profit, early-unlock fees, and loan interest collected from users, minus what you already paid out. ~1.8% applies on the mobile-money rail.
         </p>
         {overview ? (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -400,6 +436,46 @@ function Console() {
         {feeMsg ? <p className="text-sm text-muted">{feeMsg}</p> : null}
       </Card>
 
+
+
+      <Card className="space-y-3 p-4">
+        <h2 className="font-display text-lg font-semibold">Loan policy</h2>
+        <p className="text-sm text-muted">
+          Loans only against a voluntary withdrawal time-lock (not admin locks). LTV is % of locked balance. Interest is
+          charged per full month period on the amount due.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>Monthly interest %</Label>
+            <Input value={loanInterest} inputMode="decimal" onChange={(e) => setLoanInterest(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Max LTV %</Label>
+            <Input value={loanLtv} inputMode="decimal" onChange={(e) => setLoanLtv(e.target.value)} />
+          </div>
+        </div>
+        <Button
+          type="button"
+          onClick={() => {
+            setLoanPolicyMsg(null);
+            void adminSetLoanPolicy({
+              data: {
+                interestPercent: Number(loanInterest),
+                ltvPercent: Number(loanLtv),
+              },
+            })
+              .then((p) => {
+                setLoanInterest(String(Math.round(p.interestMonthly * 1000) / 10));
+                setLoanLtv(String(Math.round(p.ltvRate * 1000) / 10));
+                setLoanPolicyMsg("Loan policy saved.");
+              })
+              .catch((err) => setLoanPolicyMsg(errMessage(err)));
+          }}
+        >
+          Save loan policy
+        </Button>
+        {loanPolicyMsg ? <p className="text-sm text-muted">{loanPolicyMsg}</p> : null}
+      </Card>
 
       <Card className="space-y-3 p-4">
         <h2 className="font-display text-lg font-semibold">Send money fees (fixed kwacha)</h2>
@@ -879,6 +955,151 @@ function Console() {
       </div>
       ) : null}
 
+
+
+      {adminTab === "loans" ? (
+      <div className="space-y-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="font-display text-lg font-semibold">Loans</h2>
+            <p className="text-sm text-muted">
+              Active and closed loans against voluntary time-locks. Interest earned appears on Overview.
+            </p>
+          </div>
+          <div className="flex w-full flex-col gap-2 sm:max-w-md">
+            <Label htmlFor="loan-search">Search</Label>
+            <Input
+              id="loan-search"
+              value={loanQuery}
+              onChange={(e) => setLoanQuery(e.target.value)}
+              placeholder="Reference, username, phone, name…"
+              className="w-full"
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-1 overflow-x-auto rounded-2xl border border-border bg-surface-2 p-1">
+          {(
+            [
+              { id: "all" as const, label: "All" },
+              { id: "active" as const, label: "Active" },
+              { id: "closed" as const, label: "Closed" },
+            ] as const
+          ).map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setLoanFilter(f.id)}
+              className={
+                loanFilter === f.id
+                  ? "shrink-0 rounded-xl bg-surface px-4 py-2 text-sm font-medium text-fg shadow-sm"
+                  : "shrink-0 rounded-xl px-4 py-2 text-sm text-muted"
+              }
+            >
+              {f.label}
+              {f.id === "active"
+                ? ` (${loanRows.filter((l) => l.status === "active").length})`
+                : f.id === "closed"
+                  ? ` (${loanRows.filter((l) => l.status !== "active" && l.status !== "cancelled").length})`
+                  : ` (${loanRows.length})`}
+            </button>
+          ))}
+        </div>
+
+        <div className="overflow-x-auto rounded-2xl border border-border">
+          <table className="w-full min-w-[720px] text-left text-sm">
+            <thead className="bg-surface-2 text-muted">
+              <tr>
+                <th className="px-4 py-3 font-medium">User</th>
+                <th className="px-4 py-3 font-medium">Reference</th>
+                <th className="px-4 py-3 font-medium text-right">Principal</th>
+                <th className="px-4 py-3 font-medium text-right">Due</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium">Period / closed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loanRows
+                .filter((l) => {
+                  if (loanFilter === "active") return l.status === "active";
+                  if (loanFilter === "closed") return l.status !== "active";
+                  return true;
+                })
+                .filter((l) => {
+                  const q = loanQuery.trim().toLowerCase();
+                  if (!q) return true;
+                  return (
+                    l.reference.toLowerCase().includes(q) ||
+                    l.username.toLowerCase().includes(q) ||
+                    l.phone.replace(/\s/g, "").includes(q.replace(/\s/g, "")) ||
+                    l.fullName.toLowerCase().includes(q) ||
+                    l.status.toLowerCase().includes(q)
+                  );
+                })
+                .map((l) => (
+                  <tr key={l.id} className="border-t border-border">
+                    <td className="px-4 py-3 align-middle">
+                      <p className="font-medium">{l.fullName}</p>
+                      <p className="text-xs text-muted">
+                        @{l.username} · {l.phone}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3 align-middle font-mono text-xs">{l.reference}</td>
+                    <td className="px-4 py-3 align-middle text-right tabular-nums whitespace-nowrap">
+                      {formatKwacha(l.principalTambala, { compact: true })}
+                    </td>
+                    <td className="px-4 py-3 align-middle text-right tabular-nums whitespace-nowrap">
+                      {l.status === "active"
+                        ? formatKwacha(l.balanceDueTambala, { compact: true })
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-3 align-middle text-xs whitespace-nowrap">
+                      <span
+                        className={
+                          l.status === "active"
+                            ? "text-primary"
+                            : l.status === "paid"
+                              ? "text-muted"
+                              : "text-warn"
+                        }
+                      >
+                        {l.status}
+                      </span>
+                      <span className="block text-faint">
+                        {l.repaymentMode} · {(l.interestRateMonthly * 100).toFixed(1)}%/mo · {l.periodsElapsed} periods
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 align-middle text-xs text-muted whitespace-nowrap">
+                      {l.status === "active" ? (
+                        <>Due period ends {new Date(l.nextPeriodAt).toLocaleString()}</>
+                      ) : l.closedAt ? (
+                        <>Closed {new Date(l.closedAt).toLocaleString()}</>
+                      ) : (
+                        <>Started {new Date(l.startedAt).toLocaleString()}</>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+          {!loanRows.length ? (
+            <p className="p-4 text-sm text-muted">No loans yet. Users apply from the dashboard while self-locked.</p>
+          ) : null}
+        </div>
+
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => {
+            void adminListLoans({ data: { q: loanQuery.trim() || undefined } })
+              .then(setLoanRows)
+              .catch((err) => setError(errMessage(err)));
+          }}
+        >
+          Refresh loans
+        </Button>
+      </div>
+      ) : null}
 
       {adminTab === "reversals" ? (
       <div className="space-y-5">

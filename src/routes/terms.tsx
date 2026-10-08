@@ -136,7 +136,23 @@ function TermsPage() {
         a full return to the sender or release to the recipient. Send fees already taken are not automatically refunded.
         Do not use send for illegal purposes.
       </p>
-<h2 className="font-display text-xl font-semibold">9. Closing your account</h2>
+
+      <h2 className="font-display text-xl font-semibold">Loans (self time-lock only)</h2>
+      <p>
+        If you place a voluntary withdrawal time-lock on your vault, you may apply for a loan of up to a configured
+        percentage (default 90%) of your then balance. Platform admin locks do not qualify. Interest accrues by the month
+        period from the date you take the loan (e.g. 4 June to 4 July), at a rate set by the operator (default 3% per
+        month) on the amount then due. You may choose auto-deduct from your vault at period end or manual repayment.
+      </p>
+      <p>
+        If a manual period ends without full repayment, another month of interest is applied to the amount that was due.
+        You receive email and in-app reminders about one week before, three days before, and on the due day. If successive
+        charges cause the amount due to reach or exceed your available balance, the system may close the loan by applying
+        your remaining balance and email you a full breakdown. Disbursement is typically to your registered mobile money;
+        collateral remains subject to your time-lock rules.
+      </p>
+      <h2 className="font-display text-xl font-semibold">9. Closing your account</h2>
+
       <p>
         Account deletion requires multiple confirmations and your PIN. Withdraw available funds first. After deletion,
         profile access ends; some transaction records may be retained for audit and legal obligations.

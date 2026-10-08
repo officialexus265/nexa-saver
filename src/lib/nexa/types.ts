@@ -88,6 +88,7 @@ export type AdminOverview = {
   userBalancesTambala: number;
   platformProfitTambala: number;
   earlyUnlockFeesTambala: number;
+  loanInterestTambala: number;
   payoutReserveTambala: number;
   pendingCount: number;
   demoPayments: boolean;

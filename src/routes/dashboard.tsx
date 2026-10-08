@@ -29,6 +29,10 @@ import {
   lookupSendRecipient,
   startTransfer,
   requestTransferReversal,
+  getLoanEligibility,
+  getMyLoans,
+  applyLoan,
+  repayLoan,
   verifyPin,
   resendVerificationEmailFn,
 } from "@/lib/nexa/fns";
@@ -194,6 +198,7 @@ function Vault({
 
       <section>
         <WithdrawLockPanel />
+        <LoanPanel />
 
         <h2 className="mb-3 font-display text-lg font-semibold">Activity</h2>
         {txs === null ? (
@@ -860,6 +865,161 @@ function SendModal({
         {error ? <p className="text-sm text-danger">{error}</p> : null}
       </div>
     </Modal>
+  );
+}
+
+
+function LoanPanel() {
+  const [elig, setElig] = useState<Awaited<ReturnType<typeof getLoanEligibility>> | null>(null);
+  const [loans, setLoans] = useState<Awaited<ReturnType<typeof getMyLoans>>>([]);
+  const [amount, setAmount] = useState("");
+  const [mode, setMode] = useState<"auto" | "manual">("manual");
+  const [pin, setPin] = useState("");
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [repayRef, setRepayRef] = useState<string | null>(null);
+
+  function refresh() {
+    void getLoanEligibility()
+      .then(setElig)
+      .catch(() => setElig(null));
+    void getMyLoans()
+      .then(setLoans)
+      .catch(() => setLoans([]));
+  }
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  async function apply() {
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      const res = await applyLoan({
+        data: { amountKwacha: Number(amount), repaymentMode: mode, pin },
+      });
+      setMsg(
+        `Loan ${res.reference} opened. First amount due ${formatKwacha(res.firstDueTambala)} by ${new Date(res.nextPeriodAt).toLocaleString()}. Funds are sent to your registered mobile money.`,
+      );
+      setPin("");
+      setOpen(false);
+      refresh();
+    } catch (e) {
+      setErr(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function repay(reference: string) {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await repayLoan({ data: { reference, pin } });
+      setMsg(`Paid ${formatKwacha(res.paidTambala)}. Loan closed.`);
+      setRepayRef(null);
+      setPin("");
+      refresh();
+    } catch (e) {
+      setErr(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const active = loans.filter((l) => l.status === "active");
+
+  return (
+    <Card className="mt-4 space-y-3 p-4">
+      <div>
+        <h2 className="font-display text-lg font-semibold">Loan (against self-lock)</h2>
+        <p className="text-sm text-muted">
+          Only while a voluntary withdrawal time-lock is active. Admin locks do not qualify. Max{" "}
+          {elig ? `${Math.round((elig.ltv || 0.9) * 100)}%` : "90%"} of locked balance. Interest{" "}
+          {elig ? `${((elig.interest || 0.03) * 100).toFixed(1)}%` : "3%"} per month on the amount due.
+        </p>
+      </div>
+
+      {active.map((l) => (
+        <div key={l.reference} className="rounded-xl border border-border bg-surface-2 p-3 text-sm space-y-1">
+          <p className="font-medium">{l.reference}</p>
+          <p>
+            Due now: <span className="tabular-nums font-semibold">{formatKwacha(l.balanceDueTambala)}</span>
+          </p>
+          <p className="text-muted">
+            Principal {formatKwacha(l.principalTambala)} · mode {l.repaymentMode} · period ends{" "}
+            {new Date(l.nextPeriodAt).toLocaleString()}
+          </p>
+          {repayRef === l.reference ? (
+            <div className="space-y-2 pt-2">
+              <PinPad value={pin} onChange={setPin} disabled={busy} />
+              <Button type="button" className="w-full" disabled={busy || pin.length !== 4} onClick={() => void repay(l.reference)}>
+                {busy ? "Paying…" : "Confirm repay from vault"}
+              </Button>
+              <Button type="button" variant="secondary" className="w-full" onClick={() => setRepayRef(null)}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <Button type="button" variant="secondary" size="sm" onClick={() => { setRepayRef(l.reference); setPin(""); }}>
+              Repay now
+            </Button>
+          )}
+        </div>
+      ))}
+
+      {elig && !elig.eligible ? (
+        <p className="text-sm text-muted">{elig.reason}</p>
+      ) : null}
+
+      {elig?.eligible && !active.length ? (
+        open ? (
+          <div className="space-y-3 border-t border-border pt-3">
+            <p className="text-sm text-muted">
+              Max {formatKwacha(elig.maxTambala)}. First repayment ≈ amount +{" "}
+              {((elig.interest || 0.03) * 100).toFixed(1)}% after one month. Collateral stays in your vault; cash is
+              disbursed to your MoMo.
+            </p>
+            <div className="space-y-1.5">
+              <Label>Amount (kwacha)</Label>
+              <Input
+                inputMode="numeric"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value.replace(/\D/g, ""))}
+              />
+            </div>
+            <div className="space-y-2 text-sm">
+              <label className="flex items-start gap-2">
+                <input type="radio" checked={mode === "manual"} onChange={() => setMode("manual")} />
+                <span>Manual repay — if a period ends unpaid, another month of interest is added</span>
+              </label>
+              <label className="flex items-start gap-2">
+                <input type="radio" checked={mode === "auto"} onChange={() => setMode("auto")} />
+                <span>Auto-deduct from vault when each period ends (if balance allows)</span>
+              </label>
+            </div>
+            <PinPad value={pin} onChange={setPin} disabled={busy} />
+            <Button type="button" className="w-full" disabled={busy || pin.length !== 4 || !Number(amount)} onClick={() => void apply()}>
+              {busy ? "Applying…" : "Take loan"}
+            </Button>
+            <Button type="button" variant="secondary" className="w-full" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        ) : (
+          <Button type="button" variant="secondary" className="w-full" onClick={() => setOpen(true)}>
+            Apply for loan
+          </Button>
+        )
+      ) : null}
+
+      {err ? <p className="text-sm text-danger">{err}</p> : null}
+      {msg ? <p className="text-sm text-primary">{msg}</p> : null}
+    </Card>
   );
 }
 
