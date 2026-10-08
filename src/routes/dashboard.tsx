@@ -237,7 +237,6 @@ function Vault({
         <WithdrawLockPanel />
         <LoanPanel />
         <AffiliatePanel />
-        <ShareAppCard />
 
         <h2 className="mb-3 font-display text-lg font-semibold">Activity</h2>
         {txs === null ? (
@@ -1273,50 +1272,6 @@ function AffiliatePanel() {
       )}
       {err ? <p className="text-sm text-danger">{err}</p> : null}
       {msg ? <p className="text-sm text-primary">{msg}</p> : null}
-    </Card>
-  );
-}
-
-function ShareAppCard() {
-  const [cfg, setCfg] = useState<Awaited<ReturnType<typeof getReferralPublicConfig>> | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-  useEffect(() => {
-    void getReferralPublicConfig()
-      .then(setCfg)
-      .catch(() => null);
-  }, []);
-  const url = typeof window !== "undefined" ? window.location.origin : "https://nexa-saver.vercel.app";
-
-  async function share() {
-    const title = cfg?.og.share.title ?? "NEXA-SAVER";
-    const text = cfg?.og.share.description ?? "Save with NEXA-SAVER";
-    try {
-      if (navigator.share) {
-        await navigator.share({ title, text, url });
-      } else {
-        await navigator.clipboard.writeText(url);
-        setMsg("Link copied.");
-      }
-    } catch {
-      try {
-        await navigator.clipboard.writeText(url);
-        setMsg("Link copied.");
-      } catch {
-        window.prompt("Copy:", url);
-      }
-    }
-  }
-
-  return (
-    <Card className="mt-4 flex flex-wrap items-center justify-between gap-3 p-4">
-      <div>
-        <h2 className="font-display text-lg font-semibold">Share NEXA-SAVER</h2>
-        <p className="text-sm text-muted">Tell a friend — no referral code required.</p>
-        {msg ? <p className="text-xs text-primary">{msg}</p> : null}
-      </div>
-      <Button type="button" variant="secondary" onClick={() => void share()}>
-        Share app
-      </Button>
     </Card>
   );
 }

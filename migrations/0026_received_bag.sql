@@ -12,3 +12,8 @@ comment on column wallets.received_balance_tambala is
   'Funds from peer transfers; not mixed into main balance until user moves them.';
 comment on column transfers.cover_bank_flat is
   'Sender paid an extra 700 MWK so receiver total credit includes bank flat buffer.';
+
+insert into platform_settings (key, value, updated_at) values
+  ('footer_company_name', 'NEXUS265', now()),
+  ('footer_company_url', 'https://www.facebook.com/', now())
+on conflict (key) do nothing;

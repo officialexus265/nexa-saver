@@ -5270,3 +5270,52 @@ export const moveReceivedToMain = createServerFn({ method: "POST" })
     });
     return { ok: true as const };
   });
+
+
+export const getPublicSiteFooter = createServerFn({ method: "GET" }).handler(async () => {
+  const { getSql } = await import("@/lib/db");
+  const sql = await getSql();
+  const g = async (key: string, fb: string) => {
+    try {
+      const rows = await sql<{ value: string }>`select value from platform_settings where key = ${key} limit 1`;
+      return rows[0]?.value?.trim() || fb;
+    } catch {
+      return fb;
+    }
+  };
+  return {
+    companyName: await g("footer_company_name", "NEXUS265"),
+    companyUrl: await g("footer_company_url", "https://www.facebook.com/"),
+  };
+});
+
+export const adminGetSiteFooter = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    return getPublicSiteFooter();
+  });
+
+export const adminSetSiteFooter = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      companyName: z.string().min(1).max(80),
+      companyUrl: z.string().url().max(300),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const set = async (key: string, value: string) => {
+      await sql`
+        insert into platform_settings (key, value, updated_at)
+        values (${key}, ${value}, now())
+        on conflict (key) do update set value = excluded.value, updated_at = now()
+      `;
+    };
+    await set("footer_company_name", data.companyName.trim());
+    await set("footer_company_url", data.companyUrl.trim());
+    return { ok: true as const };
+  });

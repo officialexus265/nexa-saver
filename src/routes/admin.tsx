@@ -41,6 +41,8 @@ import {
   adminGetSignupIntroVideo,
   adminSetSignupIntroVideo,
   adminUploadOgImage,
+  adminGetSiteFooter,
+  adminSetSiteFooter,
   adminTreasuryWithdraw,
   adminExportSurveyCsv,
   adminDeleteUser,
@@ -193,6 +195,10 @@ function Console() {
   const [signupVideoMsg, setSignupVideoMsg] = useState<string | null>(null);
   const [ogBust, setOgBust] = useState(0);
   const [ogUploading, setOgUploading] = useState(false);
+  const [footerCompanyName, setFooterCompanyName] = useState("NEXUS265");
+  const [footerCompanyUrl, setFooterCompanyUrl] = useState("https://www.facebook.com/");
+  const [footerMsg, setFooterMsg] = useState<string | null>(null);
+
 
 
   const [loanFilter, setLoanFilter] = useState<"all" | "active" | "closed">("all");
@@ -204,6 +210,15 @@ function Console() {
 
 
 
+
+  useEffect(() => {
+    void adminGetSiteFooter()
+      .then((f) => {
+        setFooterCompanyName(f.companyName);
+        setFooterCompanyUrl(f.companyUrl);
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone(), adminSecuritySurveyStatus(), adminAnalytics(), adminGetPayoutMethods(), adminGetFeePolicy(), adminGetSendFeeTiers(), adminListTransferReversals(), adminGetLoanPolicy(), adminListLoans({ data: {} }), adminGetReferralSettings(), adminGetSignupIntroVideo()])
@@ -474,6 +489,36 @@ function Console() {
 
 
 
+
+      <Card className="space-y-3 p-4">
+        <h2 className="font-display text-lg font-semibold">Footer / developer credit</h2>
+        <p className="text-sm text-muted">
+          Shown on login and in the app as &quot;Developed by …&quot;. Link should be your official Facebook page (or any
+          public page).
+        </p>
+        <div className="space-y-1.5">
+          <Label>Company name</Label>
+          <Input value={footerCompanyName} onChange={(e) => setFooterCompanyName(e.target.value)} placeholder="NEXUS265" />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Link (Facebook or website)</Label>
+          <Input value={footerCompanyUrl} onChange={(e) => setFooterCompanyUrl(e.target.value)} placeholder="https://www.facebook.com/…" />
+        </div>
+        <Button
+          type="button"
+          onClick={() => {
+            setFooterMsg(null);
+            void adminSetSiteFooter({
+              data: { companyName: footerCompanyName, companyUrl: footerCompanyUrl },
+            })
+              .then(() => setFooterMsg("Footer saved."))
+              .catch((err) => setFooterMsg(errMessage(err)));
+          }}
+        >
+          Save footer
+        </Button>
+        {footerMsg ? <p className="text-sm text-muted">{footerMsg}</p> : null}
+      </Card>
 
       <Card className="space-y-3 p-4">
         <h2 className="font-display text-lg font-semibold">Signup explainer video</h2>

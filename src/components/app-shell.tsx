@@ -1,6 +1,8 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { LayoutDashboard, Shield, UserRound, LogOut } from "lucide-react";
 import { BrandLockup } from "@/components/brand";
+import { ShareAppButton } from "@/components/share-app-button";
+import { SiteFooter } from "@/components/site-footer";
 import { signOut } from "@/lib/auth/client";
 import type { PublicProfile } from "@/lib/nexa/types";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -26,16 +28,10 @@ export function AppShell({
         <div className="flex items-center gap-1.5 sm:gap-2">
           <LanguageSwitcher />
           <ThemeToggle className="h-9 px-2.5" />
-          {/* Mobile: always-visible sign out (bottom tab can be covered by help FAB) */}
-          <button
-            type="button"
-            onClick={() => signOut("/")}
-            className="inline-flex h-10 items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2.5 text-sm text-fg md:hidden"
-            aria-label={t("nav.signOut")}
-          >
-            <LogOut className="size-4 shrink-0" />
-            <span className="max-w-[4.5rem] truncate text-xs font-medium">{t("nav.signOut")}</span>
-          </button>
+          {/* Desktop: share in top bar */}
+          <div className="hidden md:block">
+            <ShareAppButton variant="nav" label="Share" />
+          </div>
           <div className="hidden items-center gap-1 md:flex">
             <NavLink to="/dashboard" current={pathname}>
               {t("nav.home")}
@@ -59,16 +55,20 @@ export function AppShell({
           </div>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-3xl px-4 py-6 pb-28 md:pb-6">{children}</main>
+      <main className="mx-auto w-full max-w-3xl px-4 py-6">{children}</main>
+      <SiteFooter className="mx-auto hidden max-w-3xl px-4 pb-4 text-center text-xs text-faint md:block" />
+
       <nav
         className={
           isAdmin
-            ? "fixed inset-x-0 bottom-0 z-20 grid grid-cols-4 border-t border-border bg-surface/95 px-1 pb-[env(safe-area-inset-bottom)] pt-2 md:hidden"
-            : "fixed inset-x-0 bottom-0 z-20 grid grid-cols-3 border-t border-border bg-surface/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 md:hidden"
+            ? "fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-border bg-surface/95 px-1 pb-[env(safe-area-inset-bottom)] pt-2 md:hidden"
+            : "fixed inset-x-0 bottom-0 z-20 grid grid-cols-4 border-t border-border bg-surface/95 px-1 pb-[env(safe-area-inset-bottom)] pt-2 md:hidden"
         }
+        aria-label="Primary"
       >
         <TabLink to="/dashboard" current={pathname} icon={<LayoutDashboard className="size-5" />} label={t("nav.home")} />
         <TabLink to="/profile" current={pathname} icon={<UserRound className="size-5" />} label={t("nav.profile")} />
+        <ShareAppButton variant="tab" label="Share" />
         {isAdmin ? (
           <TabLink to="/admin" current={pathname} icon={<Shield className="size-5" />} label={t("nav.admin")} />
         ) : null}
