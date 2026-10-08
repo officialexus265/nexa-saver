@@ -27,6 +27,12 @@ import {
   adminSetPayoutMethods,
   adminGetFeePolicy,
   adminSetFeePolicy,
+  adminGetSendFeeTiers,
+  adminSetSendFeeTiers,
+  adminListTransferReversals,
+  adminLookupTransfer,
+  adminFreezeTransfer,
+  adminResolveTransfer,
   adminTreasuryWithdraw,
   adminExportSurveyCsv,
   adminDeleteUser,
@@ -121,15 +127,36 @@ function Console() {
   const [feeForm, setFeeForm] = useState({ deposit: "6", unlockBase: "3", unlockCap: "3" });
   const [feeMsg, setFeeMsg] = useState<string | null>(null);
   const [feeBusy, setFeeBusy] = useState(false);
-  const [adminTab, setAdminTab] = useState<"overview" | "accounts" | "money" | "tools" | "translations">("overview");
+  const [sendFeeTiers, setSendFeeTiers] = useState<
+    Array<{ minKwacha: number; maxKwacha: number | null; feeKwacha: number }>
+  >([]);
+  const [sendFeeMsg, setSendFeeMsg] = useState<string | null>(null);
+  const [sendFeeBusy, setSendFeeBusy] = useState(false);
+  const [reversals, setReversals] = useState<
+    Array<{
+      requestId: number;
+      requestStatus: string;
+      reference: string;
+      amountTambala: number;
+      fromUsername: string;
+      toUsername: string;
+      transferStatus: string;
+      frozenUntil: string | null;
+      userNote: string | null;
+    }>
+  >([]);
+  const [lookupRef, setLookupRef] = useState("");
+  const [lookupMsg, setLookupMsg] = useState<string | null>(null);
+
+  const [adminTab, setAdminTab] = useState<"overview" | "accounts" | "money" | "tools" | "reversals" | "translations">("overview");
 
 
 
 
 
   useEffect(() => {
-    Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone(), adminSecuritySurveyStatus(), adminAnalytics(), adminGetPayoutMethods(), adminGetFeePolicy()])
-      .then(([o, u, t, s, sv, an, pm, fp]) => {
+    Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone(), adminSecuritySurveyStatus(), adminAnalytics(), adminGetPayoutMethods(), adminGetFeePolicy(), adminGetSendFeeTiers(), adminListTransferReversals()])
+      .then(([o, u, t, s, sv, an, pm, fp, sft, rev]) => {
         setOverview(o);
         setUsers(u);
         setTxs(t);
@@ -144,6 +171,8 @@ function Console() {
             unlockCap: String(Math.round(fp.earlyUnlockCapRate * 1000) / 10),
           });
         }
+        if (sft) setSendFeeTiers(sft);
+        if (rev) setReversals(rev);
       })
       .catch((err) => setError(errMessage(err)));
   }, []);
@@ -185,6 +214,7 @@ function Console() {
     { id: "accounts" as const, label: "Accounts" },
     { id: "money" as const, label: "Fees & payouts" },
     { id: "tools" as const, label: "Tools" },
+    { id: "reversals" as const, label: "Send reversals" },
     { id: "translations" as const, label: "Translate" },
   ];
 
@@ -368,6 +398,80 @@ function Console() {
           {feeBusy ? "Saving…" : "Save fee policy"}
         </Button>
         {feeMsg ? <p className="text-sm text-muted">{feeMsg}</p> : null}
+      </Card>
+
+
+      <Card className="space-y-3 p-4">
+        <h2 className="font-display text-lg font-semibold">Send money fees (fixed kwacha)</h2>
+        <p className="text-sm text-muted">
+          Charged from the sender&apos;s balance. Recipient always receives the full typed amount. Send is disabled when
+          withdrawals are paused or locked.
+        </p>
+        <ul className="space-y-2">
+          {sendFeeTiers.map((tier, i) => (
+            <li key={i} className="grid grid-cols-3 gap-2">
+              <Input
+                inputMode="numeric"
+                value={String(tier.minKwacha)}
+                onChange={(e) => {
+                  const v = Number(e.target.value.replace(/\D/g, "")) || 0;
+                  setSendFeeTiers((rows) => rows.map((r, j) => (j === i ? { ...r, minKwacha: v } : r)));
+                }}
+                aria-label="Min kwacha"
+              />
+              <Input
+                inputMode="numeric"
+                placeholder="max or empty"
+                value={tier.maxKwacha == null ? "" : String(tier.maxKwacha)}
+                onChange={(e) => {
+                  const raw = e.target.value.replace(/\D/g, "");
+                  const v = raw === "" ? null : Number(raw);
+                  setSendFeeTiers((rows) => rows.map((r, j) => (j === i ? { ...r, maxKwacha: v } : r)));
+                }}
+                aria-label="Max kwacha"
+              />
+              <Input
+                inputMode="numeric"
+                value={String(tier.feeKwacha)}
+                onChange={(e) => {
+                  const v = Number(e.target.value.replace(/\D/g, "")) || 0;
+                  setSendFeeTiers((rows) => rows.map((r, j) => (j === i ? { ...r, feeKwacha: v } : r)));
+                }}
+                aria-label="Fee kwacha"
+              />
+            </li>
+          ))}
+        </ul>
+        <p className="text-[11px] text-muted">Columns: min · max (blank = no upper limit) · fee in kwacha</p>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() =>
+              setSendFeeTiers((rows) => [...rows, { minKwacha: 0, maxKwacha: null, feeKwacha: 0 }])
+            }
+          >
+            Add tier
+          </Button>
+          <Button
+            type="button"
+            disabled={sendFeeBusy}
+            onClick={() => {
+              setSendFeeBusy(true);
+              setSendFeeMsg(null);
+              void adminSetSendFeeTiers({ data: { tiers: sendFeeTiers } })
+                .then((rows) => {
+                  setSendFeeTiers(rows);
+                  setSendFeeMsg("Send fee tiers saved.");
+                })
+                .catch((err) => setSendFeeMsg(errMessage(err)))
+                .finally(() => setSendFeeBusy(false));
+            }}
+          >
+            {sendFeeBusy ? "Saving…" : "Save send fees"}
+          </Button>
+        </div>
+        {sendFeeMsg ? <p className="text-sm text-muted">{sendFeeMsg}</p> : null}
       </Card>
 
       <Card className="space-y-3 p-4">
@@ -772,6 +876,118 @@ function Console() {
           ))}
         </ul>
       </section>
+      </div>
+      ) : null}
+
+
+      {adminTab === "reversals" ? (
+      <div className="space-y-5">
+        <Card className="space-y-3 p-4">
+          <h2 className="font-display text-lg font-semibold">Look up transfer ID</h2>
+          <p className="text-sm text-muted">
+            When a user reports a wrong send, take their transaction ID, freeze the transfer (2 days), and email the
+            recipient. Then reverse or release after review.
+          </p>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
+              value={lookupRef}
+              onChange={(e) => setLookupRef(e.target.value.trim())}
+              placeholder="SND_…"
+              className="flex-1"
+            />
+            <Button
+              type="button"
+              onClick={() => {
+                setLookupMsg(null);
+                void adminLookupTransfer({ data: { reference: lookupRef } })
+                  .then((tr) => {
+                    setLookupMsg(
+                      `${tr.reference}: ${tr.fromUsername} → ${tr.toUsername} · ${tr.amountTambala / 100} MWK · ${tr.status}`,
+                    );
+                  })
+                  .catch((err) => setLookupMsg(errMessage(err)));
+              }}
+            >
+              Look up
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setLookupMsg(null);
+                void adminFreezeTransfer({ data: { reference: lookupRef, days: 2 } })
+                  .then((r) => {
+                    setLookupMsg(`Frozen until ${new Date(r.frozenUntil).toLocaleString()}. Recipient emailed.`);
+                    return adminListTransferReversals();
+                  })
+                  .then(setReversals)
+                  .catch((err) => setLookupMsg(errMessage(err)));
+              }}
+            >
+              Freeze 2 days
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                void adminResolveTransfer({ data: { reference: lookupRef, action: "reverse" } })
+                  .then(() => {
+                    setLookupMsg("Reversed — amount returned to sender (fee stays with platform).");
+                    return adminListTransferReversals();
+                  })
+                  .then(setReversals)
+                  .catch((err) => setLookupMsg(errMessage(err)));
+              }}
+            >
+              Reverse
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                void adminResolveTransfer({ data: { reference: lookupRef, action: "release" } })
+                  .then(() => {
+                    setLookupMsg("Released to recipient.");
+                    return adminListTransferReversals();
+                  })
+                  .then(setReversals)
+                  .catch((err) => setLookupMsg(errMessage(err)));
+              }}
+            >
+              Release
+            </Button>
+          </div>
+          {lookupMsg ? <p className="text-sm text-muted">{lookupMsg}</p> : null}
+        </Card>
+
+        <Card className="space-y-3 p-4">
+          <h2 className="font-display text-lg font-semibold">Reversal requests</h2>
+          {!reversals.length ? (
+            <p className="text-sm text-muted">No requests yet.</p>
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {reversals.map((r) => (
+                <li key={r.requestId} className="rounded-xl border border-border bg-surface-2 p-3">
+                  <p className="font-medium">
+                    {r.reference}{" "}
+                    <button
+                      type="button"
+                      className="text-xs text-primary underline"
+                      onClick={() => setLookupRef(r.reference)}
+                    >
+                      use ID
+                    </button>
+                  </p>
+                  <p className="text-muted">
+                    {r.fromUsername} → {r.toUsername} · {(r.amountTambala / 100).toLocaleString()} MWK · req{" "}
+                    {r.requestStatus} · transfer {r.transferStatus}
+                  </p>
+                  {r.userNote ? <p className="text-xs">Note: {r.userNote}</p> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
       </div>
       ) : null}
 

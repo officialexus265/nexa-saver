@@ -597,7 +597,16 @@ export const listTransactions = createServerFn({ method: "GET" })
     `;
     return rows.map((r) => ({
       id: asInt(r.id),
-      kind: r.kind === "withdrawal" ? "withdrawal" : r.kind === "fee" ? "fee" : "deposit",
+      kind:
+        r.kind === "withdrawal"
+          ? "withdrawal"
+          : r.kind === "fee"
+            ? "fee"
+            : r.kind === "transfer_out"
+              ? "transfer_out"
+              : r.kind === "transfer_in"
+                ? "transfer_in"
+                : "deposit",
       status:
         r.status === "success"
           ? "success"
@@ -1413,7 +1422,16 @@ export const adminTransactions = createServerFn({ method: "GET" })
     `;
     return rows.map((r) => ({
       id: asInt(r.id),
-      kind: r.kind === "withdrawal" ? "withdrawal" : r.kind === "fee" ? "fee" : "deposit",
+      kind:
+        r.kind === "withdrawal"
+          ? "withdrawal"
+          : r.kind === "fee"
+            ? "fee"
+            : r.kind === "transfer_out"
+              ? "transfer_out"
+              : r.kind === "transfer_in"
+                ? "transfer_in"
+                : "deposit",
       status:
         r.status === "success"
           ? "success"
@@ -3756,4 +3774,586 @@ export const adminPublishTranslations = createServerFn({ method: "POST" })
       detail: `lang=${data.lang} keys=${n} enable=${Boolean(data.enable)}`,
     });
     return { ok: true as const, published: n };
+  });
+
+
+/** Public send-fee tiers (kwacha) for UI. */
+export const getSendFeeTiersPublic = createServerFn({ method: "GET" }).handler(async () => {
+  const { getSql } = await import("@/lib/db");
+  const { getSendFeeTiers } = await import("./send-fee.server");
+  const sql = await getSql();
+  return getSendFeeTiers(sql);
+});
+
+export const adminGetSendFeeTiers = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { getSendFeeTiers } = await import("./send-fee.server");
+    const sql = await getSql();
+    return getSendFeeTiers(sql);
+  });
+
+export const adminSetSendFeeTiers = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      tiers: z
+        .array(
+          z.object({
+            minKwacha: z.number().min(0),
+            maxKwacha: z.number().nullable(),
+            feeKwacha: z.number().min(0),
+          }),
+        )
+        .min(1)
+        .max(20),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { setSendFeeTiers } = await import("./send-fee.server");
+    const sql = await getSql();
+    const tiers = await setSendFeeTiers(sql, data.tiers);
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "send_fee_tiers_set",
+      detail: JSON.stringify(tiers),
+    });
+    return tiers;
+  });
+
+/** Look up a registered user by Malawi mobile number for P2P send. */
+export const lookupSendRecipient = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ phone: z.string().min(8).max(20) }))
+  .handler(async ({ context, data }) => {
+    const { normalizeMwPhone } = await import("./phone");
+    const phone = normalizeMwPhone(data.phone);
+    if (!phone) throw new Error("Enter a valid Malawi mobile number.");
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{
+      user_id: string;
+      first_name: string;
+      last_name: string;
+      phone: string;
+      deleted_at: unknown;
+    }>`
+      select user_id, first_name, last_name, phone, deleted_at
+      from profiles
+      where phone = ${phone}
+      limit 1
+    `;
+    if (!rows.length || rows[0].deleted_at) {
+      throw new Error("That number does not match any NEXA-SAVER account.");
+    }
+    if (rows[0].user_id === context.userId) {
+      throw new Error("You cannot send money to your own account.");
+    }
+    return {
+      userId: rows[0].user_id,
+      fullName: `${rows[0].first_name} ${rows[0].last_name}`.trim(),
+      phone: rows[0].phone,
+    };
+  });
+
+export const startTransfer = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      amountKwacha: z.number().positive(),
+      toPhone: z.string().min(8).max(20),
+      pin: pinSchema,
+      idempotencyKey: z.string().min(8).max(128),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Complete your profile first");
+    if (profile.role === "admin") throw new Error("Admin accounts cannot send user transfers this way.");
+    if (profile.admin_locked_at) throw new Error("This account is locked. Sending is disabled.");
+    if (profile.admin_withdraw_locked_at) {
+      throw new Error("Withdrawals and sending are locked by the platform. Contact support.");
+    }
+    if (profile.withdraw_lock_until && new Date(profile.withdraw_lock_until as string | Date).getTime() > Date.now()) {
+      throw new Error("Your withdrawals are time-locked, so sending is also paused until the lock ends.");
+    }
+
+    const { assertWithdrawalsAllowed } = await import("./kill-switch.server");
+    assertWithdrawalsAllowed(); // send is tied to withdrawals
+
+    const { verifySecret } = await import("./crypto");
+    if (!(await verifySecret(profile.pin_hash, data.pin))) throw new Error("Incorrect PIN");
+
+    const { normalizeMwPhone } = await import("./phone");
+    const toPhone = normalizeMwPhone(data.toPhone);
+    if (!toPhone) throw new Error("Enter a valid Malawi mobile number.");
+
+    const amountKwacha = Math.floor(data.amountKwacha);
+    if (amountKwacha < 100) throw new Error("Minimum send is 100 kwacha.");
+
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { getSendFeeTiers, feeForSendAmount } = await import("./send-fee.server");
+    const { newReference } = await import("./crypto");
+    const { claimIdempotencyKey, storeIdempotencyResponse } = await import("./idempotency.server");
+    const { kwachaToTambala, formatKwacha } = await import("./money");
+    const sql = await getSql();
+
+    const claim = await claimIdempotencyKey(sql, {
+      key: data.idempotencyKey,
+      userId: context.userId,
+      action: "transfer",
+    });
+    if (claim.hit) return claim.response as { ok: true; reference: string; amountTambala: number; feeTambala: number };
+
+    const tiers = await getSendFeeTiers(sql);
+    const feeKwacha = feeForSendAmount(amountKwacha, tiers);
+    const amountTambala = kwachaToTambala(amountKwacha);
+    const feeTambala = kwachaToTambala(feeKwacha);
+    const totalDebit = amountTambala + feeTambala;
+
+    const recipients = await sql<{
+      user_id: string;
+      first_name: string;
+      last_name: string;
+      phone: string;
+      deleted_at: unknown;
+      admin_locked_at: unknown;
+    }>`
+      select user_id, first_name, last_name, phone, deleted_at, admin_locked_at
+      from profiles where phone = ${toPhone} limit 1
+    `;
+    if (!recipients.length || recipients[0].deleted_at) {
+      throw new Error("That number does not match any NEXA-SAVER account.");
+    }
+    if (recipients[0].user_id === context.userId) {
+      throw new Error("You cannot send money to your own account.");
+    }
+    if (recipients[0].admin_locked_at) {
+      throw new Error("That account cannot receive transfers right now.");
+    }
+    const toUserId = recipients[0].user_id;
+    const toName = `${recipients[0].first_name} ${recipients[0].last_name}`.trim();
+    const reference = newReference("SND");
+
+    await withTransaction(async (tx) => {
+      const bal = await tx<{ balance_tambala: number }>`
+        select balance_tambala from wallets where user_id = ${context.userId} for update
+      `;
+      const available = Number(bal[0]?.balance_tambala ?? 0);
+      if (available < totalDebit) {
+        throw new Error(
+          `Insufficient balance. You need ${formatKwacha(totalDebit)} (send ${formatKwacha(amountTambala)} + fee ${formatKwacha(feeTambala)}).`,
+        );
+      }
+      await tx`
+        update wallets
+        set balance_tambala = balance_tambala - ${totalDebit},
+            lifetime_withdrawn_tambala = lifetime_withdrawn_tambala + ${amountTambala},
+            updated_at = now()
+        where user_id = ${context.userId}
+      `;
+      await tx`
+        insert into wallets (user_id, balance_tambala, lifetime_deposited_tambala, lifetime_withdrawn_tambala)
+        values (${toUserId}, ${amountTambala}, ${amountTambala}, 0)
+        on conflict (user_id) do update set
+          balance_tambala = wallets.balance_tambala + ${amountTambala},
+          lifetime_deposited_tambala = wallets.lifetime_deposited_tambala + ${amountTambala},
+          updated_at = now()
+      `;
+
+      const outRows = await tx<{ id: number }>`
+        insert into transactions (
+          user_id, kind, status, gross_tambala, credited_tambala,
+          platform_profit_tambala, payout_reserve_tambala, phone, reference, note, completed_at
+        ) values (
+          ${context.userId}, ${"transfer_out"}, ${"success"}, ${amountTambala}, ${0},
+          ${0}, ${0}, ${toPhone}, ${reference},
+          ${`Sent ${formatKwacha(amountTambala)} to ${toName} (${toPhone})`}, now()
+        ) returning id
+      `;
+      const inRows = await tx<{ id: number }>`
+        insert into transactions (
+          user_id, kind, status, gross_tambala, credited_tambala,
+          platform_profit_tambala, payout_reserve_tambala, phone, reference, note, completed_at
+        ) values (
+          ${toUserId}, ${"transfer_in"}, ${"success"}, ${amountTambala}, ${amountTambala},
+          ${0}, ${0}, ${profile.phone}, ${reference},
+          ${`Received ${formatKwacha(amountTambala)} from ${profile.first_name} ${profile.last_name}`}, now()
+        ) returning id
+      `;
+      let feeTxId: number | null = null;
+      if (feeTambala > 0) {
+        const feeRows = await tx<{ id: number }>`
+          insert into transactions (
+            user_id, kind, status, gross_tambala, credited_tambala,
+            platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
+          ) values (
+            ${context.userId}, ${"fee"}, ${"success"}, ${feeTambala}, ${0},
+            ${feeTambala}, ${0}, ${reference + "_FEE"},
+            ${`Send fee for ${reference}`}, now()
+          ) returning id
+        `;
+        feeTxId = feeRows[0]?.id ?? null;
+        try {
+          await tx`
+            insert into platform_treasury (id, balance_tambala, lifetime_in_tambala, updated_at)
+            values (1, ${feeTambala}, ${feeTambala}, now())
+            on conflict (id) do update set
+              balance_tambala = platform_treasury.balance_tambala + ${feeTambala},
+              lifetime_in_tambala = platform_treasury.lifetime_in_tambala + ${feeTambala},
+              updated_at = now()
+          `;
+        } catch {
+          /* optional */
+        }
+      }
+
+      await tx`
+        insert into transfers (
+          reference, from_user_id, to_user_id, amount_tambala, fee_tambala,
+          from_phone, to_phone, to_display_name, status,
+          out_tx_id, in_tx_id, fee_tx_id
+        ) values (
+          ${reference}, ${context.userId}, ${toUserId}, ${amountTambala}, ${feeTambala},
+          ${profile.phone}, ${toPhone}, ${toName}, ${"completed"},
+          ${outRows[0]?.id ?? null}, ${inRows[0]?.id ?? null}, ${feeTxId}
+        )
+      `;
+    });
+
+    const result = {
+      ok: true as const,
+      reference,
+      amountTambala,
+      feeTambala,
+      toName,
+      toPhone,
+    };
+    await storeIdempotencyResponse(sql, data.idempotencyKey, result);
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      userId: context.userId,
+      action: "transfer_send",
+      detail: `ref=${reference} to=${toPhone} amount=${amountTambala} fee=${feeTambala}`,
+    });
+    return result;
+  });
+
+export const requestTransferReversal = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ reference: z.string().min(4).max(64), note: z.string().max(400).optional() }))
+  .handler(async ({ context, data }) => {
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{
+      id: number;
+      from_user_id: string;
+      status: string;
+    }>`
+      select id, from_user_id, status from transfers where reference = ${data.reference} limit 1
+    `;
+    if (!rows.length) throw new Error("Transfer not found.");
+    if (rows[0].from_user_id !== context.userId) {
+      throw new Error("Only the sender can request a reversal.");
+    }
+    if (rows[0].status !== "completed" && rows[0].status !== "reversal_requested") {
+      throw new Error(`This transfer cannot be reversed (status: ${rows[0].status}).`);
+    }
+    await sql`
+      update transfers set status = ${"reversal_requested"}, updated_at = now()
+      where id = ${rows[0].id} and status = ${"completed"}
+    `;
+    await sql`
+      insert into transfer_reversal_requests (transfer_id, requested_by, status, user_note)
+      values (${rows[0].id}, ${context.userId}, ${"pending"}, ${data.note ?? null})
+    `;
+    return {
+      ok: true as const,
+      message:
+        "Reversal request received. For immediate help, call the platform support number. An admin will need your transaction ID.",
+    };
+  });
+
+export const adminListTransferReversals = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    try {
+      const rows = await sql<{
+        req_id: number;
+        req_status: string;
+        user_note: string | null;
+        created_at: unknown;
+        reference: string;
+        amount_tambala: number;
+        fee_tambala: number;
+        from_phone: string | null;
+        to_phone: string;
+        to_display_name: string | null;
+        transfer_status: string;
+        frozen_until: unknown;
+        from_username: string;
+        to_username: string;
+      }>`
+        select r.id as req_id, r.status as req_status, r.user_note, r.created_at,
+               t.reference, t.amount_tambala, t.fee_tambala, t.from_phone, t.to_phone,
+               t.to_display_name, t.status as transfer_status, t.frozen_until,
+               pf.username as from_username, pt.username as to_username
+        from transfer_reversal_requests r
+        join transfers t on t.id = r.transfer_id
+        join profiles pf on pf.user_id = t.from_user_id
+        join profiles pt on pt.user_id = t.to_user_id
+        order by r.created_at desc
+        limit 80
+      `;
+      return rows.map((r) => ({
+        requestId: Number(r.req_id),
+        requestStatus: r.req_status,
+        userNote: r.user_note,
+        createdAt: new Date(r.created_at as string | Date).toISOString(),
+        reference: r.reference,
+        amountTambala: Number(r.amount_tambala),
+        feeTambala: Number(r.fee_tambala),
+        fromPhone: r.from_phone,
+        toPhone: r.to_phone,
+        toDisplayName: r.to_display_name,
+        transferStatus: r.transfer_status,
+        frozenUntil: r.frozen_until ? new Date(r.frozen_until as string | Date).toISOString() : null,
+        fromUsername: r.from_username,
+        toUsername: r.to_username,
+      }));
+    } catch {
+      return [];
+    }
+  });
+
+export const adminLookupTransfer = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ reference: z.string().min(4).max(64) }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{
+      id: number;
+      reference: string;
+      amount_tambala: number;
+      fee_tambala: number;
+      status: string;
+      from_phone: string | null;
+      to_phone: string;
+      to_display_name: string | null;
+      frozen_until: unknown;
+      from_user_id: string;
+      to_user_id: string;
+      from_username: string;
+      to_username: string;
+      to_email: string;
+    }>`
+      select t.*, pf.username as from_username, pt.username as to_username, pt.email as to_email
+      from transfers t
+      join profiles pf on pf.user_id = t.from_user_id
+      join profiles pt on pt.user_id = t.to_user_id
+      where t.reference = ${data.reference}
+      limit 1
+    `;
+    if (!rows.length) throw new Error("No transfer with that transaction ID.");
+    const r = rows[0];
+    return {
+      id: Number(r.id),
+      reference: r.reference,
+      amountTambala: Number(r.amount_tambala),
+      feeTambala: Number(r.fee_tambala),
+      status: r.status,
+      fromPhone: r.from_phone,
+      toPhone: r.to_phone,
+      toDisplayName: r.to_display_name,
+      frozenUntil: r.frozen_until ? new Date(r.frozen_until as string | Date).toISOString() : null,
+      fromUserId: r.from_user_id,
+      toUserId: r.to_user_id,
+      fromUsername: r.from_username,
+      toUsername: r.to_username,
+      toEmail: r.to_email,
+    };
+  });
+
+export const adminFreezeTransfer = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ reference: z.string().min(4).max(64), days: z.number().int().min(1).max(14).optional() }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { maskPhone } = await import("./send-fee.server");
+    const sql = await getSql();
+    const days = data.days ?? 2;
+    const rows = await sql<{
+      id: number;
+      to_user_id: string;
+      from_user_id: string;
+      amount_tambala: number;
+      status: string;
+      from_phone: string | null;
+      to_email: string;
+      to_first: string;
+      from_username: string;
+    }>`
+      select t.id, t.to_user_id, t.from_user_id, t.amount_tambala, t.status, t.from_phone,
+             pt.email as to_email, pt.first_name as to_first, pf.username as from_username
+      from transfers t
+      join profiles pt on pt.user_id = t.to_user_id
+      join profiles pf on pf.user_id = t.from_user_id
+      where t.reference = ${data.reference}
+      limit 1
+    `;
+    if (!rows.length) throw new Error("Transfer not found.");
+    const tr = rows[0];
+    if (tr.status === "reversed") throw new Error("Already reversed.");
+    if (tr.status === "released") throw new Error("Already released to the recipient.");
+
+    const until = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    await withTransaction(async (tx) => {
+      // Hold the amount on recipient so they cannot withdraw the disputed sum (soft freeze: status only + email)
+      await tx`
+        update transfers
+        set status = ${"frozen"},
+            frozen_at = now(),
+            frozen_until = ${until},
+            updated_at = now()
+        where id = ${tr.id}
+      `;
+      await tx`
+        update transfer_reversal_requests
+        set status = ${"frozen"}, handled_by = ${context.userId}, updated_at = now()
+        where transfer_id = ${tr.id} and status in (${"pending"}, ${"frozen"})
+      `;
+    });
+
+    try {
+      const { sendMail } = await import("./mail.server");
+      const { maskPhone } = await import("./send-fee.server");
+      await sendMail({
+        to: tr.to_email,
+        subject: "NEXA-SAVER — transfer under review",
+        text:
+          `Hello ${tr.to_first},\n\n` +
+          `You received money that may have been sent by mistake from ${maskPhone(tr.from_phone || "")} (${tr.from_username}). ` +
+          `That transfer is frozen for ${days} days while we review.\n\n` +
+          `If you claim the money was meant for you, contact support using the platform number. ` +
+          `The platform may arrange a call (e.g. Zoom) between both parties to reach a final conclusion.\n\nNEXA-SAVER`,
+      });
+    } catch {
+      /* email best-effort */
+    }
+
+        const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "transfer_freeze",
+      detail: `ref=${data.reference} until=${until.toISOString()}`,
+    });
+    return { ok: true as const, frozenUntil: until.toISOString() };
+  });
+
+export const adminResolveTransfer = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      reference: z.string().min(4).max(64),
+      action: z.enum(["reverse", "release"]),
+      note: z.string().max(400).optional(),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { formatKwacha } = await import("./money");
+    const sql = await getSql();
+    const rows = await sql<{
+      id: number;
+      from_user_id: string;
+      to_user_id: string;
+      amount_tambala: number;
+      status: string;
+      reference: string;
+    }>`
+      select id, from_user_id, to_user_id, amount_tambala, status, reference
+      from transfers where reference = ${data.reference} limit 1
+    `;
+    if (!rows.length) throw new Error("Transfer not found.");
+    const tr = rows[0];
+    const amount = Number(tr.amount_tambala);
+
+    if (data.action === "release") {
+      await sql`
+        update transfers set status = ${"released"}, released_at = now(), updated_at = now()
+        where id = ${tr.id}
+      `;
+      await sql`
+        update transfer_reversal_requests
+        set status = ${"released"}, handled_by = ${context.userId}, admin_note = ${data.note ?? null}, updated_at = now()
+        where transfer_id = ${tr.id}
+      `;
+      return { ok: true as const, action: "release" as const };
+    }
+
+    // reverse: move amount back from recipient to sender (fee stays with platform)
+    await withTransaction(async (tx) => {
+      const toBal = await tx<{ balance_tambala: number }>`
+        select balance_tambala from wallets where user_id = ${tr.to_user_id} for update
+      `;
+      if (Number(toBal[0]?.balance_tambala ?? 0) < amount) {
+        throw new Error("Recipient no longer has enough balance to reverse the full amount.");
+      }
+      await tx`
+        update wallets set balance_tambala = balance_tambala - ${amount}, updated_at = now()
+        where user_id = ${tr.to_user_id}
+      `;
+      await tx`
+        update wallets set balance_tambala = balance_tambala + ${amount}, updated_at = now()
+        where user_id = ${tr.from_user_id}
+      `;
+      const revRef = `${tr.reference}_REV`;
+      await tx`
+        insert into transactions (
+          user_id, kind, status, gross_tambala, credited_tambala,
+          platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
+        ) values (
+          ${tr.to_user_id}, ${"transfer_out"}, ${"success"}, ${amount}, ${0},
+          ${0}, ${0}, ${revRef}, ${`Reversal of ${tr.reference}`}, now()
+        )
+      `;
+      await tx`
+        insert into transactions (
+          user_id, kind, status, gross_tambala, credited_tambala,
+          platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
+        ) values (
+          ${tr.from_user_id}, ${"transfer_in"}, ${"success"}, ${amount}, ${amount},
+          ${0}, ${0}, ${revRef}, ${`Reversal credit for ${tr.reference}`}, now()
+        )
+      `;
+      await tx`
+        update transfers set status = ${"reversed"}, reversed_at = now(), updated_at = now()
+        where id = ${tr.id}
+      `;
+      await tx`
+        update transfer_reversal_requests
+        set status = ${"reversed"}, handled_by = ${context.userId}, admin_note = ${data.note ?? null}, updated_at = now()
+        where transfer_id = ${tr.id}
+      `;
+    });
+
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "transfer_reverse",
+      detail: `ref=${data.reference} amount=${amount}`,
+    });
+    return { ok: true as const, action: "reverse" as const };
   });

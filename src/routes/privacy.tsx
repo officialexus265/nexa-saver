@@ -23,14 +23,14 @@ function PrivacyPage() {
         <li>Identity: name, date of birth, gender (if provided), username</li>
         <li>Contact: email, mobile number, optional bank payout details</li>
         <li>Security: password hash, PIN hash, security question and answer hash, lock preferences</li>
-        <li>Money movement: deposits, withdrawals, fees (including the current deposit fee of about {dep}%), references</li>
+        <li>Money movement: deposits, withdrawals, peer transfers (send), fees (including the current deposit fee of about {dep}%), references</li>
         <li>Device/session data and authenticated page-visit counts for operations</li>
         <li>Support messages and survey responses you submit</li>
       </ul>
 
       <h2 className="font-display text-xl font-semibold">2. How we use data</h2>
       <p>
-        To run your vault, verify payments, prevent fraud, enforce holds and limits, send security alerts, comply with
+        To run your vault, verify payments and peer transfers, prevent fraud, enforce holds and limits, handle transfer disputes, send security and transfer-review alerts, comply with
         law, and operate the service. We do not sell your personal information.
       </p>
 

@@ -51,7 +51,7 @@ export type BalanceResponse =
       dailyWithdrawRemainingTambala: number;
     };
 
-export type TxKind = "deposit" | "withdrawal" | "fee";
+export type TxKind = "deposit" | "withdrawal" | "fee" | "transfer_out" | "transfer_in";
 export type TxStatus = "pending" | "processing" | "success" | "failed";
 
 export type PublicTx = {

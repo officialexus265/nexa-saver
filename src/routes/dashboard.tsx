@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Eye, EyeOff, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
+import { Eye, EyeOff, ArrowDownToLine, ArrowUpFromLine, Send } from "lucide-react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { Modal } from "@/components/modal";
 import { PinPad } from "@/components/pin-pad";
@@ -25,6 +25,10 @@ import {
   extendWithdrawTimeLock,
   getPlatformSupportPhone,
   getPublicFeePolicy,
+  getSendFeeTiersPublic,
+  lookupSendRecipient,
+  startTransfer,
+  requestTransferReversal,
   verifyPin,
   resendVerificationEmailFn,
 } from "@/lib/nexa/fns";
@@ -68,6 +72,7 @@ function Vault({
   const [checkOpen, setCheckOpen] = useState(false);
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
   const [success, setSuccess] = useState<{ title: string; body: string } | null>(null);
   // Hidden until the user explicitly reveals with PIN (never auto-show on load).
   const [balanceVisible, setBalanceVisible] = useState(false);
@@ -175,12 +180,15 @@ function Vault({
         ) : null}
       </Card>
 
-      <div className="grid grid-cols-2 gap-3">
-        <Button className="h-14" onClick={() => setDepositOpen(true)}>
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+        <Button className="h-14 text-sm" onClick={() => setDepositOpen(true)}>
           <ArrowDownToLine className="size-4" /> Deposit
         </Button>
-        <Button variant="secondary" className="h-14" onClick={() => setWithdrawOpen(true)}>
+        <Button variant="secondary" className="h-14 text-sm" onClick={() => setWithdrawOpen(true)}>
           <ArrowUpFromLine className="size-4" /> Withdraw
+        </Button>
+        <Button variant="secondary" className="h-14 text-sm" onClick={() => setSendOpen(true)}>
+          <Send className="size-4" /> Send
         </Button>
       </div>
 
@@ -202,14 +210,23 @@ function Vault({
                   className="flex w-full items-center justify-between rounded-xl border border-border bg-surface px-4 py-3 text-left transition hover:border-primary/40 hover:bg-surface-2"
                 >
                   <div>
-                    <p className="text-sm font-medium capitalize">{tx.kind}</p>
+                    <p className="text-sm font-medium capitalize">
+                      {tx.kind === "transfer_out"
+                        ? "Sent"
+                        : tx.kind === "transfer_in"
+                          ? "Received"
+                          : tx.kind.replace("_", " ")}
+                    </p>
                     <p className="text-xs text-muted">
                       {tx.status} · {new Date(tx.createdAt).toLocaleString()}
                     </p>
                   </div>
                   <p className="text-sm tabular-nums">
-                    {tx.kind === "deposit" ? "+" : "−"}
-                    {formatKwacha(tx.kind === "deposit" ? tx.creditedTambala : tx.grossTambala, { compact: true })}
+                    {tx.kind === "deposit" || tx.kind === "transfer_in" ? "+" : "−"}
+                    {formatKwacha(
+                      tx.kind === "deposit" || tx.kind === "transfer_in" ? tx.creditedTambala || tx.grossTambala : tx.grossTambala,
+                      { compact: true },
+                    )}
                   </p>
                 </button>
               </li>
@@ -218,7 +235,20 @@ function Vault({
         )}
       </section>
 
-      <ActivityDetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} />
+      <ActivityDetailModal
+        tx={selectedTx}
+        onClose={() => setSelectedTx(null)}
+        onReversalRequested={() => void reloadMoney()}
+      />
+      <SendModal
+        open={sendOpen}
+        onClose={() => setSendOpen(false)}
+        onSuccess={(title, body) => {
+          setSendOpen(false);
+          setSuccess({ title, body });
+          void reloadMoney();
+        }}
+      />
 
       <CheckBalanceModal
         open={checkOpen}
@@ -309,12 +339,32 @@ function WithdrawHoldCountdown({ until }: { until: string | null }) {
   );
 }
 
-function ActivityDetailModal({ tx, onClose }: { tx: PublicTx | null; onClose: () => void }) {
+function ActivityDetailModal({
+  tx,
+  onClose,
+  onReversalRequested,
+}: {
+  tx: PublicTx | null;
+  onClose: () => void;
+  onReversalRequested?: () => void;
+}) {
   const [copied, setCopied] = useState(false);
+  const [revBusy, setRevBusy] = useState(false);
+  const [revMsg, setRevMsg] = useState<string | null>(null);
   if (!tx) return null;
 
   const when = new Date(tx.createdAt);
   const feeTambala = tx.kind === "deposit" ? Math.max(0, tx.grossTambala - tx.creditedTambala) : 0;
+  const title =
+    tx.kind === "deposit"
+      ? "Deposit details"
+      : tx.kind === "transfer_out"
+        ? "Send details"
+        : tx.kind === "transfer_in"
+          ? "Received details"
+          : tx.kind === "fee"
+            ? "Fee details"
+            : "Withdrawal details";
 
   async function copyRef() {
     try {
@@ -326,8 +376,22 @@ function ActivityDetailModal({ tx, onClose }: { tx: PublicTx | null; onClose: ()
     }
   }
 
+  async function requestReversal() {
+    setRevBusy(true);
+    setRevMsg(null);
+    try {
+      const res = await requestTransferReversal({ data: { reference: tx.reference } });
+      setRevMsg(res.message);
+      onReversalRequested?.();
+    } catch (e) {
+      setRevMsg(errMessage(e));
+    } finally {
+      setRevBusy(false);
+    }
+  }
+
   return (
-    <Modal open={Boolean(tx)} title={tx.kind === "deposit" ? "Deposit details" : "Withdrawal details"} onClose={onClose}>
+    <Modal open={Boolean(tx)} title={title} onClose={onClose}>
       <dl className="space-y-3 text-sm">
         <div className="flex justify-between gap-3">
           <dt className="text-muted">Status</dt>
@@ -399,7 +463,25 @@ function ActivityDetailModal({ tx, onClose }: { tx: PublicTx | null; onClose: ()
       <Button type="button" className="mt-5 w-full" variant="secondary" onClick={onClose}>
         Close
       </Button>
-    </Modal>
+    
+      {tx.kind === "transfer_out" ? (
+        <div className="mt-4 space-y-2 border-t border-border pt-3">
+          <p className="text-xs text-muted">
+            Sent the full amount with no cut from what the recipient receives. Platform send fee was charged separately
+            on your balance (if any).
+          </p>
+          {tx.phone ? (
+            <p className="text-sm">
+              To number: <span className="font-medium tabular-nums">{tx.phone}</span>
+            </p>
+          ) : null}
+          <Button type="button" variant="secondary" className="w-full" disabled={revBusy} onClick={() => void requestReversal()}>
+            {revBusy ? "Sending…" : "Request reversal"}
+          </Button>
+          {revMsg ? <p className="text-sm text-muted">{revMsg}</p> : null}
+        </div>
+      ) : null}
+</Modal>
   );
 }
 
@@ -624,6 +706,162 @@ function DepositModal({
   );
 }
 
+
+
+function SendModal({
+  open,
+  onClose,
+  onSuccess,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSuccess: (title: string, body: string) => void;
+}) {
+  const [amount, setAmount] = useState("500");
+  const [phone, setPhone] = useState("");
+  const [recipient, setRecipient] = useState<{ fullName: string; phone: string } | null>(null);
+  const [pin, setPin] = useState("");
+  const [stage, setStage] = useState<"form" | "confirm" | "pin">("form");
+  const [tiers, setTiers] = useState<Array<{ minKwacha: number; maxKwacha: number | null; feeKwacha: number }>>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setStage("form");
+    setRecipient(null);
+    setPin("");
+    setError(null);
+    void getSendFeeTiersPublic()
+      .then(setTiers)
+      .catch(() => setTiers([]));
+  }, [open]);
+
+  const kwacha = parseKwachaInput(amount);
+  const feeKwacha = (() => {
+    if (!kwacha) return 0;
+    for (const t of tiers) {
+      if (kwacha < t.minKwacha) continue;
+      if (t.maxKwacha == null || kwacha <= t.maxKwacha) return t.feeKwacha;
+    }
+    return 0;
+  })();
+
+  async function lookup() {
+    setBusy(true);
+    setError(null);
+    try {
+      if (!kwacha || kwacha < 100) throw new Error("Minimum send is 100 kwacha.");
+      const res = await lookupSendRecipient({ data: { phone } });
+      setRecipient({ fullName: res.fullName, phone: res.phone });
+      setStage("confirm");
+    } catch (e) {
+      setRecipient(null);
+      setError(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function send() {
+    setBusy(true);
+    setError(null);
+    try {
+      const key = `snd_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const res = await startTransfer({
+        data: {
+          amountKwacha: kwacha!,
+          toPhone: recipient!.phone,
+          pin,
+          idempotencyKey: key,
+        },
+      });
+      onSuccess(
+        "Sent",
+        `${formatKwacha(res.amountTambala)} delivered to ${res.toName}. Fee ${formatKwacha(res.feeTambala)} was taken from your balance. Ref ${res.reference}`,
+      );
+    } catch (e) {
+      setError(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open={open} title="Send money" onClose={onClose}>
+      <div className="space-y-4">
+        {stage === "form" ? (
+          <>
+            <p className="text-sm text-muted">
+              Send the full amount to another NEXA-SAVER account. A small fixed fee is charged from your balance; the
+              recipient gets every kwacha you type.
+            </p>
+            <div className="space-y-1.5">
+              <Label>Amount (kwacha)</Label>
+              <Input value={amount} inputMode="numeric" onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Their registered number</Label>
+              <Input value={phone} inputMode="tel" placeholder="09…" onChange={(e) => setPhone(e.target.value)} />
+            </div>
+            {kwacha ? (
+              <p className="text-sm text-muted">
+                Send fee for this amount: <span className="font-medium text-fg">{feeKwacha} kwacha</span> (from your
+                balance). They receive {kwacha} kwacha.
+              </p>
+            ) : null}
+            <Button type="button" className="w-full" disabled={busy || !phone || !kwacha} onClick={() => void lookup()}>
+              {busy ? "Checking…" : "Look up account"}
+            </Button>
+          </>
+        ) : null}
+
+        {stage === "confirm" && recipient ? (
+          <>
+            <p className="text-sm">
+              Send <span className="font-semibold tabular-nums">{kwacha} kwacha</span> to
+            </p>
+            <div className="rounded-xl border border-border bg-surface-2 p-3">
+              <p className="font-medium text-fg">{recipient.fullName}</p>
+              <p className="tabular-nums text-sm text-muted">{recipient.phone}</p>
+            </div>
+            <p className="text-sm text-muted">
+              Fee {feeKwacha} kwacha · total from your vault {kwacha! + feeKwacha} kwacha
+            </p>
+            <div className="flex gap-2">
+              <Button type="button" variant="secondary" className="flex-1" onClick={() => setStage("form")}>
+                Back
+              </Button>
+              <Button type="button" className="flex-1" onClick={() => setStage("pin")}>
+                Confirm recipient
+              </Button>
+            </div>
+          </>
+        ) : null}
+
+        {stage === "pin" && recipient ? (
+          <>
+            <p className="text-sm text-muted">Enter your withdraw PIN to send.</p>
+            <PinPad value={pin} onChange={setPin} disabled={busy} />
+            <Button
+              type="button"
+              className="w-full"
+              disabled={busy || pin.length !== 4}
+              onClick={() => void send()}
+            >
+              {busy ? "Sending…" : "Send now"}
+            </Button>
+            <Button type="button" variant="secondary" className="w-full" onClick={() => setStage("confirm")}>
+              Back
+            </Button>
+          </>
+        ) : null}
+
+        {error ? <p className="text-sm text-danger">{error}</p> : null}
+      </div>
+    </Modal>
+  );
+}
 
 function WithdrawLockPanel() {
   const [status, setStatus] = useState<Awaited<ReturnType<typeof getWithdrawLockStatus>> | null>(null);

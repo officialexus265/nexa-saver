@@ -116,7 +116,27 @@ function TermsPage() {
         the in-app displays together.
       </p>
 
-      <h2 className="font-display text-xl font-semibold">9. Closing your account</h2>
+      
+      <h2 className="font-display text-xl font-semibold">Send money (peer transfer)</h2>
+      <p>
+        You may send kwacha to another registered NEXA-SAVER account using their verified mobile number. The system shows
+        the recipient&apos;s registered full name for confirmation before you authorise with your PIN. If the number is not
+        linked to an account, the send is refused.
+      </p>
+      <p>
+        The amount you enter is delivered in full to the recipient (no cut from the send amount). A separate fixed send fee
+        is taken from your balance according to platform tiers published in the app and configurable by the operator. Send
+        is unavailable when withdrawals are paused, when your account is withdraw-locked, or when a voluntary time-lock is
+        active.
+      </p>
+      <p>
+        If you send to the wrong person, use Request reversal on the transaction and contact support with the transaction
+        ID. An admin may freeze the transfer for a limited period (typically two days) and notify the recipient by email
+        that the funds are under review. The platform may arrange a mediated call between both parties. Resolution may be
+        a full return to the sender or release to the recipient. Send fees already taken are not automatically refunded.
+        Do not use send for illegal purposes.
+      </p>
+<h2 className="font-display text-xl font-semibold">9. Closing your account</h2>
       <p>
         Account deletion requires multiple confirmations and your PIN. Withdraw available funds first. After deletion,
         profile access ends; some transaction records may be retained for audit and legal obligations.
