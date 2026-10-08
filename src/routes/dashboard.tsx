@@ -28,6 +28,7 @@ import {
   getSendFeeTiersPublic,
   lookupSendRecipient,
   startTransfer,
+  moveReceivedToMain,
   requestTransferReversal,
   getLoanEligibility,
   getMyLoans,
@@ -153,6 +154,38 @@ function Vault({
             </span>
           </Button>
         </div>
+        {revealed && ((balance as { receivedBalanceTambala?: number }).receivedBalanceTambala ?? 0) > 0 ? (
+          <div className="mt-4 rounded-xl border border-border bg-surface-2/60 p-3 text-sm">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted">Received bag</p>
+            <p className="mt-1 font-display text-xl font-semibold tabular-nums text-fg">
+              {formatKwacha((balance as { receivedBalanceTambala?: number }).receivedBalanceTambala ?? 0)}
+            </p>
+            <p className="mt-1 text-xs text-muted">
+              Money sent to you stays here until you withdraw it or move it to your main vault. Bank withdrawals take a
+              700 MWK flat from this bag (not a NEXA fee). MoMo can take the full amount.
+            </p>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="mt-2"
+              onClick={() => {
+                void moveReceivedToMain({ data: {} })
+                  .then(() => {
+                    setSuccess({
+                      title: "Moved to main vault",
+                      body: "Received funds are now in your main balance. Bank withdraws from main still use the 700 MWK bank flat.",
+                    });
+                    void reloadMoney();
+                  })
+                  .catch((err) => setSuccess({ title: "Could not move", body: errMessage(err) }));
+              }}
+            >
+              Move all to main vault (free)
+            </Button>
+          </div>
+        ) : null}
+
         {!revealed ? (
           <Button className="mt-5 w-full" onClick={() => setCheckOpen(true)}>
             Check balance
@@ -293,6 +326,7 @@ function Vault({
         }
         bankHoldUntil={profile.bankHoldUntil ?? null}
         maxTambala={balance?.balanceTambala ?? 0}
+        receivedTambala={(balance as { receivedBalanceTambala?: number })?.receivedBalanceTambala ?? 0}
         dailyRemainingTambala={balance?.dailyRemainingTambala ?? balance?.balanceTambala ?? 0}
         holdMessage={balance?.withdrawHoldMessage ?? null}
         revealed={revealed}
@@ -731,6 +765,7 @@ function SendModal({
   const [amount, setAmount] = useState("500");
   const [phone, setPhone] = useState("");
   const [recipient, setRecipient] = useState<{ fullName: string; phone: string } | null>(null);
+  const [coverBankFlat, setCoverBankFlat] = useState(false);
   const [pin, setPin] = useState("");
   const [stage, setStage] = useState<"form" | "confirm" | "pin">("form");
   const [tiers, setTiers] = useState<Array<{ minKwacha: number; maxKwacha: number | null; feeKwacha: number }>>([]);
@@ -785,11 +820,14 @@ function SendModal({
           toPhone: recipient!.phone,
           pin,
           idempotencyKey: key,
+          coverBankFlat,
         },
       });
       onSuccess(
         "Sent",
-        `${formatKwacha(res.amountTambala)} delivered to ${res.toName}. Fee ${formatKwacha(res.feeTambala)} was taken from your balance. Ref ${res.reference}`,
+        `${formatKwacha(res.creditTambala ?? res.amountTambala)} credited to ${res.toName}'s received bag${
+          res.coverBankFlat ? " (includes 700 bank-flat cover)" : ""
+        }. Fee ${formatKwacha(res.feeTambala)} from your balance. Ref ${res.reference}`,
       );
     } catch (e) {
       setError(errMessage(e));
@@ -816,10 +854,30 @@ function SendModal({
               <Input value={phone} inputMode="tel" placeholder="09…" onChange={(e) => setPhone(e.target.value)} />
             </div>
             {kwacha ? (
-              <p className="text-sm text-muted">
-                Send fee for this amount: <span className="font-medium text-fg">{feeKwacha} kwacha</span> (from your
-                balance). They receive {kwacha} kwacha.
-              </p>
+              <>
+                <label className="flex items-start gap-2 rounded-xl border border-border bg-surface-2/50 p-3 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={coverBankFlat}
+                    onChange={(e) => setCoverBankFlat(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-medium text-fg">Cover bank flat (700 MWK)</span>
+                    <span className="mt-1 block text-xs text-muted">
+                      You also pay 700 so their received bag is {kwacha} + 700. When they withdraw the whole bag to
+                      bank, 700 covers the bank flat and they can get your full {kwacha}. MoMo never needs the 700.
+                      Leave unchecked if they should fund the 700 from the amount alone.
+                    </span>
+                  </span>
+                </label>
+                <p className="text-sm text-muted">
+                  Send fee: <span className="font-medium text-fg">{feeKwacha} kwacha</span>. They receive{" "}
+                  <span className="font-medium text-fg">{kwacha + (coverBankFlat ? 700 : 0)} kwacha</span> in their
+                  received bag. Total from your vault:{" "}
+                  <span className="font-medium text-fg">{kwacha + feeKwacha + (coverBankFlat ? 700 : 0)} kwacha</span>.
+                </p>
+              </>
             ) : null}
             <Button type="button" className="w-full" disabled={busy || !phone || !kwacha} onClick={() => void lookup()}>
               {busy ? "Checking…" : "Look up account"}
@@ -837,7 +895,9 @@ function SendModal({
               <p className="tabular-nums text-sm text-muted">{recipient.phone}</p>
             </div>
             <p className="text-sm text-muted">
-              Fee {feeKwacha} kwacha · total from your vault {kwacha! + feeKwacha} kwacha
+              Fee {feeKwacha} kwacha
+              {coverBankFlat ? " · bank-flat cover 700" : ""} · total from your vault{" "}
+              {kwacha! + feeKwacha + (coverBankFlat ? 700 : 0)} kwacha
             </p>
             <div className="flex gap-2">
               <Button type="button" variant="secondary" className="flex-1" onClick={() => setStage("form")}>
@@ -1559,6 +1619,7 @@ function WithdrawModal({
   bankLabel,
   bankHoldUntil,
   maxTambala,
+  receivedTambala = 0,
   dailyRemainingTambala,
   holdMessage,
   revealed,
@@ -1573,6 +1634,7 @@ function WithdrawModal({
   bankLabel: string | null;
   bankHoldUntil: string | null;
   maxTambala: number;
+  receivedTambala?: number;
   dailyRemainingTambala: number;
   holdMessage: string | null;
   revealed: boolean;
@@ -1581,6 +1643,7 @@ function WithdrawModal({
   onSuccess: (title: string, body: string) => void;
 }) {
   const [method, setMethod] = useState<"momo" | "bank">("momo");
+  const [source, setSource] = useState<"main" | "received">("main");
   const [amount, setAmount] = useState("");
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -1589,7 +1652,8 @@ function WithdrawModal({
   const [bankFeeAccepted, setBankFeeAccepted] = useState(false);
   const [bankFinalAck, setBankFinalAck] = useState(false);
   const kwacha = parseKwachaInput(amount);
-  const effectiveMax = Math.min(maxTambala, dailyRemainingTambala);
+  const sourceMax = source === "received" ? receivedTambala : maxTambala;
+  const effectiveMax = Math.min(sourceMax, source === "received" ? receivedTambala : dailyRemainingTambala);
   const onHold = Boolean(holdMessage);
   const bankOnHold =
     Boolean(bankHoldUntil) && new Date(bankHoldUntil!).getTime() > Date.now();
@@ -1629,6 +1693,8 @@ function WithdrawModal({
           pin,
           idempotencyKey: crypto.randomUUID(),
           method,
+          source,
+          acceptBankFlatFee: method === "bank" ? true : undefined,
         },
       });
       const dest =
@@ -1673,6 +1739,40 @@ function WithdrawModal({
         </div>
       ) : (
         <div className="space-y-4">
+          {receivedTambala > 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted">Withdraw from</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className={
+                    source === "main"
+                      ? "rounded-xl border border-primary bg-primary/15 px-3 py-2 text-sm font-medium"
+                      : "rounded-xl border border-border px-3 py-2 text-sm"
+                  }
+                  onClick={() => setSource("main")}
+                >
+                  Main vault
+                </button>
+                <button
+                  type="button"
+                  className={
+                    source === "received"
+                      ? "rounded-xl border border-primary bg-primary/15 px-3 py-2 text-sm font-medium"
+                      : "rounded-xl border border-border px-3 py-2 text-sm"
+                  }
+                  onClick={() => setSource("received")}
+                >
+                  Received bag
+                </button>
+              </div>
+              <p className="text-xs text-muted">
+                {source === "received"
+                  ? `Received available: ${formatKwacha(receivedTambala)}. Bank takes 700 MWK from this amount (not NEXA). MoMo: full amount.`
+                  : `Main vault available: ${formatKwacha(maxTambala)}. Bank: same 700 MWK flat from your request.`}
+              </p>
+            </div>
+          ) : null}
           <div className="grid grid-cols-2 gap-2 rounded-xl bg-surface-2 p-1">
             <button
               type="button"
@@ -1741,9 +1841,9 @@ function WithdrawModal({
                 <div className="space-y-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
                   <p className="font-medium text-fg">Bank channel flat fee: 700 MWK</p>
                   <p className="text-muted">
-                    This is charged by the <span className="text-fg">payment / bank rail (PayChangu)</span>, not by
-                    NEXA-SAVER. If you request 1,000 kwacha, about <span className="text-fg">930 kwacha</span> reaches
-                    the bank account. Your vault is debited the full amount you request.
+                    Charged by the <span className="text-fg">bank / PayChangu rail</span>, not NEXA-SAVER. The 700 MWK
+                    is taken from the balance you withdraw. Example: request <span className="text-fg">10,000</span> →
+                    about <span className="text-fg">9,300</span> reaches the bank. MoMo has no 700 flat.
                   </p>
                   <label className="flex items-start gap-2 text-sm">
                     <input

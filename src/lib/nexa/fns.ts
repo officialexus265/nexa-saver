@@ -584,14 +584,18 @@ export const getBalance = createServerFn({ method: "GET" })
     }
     const wallets = await sql<{
       balance_tambala: number;
+      received_balance_tambala: number;
       lifetime_deposited_tambala: number;
       lifetime_withdrawn_tambala: number;
-    }>`select balance_tambala, lifetime_deposited_tambala, lifetime_withdrawn_tambala from wallets where user_id = ${context.userId}`;
+    }>`select balance_tambala, coalesce(received_balance_tambala,0) as received_balance_tambala,
+              lifetime_deposited_tambala, lifetime_withdrawn_tambala
+       from wallets where user_id = ${context.userId}`;
     const w = wallets[0];
     return {
       ok: true,
       locked: false,
       balanceTambala: asInt(w?.balance_tambala),
+      receivedBalanceTambala: asInt(w?.received_balance_tambala),
       lifetimeDepositedTambala: asInt(w?.lifetime_deposited_tambala),
       lifetimeWithdrawnTambala: asInt(w?.lifetime_withdrawn_tambala),
       ...roomMeta,
@@ -807,6 +811,8 @@ export const startWithdraw = createServerFn({ method: "POST" })
       pin: pinSchema,
       idempotencyKey: z.string().min(8).max(128),
       method: z.enum(["momo", "bank"]).default("momo"),
+      source: z.enum(["main", "received"]).default("main"),
+      acceptBankFlatFee: z.boolean().optional(),
     }),
   )
   .handler(async ({ context, data }) => {
@@ -915,31 +921,63 @@ export const startWithdraw = createServerFn({ method: "POST" })
     let prepared;
     try {
       prepared = await withTransaction(async (tx) => {
-      const wallets = await tx<{ balance_tambala: number; payout_reserve_tambala: number }>`
-        select balance_tambala, payout_reserve_tambala
+      const source = data.source === "received" ? "received" : "main";
+      const wallets = await tx<{
+        balance_tambala: number;
+        received_balance_tambala: number;
+        payout_reserve_tambala: number;
+      }>`
+        select balance_tambala,
+               coalesce(received_balance_tambala, 0) as received_balance_tambala,
+               payout_reserve_tambala
         from wallets
         where user_id = ${context.userId}
         for update
       `;
-      const balance = asInt(wallets[0]?.balance_tambala);
+      const mainBal = asInt(wallets[0]?.balance_tambala);
+      const receivedBal = asInt(wallets[0]?.received_balance_tambala);
+      const balance = source === "received" ? receivedBal : mainBal;
       const amountErr = validateWithdrawAmount(data.amountKwacha, balance);
       if (amountErr) throw new Error(amountErr);
 
-      const reserveShare = Math.min(
-        asInt(wallets[0]?.payout_reserve_tambala),
-        Math.round(amount * (0.03 / 0.94)),
-      );
+      const reserveShare =
+        source === "main"
+          ? Math.min(
+              asInt(wallets[0]?.payout_reserve_tambala),
+              Math.round(amount * (0.03 / 0.94)),
+            )
+          : 0;
 
-      const updated = await tx<{ balance_tambala: number }>`
-        update wallets
-        set balance_tambala = balance_tambala - ${amount},
-            lifetime_withdrawn_tambala = lifetime_withdrawn_tambala + ${amount},
-            payout_reserve_tambala = greatest(payout_reserve_tambala - ${reserveShare}, 0),
-            updated_at = now()
-        where user_id = ${context.userId} and balance_tambala >= ${amount}
-        returning balance_tambala
-      `;
-      if (!updated.length) throw new Error("You can only withdraw the amount shown in your account");
+      let remaining = 0;
+      if (source === "received") {
+        const updated = await tx<{ received_balance_tambala: number }>`
+          update wallets
+          set received_balance_tambala = received_balance_tambala - ${amount},
+              lifetime_withdrawn_tambala = lifetime_withdrawn_tambala + ${amount},
+              updated_at = now()
+          where user_id = ${context.userId} and received_balance_tambala >= ${amount}
+          returning received_balance_tambala
+        `;
+        if (!updated.length) throw new Error("You can only withdraw what is in your received bag.");
+        remaining = asInt(updated[0]?.received_balance_tambala);
+      } else {
+        const updated = await tx<{ balance_tambala: number }>`
+          update wallets
+          set balance_tambala = balance_tambala - ${amount},
+              lifetime_withdrawn_tambala = lifetime_withdrawn_tambala + ${amount},
+              payout_reserve_tambala = greatest(payout_reserve_tambala - ${reserveShare}, 0),
+              updated_at = now()
+          where user_id = ${context.userId} and balance_tambala >= ${amount}
+          returning balance_tambala
+        `;
+        if (!updated.length) throw new Error("You can only withdraw the amount shown in your account");
+        remaining = asInt(updated[0]?.balance_tambala);
+      }
+
+      const bankNote =
+        (data.method ?? "momo") === "bank"
+          ? `Withdraw ${formatKwacha(amount)} from ${source} to bank ${profile.bank_name ?? ""} ****${String(profile.bank_account_number ?? "").slice(-4)} (700 MWK bank flat from this amount — not a NEXA fee)`
+          : `Withdraw ${formatKwacha(amount)} from ${source} to registered number ${profile.phone}`;
 
       const inserted = await tx<{ id: number }>`
         insert into transactions (
@@ -948,15 +986,13 @@ export const startWithdraw = createServerFn({ method: "POST" })
         ) values (
           ${context.userId}, ${"withdrawal"}, ${"processing"}, ${amount}, ${amount},
           ${0}, ${reserveShare}, ${profile.phone}, ${reference},
-          ${(data.method ?? "momo") === "bank"
-          ? `Withdraw ${formatKwacha(amount)} to bank ${profile.bank_name ?? ""} ****${String(profile.bank_account_number ?? "").slice(-4)} (bank flat 700 MWK — recipient gets less; not a NEXA fee)`
-          : `Withdraw ${formatKwacha(amount)} to registered number ${profile.phone}`}
+          ${bankNote}
         )
         returning id
       `;
       return {
         txId: inserted[0]!.id,
-        remaining: asInt(updated[0]?.balance_tambala),
+        remaining,
         reserveShare,
       };
       });
@@ -3910,6 +3946,8 @@ export const startTransfer = createServerFn({ method: "POST" })
       toPhone: z.string().min(8).max(20),
       pin: pinSchema,
       idempotencyKey: z.string().min(8).max(128),
+      /** When true, sender also pays 700 MWK so receiver credit includes bank flat buffer. */
+      coverBankFlat: z.boolean().optional(),
     }),
   )
   .handler(async ({ context, data }) => {
@@ -3955,7 +3993,12 @@ export const startTransfer = createServerFn({ method: "POST" })
     const feeKwacha = feeForSendAmount(amountKwacha, tiers);
     const amountTambala = kwachaToTambala(amountKwacha);
     const feeTambala = kwachaToTambala(feeKwacha);
-    const totalDebit = amountTambala + feeTambala;
+    const { BANK_FLAT_FEE_KWACHA } = await import("./constants");
+    const coverBankFlat = Boolean(data.coverBankFlat);
+    const coverTambala = coverBankFlat ? kwachaToTambala(BANK_FLAT_FEE_KWACHA) : 0;
+    // Receiver credit lands in received bag (amount + optional 700 cover).
+    const creditTambala = amountTambala + coverTambala;
+    const totalDebit = creditTambala + feeTambala;
 
     const recipients = await sql<{
       user_id: string;
@@ -3987,34 +4030,41 @@ export const startTransfer = createServerFn({ method: "POST" })
       `;
       const available = Number(bal[0]?.balance_tambala ?? 0);
       if (available < totalDebit) {
+        const coverNote = coverTambala
+          ? ` + bank-flat cover ${formatKwacha(coverTambala)}`
+          : "";
         throw new Error(
-          `Insufficient balance. You need ${formatKwacha(totalDebit)} (send ${formatKwacha(amountTambala)} + fee ${formatKwacha(feeTambala)}).`,
+          `Insufficient balance. You need ${formatKwacha(totalDebit)} (send ${formatKwacha(amountTambala)}${coverNote} + fee ${formatKwacha(feeTambala)}).`,
         );
       }
       await tx`
         update wallets
         set balance_tambala = balance_tambala - ${totalDebit},
-            lifetime_withdrawn_tambala = lifetime_withdrawn_tambala + ${amountTambala},
+            lifetime_withdrawn_tambala = lifetime_withdrawn_tambala + ${creditTambala},
             updated_at = now()
         where user_id = ${context.userId}
       `;
+      // Credit lands in received bag — not main vault.
       await tx`
-        insert into wallets (user_id, balance_tambala, lifetime_deposited_tambala, lifetime_withdrawn_tambala)
-        values (${toUserId}, ${amountTambala}, ${amountTambala}, 0)
+        insert into wallets (user_id, balance_tambala, received_balance_tambala, lifetime_deposited_tambala, lifetime_withdrawn_tambala)
+        values (${toUserId}, 0, ${creditTambala}, ${creditTambala}, 0)
         on conflict (user_id) do update set
-          balance_tambala = wallets.balance_tambala + ${amountTambala},
-          lifetime_deposited_tambala = wallets.lifetime_deposited_tambala + ${amountTambala},
+          received_balance_tambala = wallets.received_balance_tambala + ${creditTambala},
+          lifetime_deposited_tambala = wallets.lifetime_deposited_tambala + ${creditTambala},
           updated_at = now()
       `;
 
+      const coverNoteOut = coverBankFlat
+        ? ` (includes ${formatKwacha(coverTambala)} bank-flat cover)`
+        : "";
       const outRows = await tx<{ id: number }>`
         insert into transactions (
           user_id, kind, status, gross_tambala, credited_tambala,
           platform_profit_tambala, payout_reserve_tambala, phone, reference, note, completed_at
         ) values (
-          ${context.userId}, ${"transfer_out"}, ${"success"}, ${amountTambala}, ${0},
+          ${context.userId}, ${"transfer_out"}, ${"success"}, ${creditTambala}, ${0},
           ${0}, ${0}, ${toPhone}, ${reference},
-          ${`Sent ${formatKwacha(amountTambala)} to ${toName} (${toPhone})`}, now()
+          ${`Sent ${formatKwacha(amountTambala)} to ${toName} (${toPhone})${coverNoteOut}`}, now()
         ) returning id
       `;
       const inRows = await tx<{ id: number }>`
@@ -4022,9 +4072,9 @@ export const startTransfer = createServerFn({ method: "POST" })
           user_id, kind, status, gross_tambala, credited_tambala,
           platform_profit_tambala, payout_reserve_tambala, phone, reference, note, completed_at
         ) values (
-          ${toUserId}, ${"transfer_in"}, ${"success"}, ${amountTambala}, ${amountTambala},
+          ${toUserId}, ${"transfer_in"}, ${"success"}, ${creditTambala}, ${creditTambala},
           ${0}, ${0}, ${profile.phone}, ${reference},
-          ${`Received ${formatKwacha(amountTambala)} from ${profile.first_name} ${profile.last_name}`}, now()
+          ${`Received ${formatKwacha(creditTambala)} from ${profile.first_name} ${profile.last_name} (received bag${coverBankFlat ? "; includes bank-flat cover" : ""})`}, now()
         ) returning id
       `;
       let feeTxId: number | null = null;
@@ -4058,11 +4108,12 @@ export const startTransfer = createServerFn({ method: "POST" })
         insert into transfers (
           reference, from_user_id, to_user_id, amount_tambala, fee_tambala,
           from_phone, to_phone, to_display_name, status,
-          out_tx_id, in_tx_id, fee_tx_id
+          out_tx_id, in_tx_id, fee_tx_id, cover_bank_flat, credit_tambala
         ) values (
           ${reference}, ${context.userId}, ${toUserId}, ${amountTambala}, ${feeTambala},
           ${profile.phone}, ${toPhone}, ${toName}, ${"completed"},
-          ${outRows[0]?.id ?? null}, ${inRows[0]?.id ?? null}, ${feeTxId}
+          ${outRows[0]?.id ?? null}, ${inRows[0]?.id ?? null}, ${feeTxId},
+          ${coverBankFlat}, ${creditTambala}
         )
       `;
     });
@@ -4072,6 +4123,8 @@ export const startTransfer = createServerFn({ method: "POST" })
       reference,
       amountTambala,
       feeTambala,
+      creditTambala,
+      coverBankFlat,
       toName,
       toPhone,
     };
@@ -4080,7 +4133,7 @@ export const startTransfer = createServerFn({ method: "POST" })
     await writeAudit(sql, {
       userId: context.userId,
       action: "transfer_send",
-      detail: `ref=${reference} to=${toPhone} amount=${amountTambala} fee=${feeTambala}`,
+      detail: `ref=${reference} to=${toPhone} amount=${amountTambala} credit=${creditTambala} cover=${coverBankFlat} fee=${feeTambala}`,
     });
     return result;
   });
@@ -5176,4 +5229,44 @@ export const adminUploadOgImage = createServerFn({ method: "POST" })
       path: "/api/og-image/share",
       paths: { share: "/api/og-image/share", referral: "/api/og-image/referral" },
     };
+  });
+
+
+export const moveReceivedToMain = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ amountKwacha: z.number().positive().optional() }))
+  .handler(async ({ context, data }) => {
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { kwachaToTambala, formatKwacha } = await import("./money");
+    const { newReference } = await import("./crypto");
+    await withTransaction(async (tx) => {
+      const rows = await tx<{ balance_tambala: number; received_balance_tambala: number }>`
+        select balance_tambala, coalesce(received_balance_tambala, 0) as received_balance_tambala
+        from wallets where user_id = ${context.userId} for update
+      `;
+      const received = Number(rows[0]?.received_balance_tambala ?? 0);
+      if (received <= 0) throw new Error("Your received bag is empty.");
+      const want = data.amountKwacha != null ? kwachaToTambala(Math.floor(data.amountKwacha)) : received;
+      const move = Math.min(want, received);
+      if (move <= 0) throw new Error("Nothing to move.");
+      await tx`
+        update wallets
+        set received_balance_tambala = received_balance_tambala - ${move},
+            balance_tambala = balance_tambala + ${move},
+            updated_at = now()
+        where user_id = ${context.userId}
+      `;
+      const ref = newReference("RCV");
+      await tx`
+        insert into transactions (
+          user_id, kind, status, gross_tambala, credited_tambala,
+          platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
+        ) values (
+          ${context.userId}, ${"transfer_in"}, ${"success"}, ${move}, ${move},
+          ${0}, ${0}, ${ref},
+          ${`Moved ${formatKwacha(move)} from received bag to main vault`}, now()
+        )
+      `;
+    });
+    return { ok: true as const };
   });
