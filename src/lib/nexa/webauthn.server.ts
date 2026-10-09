@@ -18,12 +18,12 @@ function rpConfig() {
   const url = new URL(base);
   const rpID = url.hostname === "localhost" ? "localhost" : url.hostname;
   const origin = url.origin;
-  return { rpID, origin, rpName: "NEXA-SAVER Admin" };
+  return { rpID, origin, rpName: "NEXA-SAVER" };
 }
 
-async function assertAdmin(sql: Sql, userId: string) {
-  const rows = await sql<{ role: string }>`select role from profiles where user_id = ${userId} limit 1`;
-  if (!rows.length || rows[0].role !== "admin") throw new Error("Only admin can use security keys.");
+async function assertUser(sql: Sql, userId: string) {
+  const rows = await sql<{ user_id: string }>`select user_id from profiles where user_id = ${userId} limit 1`;
+  if (!rows.length) throw new Error("Account not found.");
 }
 
 async function storeChallenge(sql: Sql, userId: string, challenge: string, purpose: string) {
@@ -66,7 +66,7 @@ function bufToB64url(buf: Uint8Array | Buffer): string {
 }
 
 export async function listWebAuthnCredentials(sql: Sql, userId: string) {
-  await assertAdmin(sql, userId);
+  await assertUser(sql, userId);
   const rows = await sql<{
     id: string;
     nickname: string | null;
@@ -90,7 +90,7 @@ export async function listWebAuthnCredentials(sql: Sql, userId: string) {
 }
 
 export async function getRegistrationOptions(sql: Sql, userId: string, userName: string) {
-  await assertAdmin(sql, userId);
+  await assertUser(sql, userId);
   const { rpID, rpName } = rpConfig();
   const existing = await sql<{ credential_id: string; transports: string | null }>`
     select credential_id, transports from admin_webauthn_credentials where user_id = ${userId}
@@ -99,7 +99,7 @@ export async function getRegistrationOptions(sql: Sql, userId: string, userName:
     rpName,
     rpID,
     userName,
-    userDisplayName: "NEXA Admin",
+    userDisplayName: userName.slice(0, 64) || "NEXA user",
     userID: new TextEncoder().encode(userId.slice(0, 32).padEnd(16, "0")),
     attestationType: "none",
     excludeCredentials: existing.map((e) => ({
@@ -121,7 +121,7 @@ export async function verifyRegistration(
   response: unknown,
   nickname?: string,
 ) {
-  await assertAdmin(sql, userId);
+  await assertUser(sql, userId);
   const { rpID, origin } = rpConfig();
   const expectedChallenge = await takeChallenge(sql, userId, "register");
   const verification = await verifyRegistrationResponse({
@@ -166,7 +166,7 @@ function randomId(): Uint8Array {
 }
 
 export async function getAuthenticationOptions(sql: Sql, userId: string) {
-  await assertAdmin(sql, userId);
+  await assertUser(sql, userId);
   const { rpID } = rpConfig();
   const existing = await sql<{ credential_id: string; transports: string | null }>`
     select credential_id, transports from admin_webauthn_credentials where user_id = ${userId}
@@ -185,7 +185,7 @@ export async function getAuthenticationOptions(sql: Sql, userId: string) {
 }
 
 export async function verifyAuthentication(sql: Sql, userId: string, response: unknown) {
-  await assertAdmin(sql, userId);
+  await assertUser(sql, userId);
   const { rpID, origin } = rpConfig();
   const expectedChallenge = await takeChallenge(sql, userId, "auth");
   const credId =
@@ -232,7 +232,7 @@ export async function verifyAuthentication(sql: Sql, userId: string, response: u
 }
 
 export async function deleteWebAuthnCredential(sql: Sql, userId: string, id: string) {
-  await assertAdmin(sql, userId);
+  await assertUser(sql, userId);
   await sql`delete from admin_webauthn_credentials where id = ${id} and user_id = ${userId}`;
 }
 

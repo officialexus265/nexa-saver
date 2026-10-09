@@ -11,6 +11,8 @@ import {
   adminVerifyTotp,
   adminWebAuthnAuthOptions,
   adminWebAuthnAuthVerify,
+  userWebAuthnAuthOptions,
+  userWebAuthnAuthVerify,
   changePasswordFn,
   getMe,
   heartbeat,
@@ -28,6 +30,7 @@ export function SessionGate({
     demoPayments: boolean;
     pinUnlocked: boolean;
     emailVerified: boolean;
+    hasPasskey: boolean;
     lock: () => void;
     unlock: () => void;
   }) => React.ReactNode;
@@ -200,6 +203,7 @@ export function SessionGate({
         demoPayments: me.demoPayments,
         pinUnlocked: locked === false,
         emailVerified: Boolean(!me.needsProfile && me.emailVerified),
+        hasPasskey: Boolean(!me.needsProfile && me.hasPasskey),
         lock: () => setLocked(true),
         unlock: () => setLocked(false),
       })}
@@ -297,6 +301,52 @@ export function SessionGate({
           </form>
             );
           })()}
+        </div>
+      ) : null}
+
+      
+      {!me.needsProfile && me.profile.role !== "admin" && me.needsUserPasskey ? (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-bg/95 p-5">
+          <div className="w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6">
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Extra security</p>
+            <h2 className="font-display text-2xl font-semibold">Security key / passkey</h2>
+            <p className="text-sm text-muted">
+              This account is protected with a hardware key or passkey. Confirm it to continue.
+            </p>
+            {totpError ? <p className="text-sm text-danger">{totpError}</p> : null}
+            <Button
+              type="button"
+              className="w-full"
+              disabled={totpBusy}
+              onClick={() => {
+                setTotpBusy(true);
+                setTotpError(null);
+                void (async () => {
+                  try {
+                    const opts = await userWebAuthnAuthOptions();
+                    const { startAuthentication } = await import("@simplewebauthn/browser");
+                    const assertion = await startAuthentication({ optionsJSON: opts });
+                    await userWebAuthnAuthVerify({ data: { response: assertion } });
+                    await refresh();
+                  } catch (err) {
+                    setTotpError(errMessage(err));
+                  } finally {
+                    setTotpBusy(false);
+                  }
+                })();
+              }}
+            >
+              {totpBusy ? "Waiting for key…" : "Use security key / passkey"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full"
+              onClick={() => void clientSignOut().then(() => (window.location.href = "/"))}
+            >
+              Sign out
+            </Button>
+          </div>
         </div>
       ) : null}
 

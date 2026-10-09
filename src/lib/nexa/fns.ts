@@ -449,10 +449,13 @@ export const getMe = createServerFn({ method: "GET" })
     let needsAdminTotp = false;
     let adminTotpEnabled = false;
     let adminHasPasskey = false;
-    if (fresh.role === "admin") {
-      try {
-        const { isTotpElevated } = await import("./admin-totp.server");
-        const { adminNeedsSecondFactor } = await import("./webauthn.server");
+    let hasPasskey = false;
+    let needsUserPasskey = false;
+    try {
+      const { isTotpElevated } = await import("./admin-totp.server");
+      const { hasWebAuthn, adminNeedsSecondFactor } = await import("./webauthn.server");
+      hasPasskey = await hasWebAuthn(sqlUser, context.userId);
+      if (fresh.role === "admin") {
         const sf = await adminNeedsSecondFactor(sqlUser, context.userId);
         adminTotpEnabled = sf.totpEnabled;
         adminHasPasskey = sf.hasPasskey;
@@ -460,9 +463,13 @@ export const getMe = createServerFn({ method: "GET" })
           const sessionToken = session?.sessionToken ?? null;
           needsAdminTotp = !(await isTotpElevated(sqlUser, context.userId, sessionToken));
         }
-      } catch {
-        /* migration not applied yet */
+      } else if (hasPasskey) {
+        // Regular users: passkey-only second factor when enrolled
+        const sessionToken = session?.sessionToken ?? null;
+        needsUserPasskey = !(await isTotpElevated(sqlUser, context.userId, sessionToken));
       }
+    } catch {
+      /* migration not applied yet */
     }
     return {
       ok: true,
@@ -474,6 +481,8 @@ export const getMe = createServerFn({ method: "GET" })
       needsAdminTotp,
       adminTotpEnabled,
       adminHasPasskey,
+      hasPasskey,
+      needsUserPasskey,
     };
   });
 
@@ -5582,4 +5591,95 @@ export const adminDeletePasskey = createServerFn({ method: "POST" })
       detail: `id=${data.id}`,
     });
     return { ok: true as const };
+  });
+
+
+// —— User passkeys (WebAuthn only — no TOTP for savers) ——
+
+export const userListPasskeys = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { getSql } = await import("@/lib/db");
+    const { listWebAuthnCredentials } = await import("./webauthn.server");
+    return listWebAuthnCredentials(await getSql(), context.userId);
+  });
+
+export const userWebAuthnRegisterOptions = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { getSql } = await import("@/lib/db");
+    const { getRegistrationOptions } = await import("./webauthn.server");
+    const profile = await loadProfile(context.userId);
+    const name = profile?.email || profile?.username || profile?.phone || "user";
+    return getRegistrationOptions(await getSql(), context.userId, name);
+  });
+
+export const userWebAuthnRegisterVerify = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ response: z.any(), nickname: z.string().max(80).optional() }))
+  .handler(async ({ context, data }) => {
+    const { getSql } = await import("@/lib/db");
+    const { verifyRegistration } = await import("./webauthn.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const res = await verifyRegistration(sql, context.userId, data.response, data.nickname || "My passkey");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "user_webauthn_register",
+      detail: `id=${res.id}`,
+    });
+    return res;
+  });
+
+export const userWebAuthnAuthOptions = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { getSql } = await import("@/lib/db");
+    const { getAuthenticationOptions } = await import("./webauthn.server");
+    return getAuthenticationOptions(await getSql(), context.userId);
+  });
+
+export const userWebAuthnAuthVerify = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ response: z.any() }))
+  .handler(async ({ context, data }) => {
+    const { getSql } = await import("@/lib/db");
+    const { verifyAuthentication } = await import("./webauthn.server");
+    const { markTotpVerified } = await import("./admin-totp.server");
+    const { getSessionUser } = await import("@/lib/auth/verify.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    await verifyAuthentication(sql, context.userId, data.response);
+    const session = await getSessionUser();
+    if (!session?.sessionToken) throw new Error("No session — sign in again.");
+    await markTotpVerified(sql, context.userId, session.sessionToken);
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "user_webauthn_ok",
+      detail: "session elevated via passkey",
+    });
+    return { ok: true as const };
+  });
+
+export const userDeletePasskey = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ id: z.string().min(4), pin: z.string().min(4).max(12) }))
+  .handler(async ({ context, data }) => {
+    const { getSql } = await import("@/lib/db");
+    const { deleteWebAuthnCredential, hasWebAuthn } = await import("./webauthn.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    // Require PIN to remove a key
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Profile missing");
+    const { verifySecret } = await import("./crypto");
+    const ok = await verifySecret(profile.pin_hash, data.pin);
+    if (!ok) throw new Error("Incorrect PIN");
+    await deleteWebAuthnCredential(sql, context.userId, data.id);
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "user_webauthn_delete",
+      detail: `id=${data.id}`,
+    });
+    return { ok: true as const, stillHasPasskey: await hasWebAuthn(sql, context.userId) };
   });

@@ -61,6 +61,7 @@ function Vault({
   profile,
   demoPayments,
   emailVerified,
+  hasPasskey: hasPasskeyInitial,
 }: {
   profile: {
     firstName: string;
@@ -75,8 +76,12 @@ function Vault({
   };
   demoPayments: boolean;
   emailVerified: boolean;
+  hasPasskey: boolean;
 }) {
   const { t } = useT();
+  const [hasPasskey, setHasPasskey] = useState(hasPasskeyInitial);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [passkeyMsg, setPasskeyMsg] = useState<string | null>(null);
   const [balance, setBalance] = useState<BalanceResponse | null>(null);
   const [txs, setTxs] = useState<PublicTx[] | null>(null);
   const [checkOpen, setCheckOpen] = useState(false);
@@ -120,6 +125,44 @@ function Vault({
         <p className="text-sm text-muted">{t("dash.welcome")}</p>
         <h1 className="font-display text-3xl font-semibold">{profile.firstName}</h1>
       </div>
+
+      {!hasPasskey ? (
+        <div className="rounded-xl border border-primary/35 bg-primary/10 px-4 py-3 text-sm">
+          <p className="font-medium text-fg">Secure your account with a hardware key / passkey</p>
+          <p className="mt-1 text-muted">
+            Add a security key or device passkey so only you can open this vault — even if someone knows your password.
+            No authenticator app needed.
+          </p>
+          <Button
+            type="button"
+            className="mt-3"
+            disabled={passkeyBusy}
+            onClick={() => {
+              setPasskeyBusy(true);
+              setPasskeyMsg(null);
+              void (async () => {
+                try {
+                  const opts = await userWebAuthnRegisterOptions();
+                  const { startRegistration } = await import("@simplewebauthn/browser");
+                  const att = await startRegistration({ optionsJSON: opts });
+                  await userWebAuthnRegisterVerify({
+                    data: { response: att, nickname: "My passkey" },
+                  });
+                  setHasPasskey(true);
+                  setPasskeyMsg("Passkey saved. Next sign-in will ask for this key.");
+                } catch (err) {
+                  setPasskeyMsg(errMessage(err));
+                } finally {
+                  setPasskeyBusy(false);
+                }
+              })();
+            }}
+          >
+            {passkeyBusy ? "Waiting for key…" : "Set up security key / passkey"}
+          </Button>
+          {passkeyMsg ? <p className="mt-2 text-xs text-muted">{passkeyMsg}</p> : null}
+        </div>
+      ) : null}
 
       {!emailVerified ? (
         <EmailVerifyBanner />

@@ -32,6 +32,8 @@ export type MeResponse =
       needsAdminTotp?: boolean;
       adminTotpEnabled?: boolean;
       adminHasPasskey?: boolean;
+      hasPasskey?: boolean;
+      needsUserPasskey?: boolean;
     };
 
 export type BalanceResponse =
