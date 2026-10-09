@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DEPOSIT_FEE_RATE, MIN_DEPOSIT_KWACHA, MIN_WITHDRAW_KWACHA, BANK_FLAT_FEE_KWACHA, MIN_BANK_WITHDRAW_KWACHA } from "@/lib/nexa/constants";
 import { errMessage } from "@/lib/nexa/errors";
+import { useT } from "@/lib/i18n/client";
 import {
   confirmDemoDeposit,
   getBalance,
@@ -29,6 +30,8 @@ import {
   lookupSendRecipient,
   startTransfer,
   moveReceivedToMain,
+  userWebAuthnRegisterOptions,
+  userWebAuthnRegisterVerify,
   requestTransferReversal,
   getLoanEligibility,
   getMyLoans,
