@@ -28,6 +28,9 @@ export type MeResponse =
       profile: PublicProfile;
       pinUnlocked: boolean;
       demoPayments: boolean;
+      /** Admin must complete TOTP before using admin UI / sensitive actions */
+      needsAdminTotp?: boolean;
+      adminTotpEnabled?: boolean;
     };
 
 export type BalanceResponse =

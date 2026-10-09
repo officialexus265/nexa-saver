@@ -7,7 +7,7 @@ import { PasswordField } from "@/components/password-field";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { signOut as clientSignOut } from "@/lib/auth/client";
 import { errMessage } from "@/lib/nexa/errors";
-import { changePasswordFn, getMe, heartbeat, recordPageVisit } from "@/lib/nexa/fns";
+import { adminVerifyTotp, changePasswordFn, getMe, heartbeat, recordPageVisit } from "@/lib/nexa/fns";
 import { I18nProvider } from "@/lib/i18n/client";
 import type { MeResponse, PublicProfile } from "@/lib/nexa/types";
 
@@ -33,6 +33,10 @@ export function SessionGate({
   const [pw, setPw] = useState({ current: "", next: "" });
   const [pwError, setPwError] = useState<string | null>(null);
   const [pwBusy, setPwBusy] = useState(false);
+  const [totpCode, setTotpCode] = useState("");
+  const [totpError, setTotpError] = useState<string | null>(null);
+  const [totpBusy, setTotpBusy] = useState(false);
+
 
   const refresh = useCallback(async () => {
     try {
@@ -191,6 +195,53 @@ export function SessionGate({
         lock: () => setLocked(true),
         unlock: () => setLocked(false),
       })}
+      
+      {!me.needsProfile && me.profile.role === "admin" && me.needsAdminTotp ? (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-bg/95 p-5">
+          <form
+            className="w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setTotpBusy(true);
+              setTotpError(null);
+              void adminVerifyTotp({ data: { code: totpCode } })
+                .then(() => {
+                  setTotpCode("");
+                  return refresh();
+                })
+                .catch((err) => setTotpError(errMessage(err)))
+                .finally(() => setTotpBusy(false));
+            }}
+          >
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Admin 2FA</p>
+            <h2 className="font-display text-2xl font-semibold">Authenticator code</h2>
+            <p className="text-sm text-muted">
+              Enter the 6-digit code from your authenticator app, or a one-time backup code.
+            </p>
+            <input
+              className="flex h-12 w-full rounded-xl border border-border bg-surface-2 px-3 text-center text-lg tracking-[0.3em] tabular-nums"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              value={totpCode}
+              onChange={(e) => setTotpCode(e.target.value.replace(/\s/g, "").slice(0, 16))}
+              placeholder="000000"
+            />
+            {totpError ? <p className="text-sm text-danger">{totpError}</p> : null}
+            <Button type="submit" className="w-full" disabled={totpBusy || totpCode.length < 6}>
+              {totpBusy ? "Checking…" : "Verify and continue"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full"
+              onClick={() => void clientSignOut().then(() => (window.location.href = "/"))}
+            >
+              Sign out
+            </Button>
+          </form>
+        </div>
+      ) : null}
+
       {profile.mustChangePassword ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-bg/92 p-5">
           <form onSubmit={savePassword} className="w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6">

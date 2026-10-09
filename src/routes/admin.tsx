@@ -43,6 +43,11 @@ import {
   adminUploadOgImage,
   adminGetSiteFooter,
   adminSetSiteFooter,
+  adminTotpStatus,
+  adminBeginTotpSetup,
+  adminConfirmTotpSetup,
+  adminDisableTotp,
+
   adminTreasuryWithdraw,
   adminExportSurveyCsv,
   adminDeleteUser,
@@ -198,6 +203,17 @@ function Console() {
   const [footerCompanyName, setFooterCompanyName] = useState("NEXUS265");
   const [footerCompanyUrl, setFooterCompanyUrl] = useState("https://www.facebook.com/");
   const [footerMsg, setFooterMsg] = useState<string | null>(null);
+  const [totpStatus, setTotpStatus] = useState<{
+    enabled: boolean;
+    elevated: boolean;
+    configured?: boolean;
+  } | null>(null);
+  const [totpSetup, setTotpSetup] = useState<{ secret: string; qrUrl: string; otpauthUri: string } | null>(null);
+  const [totpBackups, setTotpBackups] = useState<string[] | null>(null);
+  const [totpCode, setTotpCode] = useState("");
+  const [totpMsg, setTotpMsg] = useState<string | null>(null);
+  const [totpBusy, setTotpBusy] = useState(false);
+
 
 
 
@@ -210,6 +226,12 @@ function Console() {
 
 
 
+
+  useEffect(() => {
+    void adminTotpStatus()
+      .then(setTotpStatus)
+      .catch(() => setTotpStatus(null));
+  }, []);
 
   useEffect(() => {
     void adminGetSiteFooter()
@@ -416,6 +438,122 @@ function Console() {
         ) : (
           <p className="text-sm text-muted">Loading checklist…</p>
         )}
+      </Card>
+
+      <Card className="space-y-3 p-4 border-primary/30">
+        <h2 className="font-display text-lg font-semibold">Admin authenticator (2FA)</h2>
+        <p className="text-sm text-muted">
+          Protect force-credit, user delete/lock, fee changes, treasury withdraw, and other sensitive actions.
+          Use Google Authenticator, Authy, or any TOTP app. Save backup codes offline.
+        </p>
+        {totpStatus ? (
+          <p className="text-sm">
+            Status:{" "}
+            <span className={totpStatus.enabled ? "text-primary font-medium" : "text-danger font-medium"}>
+              {totpStatus.enabled ? "Enabled" : "Not enabled"}
+            </span>
+            {totpStatus.enabled ? (
+              <span className="text-muted">
+                {" "}
+                · this session {totpStatus.elevated ? "verified" : "needs code"}
+              </span>
+            ) : null}
+          </p>
+        ) : null}
+        {totpBackups ? (
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+            <p className="font-medium text-fg">Save these backup codes now (shown once)</p>
+            <ul className="mt-2 grid grid-cols-2 gap-1 font-mono text-xs">
+              {totpBackups.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ul>
+            <Button type="button" variant="secondary" className="mt-2" onClick={() => setTotpBackups(null)}>
+              I saved them
+            </Button>
+          </div>
+        ) : null}
+        {totpSetup && !totpStatus?.enabled ? (
+          <div className="space-y-3">
+            <p className="text-sm text-muted">Scan this QR with your authenticator app, or enter the secret manually.</p>
+            <img src={totpSetup.qrUrl} alt="2FA QR" className="mx-auto rounded-lg border border-border bg-white p-2" width={200} height={200} />
+            <p className="break-all text-center font-mono text-xs text-muted">{totpSetup.secret}</p>
+            <input
+              className="flex h-11 w-full rounded-xl border border-border bg-surface-2 px-3 text-center tracking-widest"
+              placeholder="6-digit code"
+              value={totpCode}
+              onChange={(e) => setTotpCode(e.target.value.replace(/\s/g, "").slice(0, 8))}
+            />
+            <Button
+              type="button"
+              disabled={totpBusy || totpCode.length < 6}
+              onClick={() => {
+                setTotpBusy(true);
+                setTotpMsg(null);
+                void adminConfirmTotpSetup({ data: { code: totpCode } })
+                  .then((r) => {
+                    setTotpBackups(r.backupCodes);
+                    setTotpSetup(null);
+                    setTotpCode("");
+                    return adminTotpStatus().then(setTotpStatus);
+                  })
+                  .then(() => setTotpMsg("2FA enabled."))
+                  .catch((err) => setTotpMsg(errMessage(err)))
+                  .finally(() => setTotpBusy(false));
+              }}
+            >
+              Confirm and enable
+            </Button>
+          </div>
+        ) : null}
+        <div className="flex flex-wrap gap-2">
+          {!totpStatus?.enabled ? (
+            <Button
+              type="button"
+              disabled={totpBusy}
+              onClick={() => {
+                setTotpBusy(true);
+                setTotpMsg(null);
+                void adminBeginTotpSetup()
+                  .then(setTotpSetup)
+                  .catch((err) => setTotpMsg(errMessage(err)))
+                  .finally(() => setTotpBusy(false));
+              }}
+            >
+              Set up 2FA
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={totpBusy || totpCode.length < 6}
+              onClick={() => {
+                setTotpBusy(true);
+                setTotpMsg(null);
+                void adminDisableTotp({ data: { code: totpCode } })
+                  .then(() => {
+                    setTotpCode("");
+                    setTotpSetup(null);
+                    return adminTotpStatus().then(setTotpStatus);
+                  })
+                  .then(() => setTotpMsg("2FA disabled."))
+                  .catch((err) => setTotpMsg(errMessage(err)))
+                  .finally(() => setTotpBusy(false));
+              }}
+            >
+              Disable 2FA (enter code first)
+            </Button>
+          )}
+        </div>
+        {totpStatus?.enabled ? (
+          <input
+            className="flex h-11 w-full max-w-xs rounded-xl border border-border bg-surface-2 px-3 text-center tracking-widest"
+            placeholder="Code to disable"
+            value={totpCode}
+            onChange={(e) => setTotpCode(e.target.value.replace(/\s/g, "").slice(0, 16))}
+          />
+        ) : null}
+        {totpMsg ? <p className="text-sm text-muted">{totpMsg}</p> : null}
       </Card>
 
       <Card className="space-y-3 p-4">

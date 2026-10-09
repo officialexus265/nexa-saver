@@ -446,6 +446,21 @@ export const getMe = createServerFn({ method: "GET" })
     const ev = await sqlUser<{ emailVerified: boolean }>`
       select "emailVerified" from "user" where id = ${context.userId} limit 1
     `;
+    let needsAdminTotp = false;
+    let adminTotpEnabled = false;
+    if (fresh.role === "admin") {
+      try {
+        const { getAdminTotpStatus, isTotpElevated } = await import("./admin-totp.server");
+        const st = await getAdminTotpStatus(sqlUser, context.userId);
+        adminTotpEnabled = st.enabled;
+        if (st.enabled) {
+          const sessionToken = session?.sessionToken ?? null;
+          needsAdminTotp = !(await isTotpElevated(sqlUser, context.userId, sessionToken));
+        }
+      } catch {
+        /* migration not applied yet */
+      }
+    }
     return {
       ok: true,
       needsProfile: false,
@@ -453,6 +468,8 @@ export const getMe = createServerFn({ method: "GET" })
       profile: toPublic(fresh),
       pinUnlocked: pinWindowOpen(fresh.pin_verified_at),
       demoPayments: demoPaymentsEnabled(),
+      needsAdminTotp,
+      adminTotpEnabled,
     };
   });
 
@@ -1352,6 +1369,16 @@ async function requireVerifiedEmail(userId: string) {
   }
 }
 
+async function requireAdminSensitive(userId: string) {
+  await requireAdmin(userId);
+  const { getSql } = await import("@/lib/db");
+  const { getSessionUser } = await import("@/lib/auth/verify.server");
+  const { requireAdminTotpElevation } = await import("./admin-totp.server");
+  const sql = await getSql();
+  const session = await getSessionUser();
+  await requireAdminTotpElevation(sql, userId, session?.sessionToken ?? null);
+}
+
 async function requireAdmin(userId: string) {
   const profile = await loadProfile(userId);
   if (!profile || profile.role !== "admin") throw new Error("Admin only");
@@ -2239,7 +2266,7 @@ export const adminForceCreditDeposit = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ context, data }) => {
-    await requireAdmin(context.userId);
+    await requireAdminSensitive(context.userId);
     const { getSql } = await import("@/lib/db");
     const { writeAudit } = await import("./audit.server");
     const sql = await getSql();
@@ -2835,7 +2862,7 @@ export const adminLockUser = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ context, data }) => {
-    await requireAdmin(context.userId);
+    await requireAdminSensitive(context.userId);
     if (data.userId === context.userId) throw new Error("You cannot lock your own admin account");
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
@@ -2877,7 +2904,7 @@ export const adminDeleteUser = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ context, data }) => {
-    await requireAdmin(context.userId);
+    await requireAdminSensitive(context.userId);
     if (data.userId === context.userId) throw new Error("You cannot delete your own admin account");
     const { getSql, withTransaction } = await import("@/lib/db");
     const sql = await getSql();
@@ -3103,7 +3130,7 @@ export const adminSetPayoutMethods = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ context, data }) => {
-    await requireAdmin(context.userId);
+    await requireAdminSensitive(context.userId);
     const { getSql } = await import("@/lib/db");
     const { setPayoutMethods } = await import("./payout-methods.server");
     const sql = await getSql();
@@ -3270,7 +3297,7 @@ export const adminTreasuryWithdraw = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ context, data }) => {
-    await requireAdmin(context.userId);
+    await requireAdminSensitive(context.userId);
     const { getSql, withTransaction } = await import("@/lib/db");
     const { verifySecret, newReference } = await import("./crypto");
     const { kwachaToTambala, tambalaToKwacha, formatKwacha } = await import("./money");
@@ -3732,7 +3759,7 @@ export const adminSetFeePolicy = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ context, data }) => {
-    await requireAdmin(context.userId);
+    await requireAdminSensitive(context.userId);
     const { getSql } = await import("@/lib/db");
     const { setFeePolicy } = await import("./fee-policy.server");
     const sql = await getSql();
@@ -3858,7 +3885,7 @@ export const adminPublishTranslations = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ context, data }) => {
-    await requireAdmin(context.userId);
+    await requireAdminSensitive(context.userId);
     const { getSql } = await import("@/lib/db");
     const { saveDraft, publishLanguage, setLanguageEnabled } = await import("@/lib/i18n/i18n.server");
     const sql = await getSql();
@@ -5126,7 +5153,7 @@ export const adminSetReferralSettings = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ context, data }) => {
-    await requireAdmin(context.userId);
+    await requireAdminSensitive(context.userId);
     const { getSql } = await import("@/lib/db");
     const sql = await getSql();
     const set = async (key: string, value: string) => {
@@ -5341,5 +5368,123 @@ export const adminSetSiteFooter = createServerFn({ method: "POST" })
     };
     await set("footer_company_name", data.companyName.trim());
     await set("footer_company_url", data.companyUrl.trim());
+    return { ok: true as const };
+  });
+
+
+// —— Phase B: Admin TOTP 2FA ——
+
+export const adminTotpStatus = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { getAdminTotpStatus, isTotpElevated } = await import("./admin-totp.server");
+    const { getSessionUser } = await import("@/lib/auth/verify.server");
+    const sql = await getSql();
+    const st = await getAdminTotpStatus(sql, context.userId);
+    const session = await getSessionUser();
+    const elevated = st.enabled
+      ? await isTotpElevated(sql, context.userId, session?.sessionToken ?? null)
+      : true;
+    return { ...st, elevated };
+  });
+
+export const adminBeginTotpSetup = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { beginTotpSetup } = await import("./admin-totp.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const profile = await loadProfile(context.userId);
+    const label = profile?.email || profile?.username || "admin";
+    const res = await beginTotpSetup(sql, context.userId, label);
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "admin_totp_setup_begin",
+      detail: "pending secret issued",
+    });
+    return res;
+  });
+
+export const adminConfirmTotpSetup = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ code: z.string().min(6).max(16) }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { confirmTotpSetup, markTotpVerified } = await import("./admin-totp.server");
+    const { getSessionUser } = await import("@/lib/auth/verify.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    try {
+      const res = await confirmTotpSetup(sql, context.userId, data.code);
+      const session = await getSessionUser();
+      if (session?.sessionToken) {
+        await markTotpVerified(sql, context.userId, session.sessionToken);
+      }
+      await writeAudit(sql, {
+        actorUserId: context.userId,
+        action: "admin_totp_enabled",
+        detail: "2FA enrolled",
+      });
+      return res;
+    } catch (err) {
+      await writeAudit(sql, {
+        actorUserId: context.userId,
+        action: "admin_totp_setup_failed",
+        detail: String((err as Error).message).slice(0, 120),
+      });
+      throw err;
+    }
+  });
+
+export const adminVerifyTotp = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ code: z.string().min(6).max(24) }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { verifyAndElevate } = await import("./admin-totp.server");
+    const { getSessionUser } = await import("@/lib/auth/verify.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const session = await getSessionUser();
+    if (!session?.sessionToken) throw new Error("No session token — sign in again.");
+    try {
+      await verifyAndElevate(sql, context.userId, session.sessionToken, data.code);
+      await writeAudit(sql, {
+        actorUserId: context.userId,
+        action: "admin_totp_ok",
+        detail: "session elevated",
+      });
+      return { ok: true as const };
+    } catch (err) {
+      await writeAudit(sql, {
+        actorUserId: context.userId,
+        action: "admin_totp_failed",
+        detail: String((err as Error).message).slice(0, 120),
+      });
+      throw err;
+    }
+  });
+
+export const adminDisableTotp = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ code: z.string().min(6).max(24) }))
+  .handler(async ({ context, data }) => {
+    await requireAdminSensitive(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { disableTotp } = await import("./admin-totp.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    await disableTotp(sql, context.userId, data.code);
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "admin_totp_disabled",
+      detail: "2FA turned off",
+    });
     return { ok: true as const };
   });
