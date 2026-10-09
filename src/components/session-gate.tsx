@@ -206,10 +206,25 @@ export function SessionGate({
       
       {!me.needsProfile && me.profile.role === "admin" && me.needsAdminTotp ? (
         <div className="fixed inset-0 z-[60] grid place-items-center bg-bg/95 p-5">
+          {(() => {
+            const showPasskey = Boolean(me.adminHasPasskey);
+            const showTotp = Boolean(me.adminTotpEnabled);
+            const title = showPasskey && !showTotp
+              ? "Security key"
+              : showTotp && !showPasskey
+                ? "Authenticator code"
+                : "Admin verification";
+            const hint = showPasskey && showTotp
+              ? "Use a security key / passkey, or enter the 6-digit authenticator code (or a backup code)."
+              : showPasskey
+                ? "Touch your security key or use your device passkey to continue."
+                : "Enter the 6-digit code from your authenticator app, or a one-time backup code.";
+            return (
           <form
             className="w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6"
             onSubmit={(e) => {
               e.preventDefault();
+              if (!showTotp) return;
               setTotpBusy(true);
               setTotpError(null);
               void adminVerifyTotp({ data: { code: totpCode } })
@@ -222,10 +237,9 @@ export function SessionGate({
             }}
           >
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Admin 2FA</p>
-            <h2 className="font-display text-2xl font-semibold">Authenticator code</h2>
-            <p className="text-sm text-muted">
-              Use a security key / passkey, or enter the 6-digit authenticator code (or a backup code).
-            </p>
+            <h2 className="font-display text-2xl font-semibold">{title}</h2>
+            <p className="text-sm text-muted">{hint}</p>
+            {showPasskey ? (
             <Button
               type="button"
               className="w-full"
@@ -250,9 +264,14 @@ export function SessionGate({
             >
               {totpBusy ? "Waiting for key…" : "Use security key / passkey"}
             </Button>
+            ) : null}
+            {showPasskey && showTotp ? (
             <div className="relative py-1 text-center text-xs text-muted">
               <span className="bg-surface px-2">or authenticator code</span>
             </div>
+            ) : null}
+            {showTotp ? (
+            <>
             <input
               className="flex h-12 w-full rounded-xl border border-border bg-surface-2 px-3 text-center text-lg tracking-[0.3em] tabular-nums"
               inputMode="numeric"
@@ -261,10 +280,12 @@ export function SessionGate({
               onChange={(e) => setTotpCode(e.target.value.replace(/\s/g, "").slice(0, 16))}
               placeholder="000000"
             />
-            {totpError ? <p className="text-sm text-danger">{totpError}</p> : null}
             <Button type="submit" className="w-full" disabled={totpBusy || totpCode.length < 6}>
               {totpBusy ? "Checking…" : "Verify code"}
             </Button>
+            </>
+            ) : null}
+            {totpError ? <p className="text-sm text-danger">{totpError}</p> : null}
             <Button
               type="button"
               variant="secondary"
@@ -274,6 +295,8 @@ export function SessionGate({
               Sign out
             </Button>
           </form>
+            );
+          })()}
         </div>
       ) : null}
 
