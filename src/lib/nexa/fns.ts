@@ -87,6 +87,13 @@ type ProfileRow = {
   email: string;
   phone: string;
   phone_verified_at: unknown;
+  kyc_status?: string;
+  kyc_id_type?: string | null;
+  kyc_id_number?: string | null;
+  kyc_id_name?: string | null;
+  kyc_submitted_at?: unknown;
+  kyc_reviewed_at?: unknown;
+  kyc_review_note?: string | null;
   lock_mode: string;
   lock_idle_minutes: number;
   username: string;
@@ -137,6 +144,14 @@ function toPublic(row: ProfileRow): PublicProfile {
     email: row.email,
     phone: row.phone,
     phoneVerified: Boolean(row.phone_verified_at),
+    kycStatus: (row.kyc_status as "none" | "pending" | "verified" | "rejected") || "none",
+    kycIdType: row.kyc_id_type ?? null,
+    kycIdName: row.kyc_id_name ?? null,
+    kycSubmittedAt: row.kyc_submitted_at
+      ? new Date(row.kyc_submitted_at as string | Date).toISOString()
+      : null,
+    kycReviewNote: row.kyc_review_note ?? null,
+
     bankName: row.bank_name ?? null,
     bankAccountNumberMasked: row.bank_account_number
       ? `****${String(row.bank_account_number).slice(-4)}`
@@ -895,6 +910,10 @@ export const startWithdraw = createServerFn({ method: "POST" })
     await assertWithdrawalsAllowedAsync(sql);
     const { assertMoneyInfraReady } = await import("./production-guards.server");
     assertMoneyInfraReady("Withdrawals");
+    {
+      const { assertKycAllowsWithdraw } = await import("./kyc.server");
+      await assertKycAllowsWithdraw(sql, context.userId, data.amountKwacha);
+    }
     const { assertRateLimit: assertRlWithdraw } = await import("./rate-limit.server");
     await assertRlWithdraw(sql, {
       bucket: `withdraw-start:${context.userId}`,
@@ -6108,4 +6127,162 @@ export const adminSetMoneyPause = createServerFn({ method: "POST" })
       detail: `dep=${data.deposits} wd=${data.withdrawals} note=${(data.note || "").slice(0, 80)}`,
     });
     return status;
+  });
+
+
+// —— Phase E1: light KYC ——
+
+export const getMyKyc = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { getSql } = await import("@/lib/db");
+    const { getProfileKyc, getKycWithdrawThresholdKwacha, KYC_ID_TYPES } = await import("./kyc.server");
+    const sql = await getSql();
+    const kyc = await getProfileKyc(sql, context.userId);
+    const thresholdKwacha = await getKycWithdrawThresholdKwacha(sql);
+    return { kyc, thresholdKwacha, idTypes: KYC_ID_TYPES };
+  });
+
+export const submitKycDetails = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      idType: z.enum(["national_id", "passport", "drivers_license"]),
+      idNumber: z.string().min(4).max(40),
+      idName: z.string().min(2).max(120),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    const { getSql } = await import("@/lib/db");
+    const { normalizeIdNumber } = await import("./kyc.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Complete your profile first");
+    if (profile.role === "admin") throw new Error("Admin accounts do not use saver KYC.");
+    if (profile.kyc_status === "verified") {
+      throw new Error("Identity is already verified. Contact support if you need a correction.");
+    }
+    const idNumber = normalizeIdNumber(data.idNumber);
+    if (idNumber.length < 4) throw new Error("Enter a valid ID number.");
+    const idName = data.idName.trim().replace(/\s+/g, " ").slice(0, 120);
+    await sql`
+      update profiles
+      set kyc_status = ${"pending"},
+          kyc_id_type = ${data.idType},
+          kyc_id_number = ${idNumber},
+          kyc_id_name = ${idName},
+          kyc_submitted_at = now(),
+          kyc_reviewed_at = null,
+          kyc_review_note = null,
+          kyc_reviewed_by = null,
+          updated_at = now()
+      where user_id = ${context.userId}
+    `;
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "kyc_submit",
+      detail: `type=${data.idType}`,
+    });
+    return { ok: true as const, status: "pending" as const };
+  });
+
+export const adminListKycQueue = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { getKycWithdrawThresholdKwacha } = await import("./kyc.server");
+    const sql = await getSql();
+    const rows = await sql<{
+      user_id: string;
+      first_name: string;
+      last_name: string;
+      username: string;
+      email: string;
+      phone: string;
+      kyc_status: string;
+      kyc_id_type: string | null;
+      kyc_id_number: string | null;
+      kyc_id_name: string | null;
+      kyc_submitted_at: Date | string | null;
+      date_of_birth: Date | string | null;
+    }>`
+      select user_id, first_name, last_name, username, email, phone,
+             kyc_status, kyc_id_type, kyc_id_number, kyc_id_name, kyc_submitted_at, date_of_birth
+      from profiles
+      where role = ${"user"} and kyc_status in (${"pending"}, ${"rejected"}, ${"verified"})
+      order by
+        case kyc_status when 'pending' then 0 when 'rejected' then 1 else 2 end,
+        kyc_submitted_at desc nulls last
+      limit 100
+    `;
+    return {
+      thresholdKwacha: await getKycWithdrawThresholdKwacha(sql),
+      rows: rows.map((r) => ({
+        userId: r.user_id,
+        name: `${r.first_name} ${r.last_name}`.trim(),
+        username: r.username,
+        email: r.email,
+        phone: r.phone,
+        status: r.kyc_status,
+        idType: r.kyc_id_type,
+        idNumber: r.kyc_id_number,
+        idName: r.kyc_id_name,
+        submittedAt: r.kyc_submitted_at ? new Date(r.kyc_submitted_at).toISOString() : null,
+        dateOfBirth: r.date_of_birth ? String(r.date_of_birth).slice(0, 10) : null,
+      })),
+    };
+  });
+
+export const adminReviewKyc = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      userId: z.string().min(1),
+      decision: z.enum(["verified", "rejected"]),
+      note: z.string().max(500).optional(),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const updated = await sql<{ user_id: string }>`
+      update profiles
+      set kyc_status = ${data.decision},
+          kyc_reviewed_at = now(),
+          kyc_review_note = ${data.note?.trim() || null},
+          kyc_reviewed_by = ${context.userId},
+          updated_at = now()
+      where user_id = ${data.userId} and role = ${"user"}
+      returning user_id
+    `;
+    if (!updated.length) throw new Error("User not found");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      userId: data.userId,
+      action: "kyc_review",
+      detail: `decision=${data.decision} note=${(data.note || "").slice(0, 80)}`,
+    });
+    return { ok: true as const };
+  });
+
+export const adminSetKycThreshold = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ thresholdKwacha: z.number().min(0).max(50_000_000) }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { setKycWithdrawThresholdKwacha } = await import("./kyc.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const v = await setKycWithdrawThresholdKwacha(sql, data.thresholdKwacha);
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "kyc_threshold_set",
+      detail: `kwacha=${v}`,
+    });
+    return { ok: true as const, thresholdKwacha: v };
   });

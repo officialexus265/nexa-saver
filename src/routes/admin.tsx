@@ -14,6 +14,9 @@ import {
   adminUsers,
   adminLookupReference,
   adminForceCreditDeposit,
+  adminSetKycThreshold,
+  adminReviewKyc,
+  adminListKycQueue,
   runReconciliationFn,
   adminSetMoneyPause,
   adminGetReconHistory,
@@ -233,6 +236,9 @@ function Console() {
   const [reconLatest, setReconLatest] = useState<Awaited<ReturnType<typeof runReconciliationFn>> | null>(null);
   const [opsMsg, setOpsMsg] = useState<string | null>(null);
   const [opsBusy, setOpsBusy] = useState(false);
+  const [kycQueue, setKycQueue] = useState<Awaited<ReturnType<typeof adminListKycQueue>> | null>(null);
+  const [kycThreshold, setKycThreshold] = useState("100000");
+
   const [pauseNote, setPauseNote] = useState("");
 
   const legalTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -272,11 +278,13 @@ function Console() {
   useEffect(() => {
     if (adminTab !== "ops") return;
     setOpsMsg(null);
-    void Promise.all([adminGetOpsQueue(), adminGetReconHistory()])
-      .then(([q, h]) => {
+    void Promise.all([adminGetOpsQueue(), adminGetReconHistory(), adminListKycQueue()])
+      .then(([q, h, kyc]) => {
         setOpsQueue(q);
         setReconHistory(h);
         if (q.pause.note) setPauseNote(q.pause.note);
+        setKycQueue(kyc);
+        setKycThreshold(String(kyc.thresholdKwacha));
       })
       .catch((err) => setOpsMsg(errMessage(err)));
   }, [adminTab]);
@@ -2179,6 +2187,86 @@ function Console() {
               {!opsQueue?.frozenTransfers.length ? <li className="text-muted">None</li> : null}
             </ul>
           </Card>
+          <Card className="space-y-3 p-4">
+            <h2 className="font-display text-lg font-semibold">KYC queue (light)</h2>
+            <p className="text-sm text-muted">
+              Users submit ID type, number, and name. Approving unlocks withdrawals at or above the threshold.
+            </p>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="space-y-1">
+                <Label>Threshold (MWK)</Label>
+                <Input value={kycThreshold} onChange={(e) => setKycThreshold(e.target.value)} className="w-36" />
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={opsBusy}
+                onClick={() => {
+                  setOpsBusy(true);
+                  void adminSetKycThreshold({ data: { thresholdKwacha: Number(kycThreshold) || 0 } })
+                    .then((r) => {
+                      setKycThreshold(String(r.thresholdKwacha));
+                      setOpsMsg(`KYC threshold set to ${r.thresholdKwacha.toLocaleString()} MWK`);
+                    })
+                    .catch((err) => setOpsMsg(errMessage(err)))
+                    .finally(() => setOpsBusy(false));
+                }}
+              >
+                Save threshold
+              </Button>
+            </div>
+            <ul className="space-y-2 text-sm">
+              {(kycQueue?.rows ?? []).map((r) => (
+                <li key={r.userId} className="rounded-xl border border-border px-3 py-2">
+                  <p className="font-medium">
+                    {r.name} @{r.username} · <span className="text-muted">{r.status}</span>
+                  </p>
+                  <p className="text-xs text-muted">
+                    {r.idType} · {r.idNumber} · name on ID: {r.idName} · DOB {r.dateOfBirth}
+                  </p>
+                  <p className="text-xs text-muted">{r.email} · {r.phone}</p>
+                  {r.status === "pending" ? (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={opsBusy}
+                        onClick={() => {
+                          setOpsBusy(true);
+                          void adminReviewKyc({ data: { userId: r.userId, decision: "verified" } })
+                            .then(() => adminListKycQueue())
+                            .then(setKycQueue)
+                            .catch((err) => setOpsMsg(errMessage(err)))
+                            .finally(() => setOpsBusy(false));
+                        }}
+                      >
+                        Approve
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        disabled={opsBusy}
+                        onClick={() => {
+                          const note = window.prompt("Rejection reason (optional)") || "";
+                          setOpsBusy(true);
+                          void adminReviewKyc({ data: { userId: r.userId, decision: "rejected", note } })
+                            .then(() => adminListKycQueue())
+                            .then(setKycQueue)
+                            .catch((err) => setOpsMsg(errMessage(err)))
+                            .finally(() => setOpsBusy(false));
+                        }}
+                      >
+                        Reject
+                      </Button>
+                    </div>
+                  ) : null}
+                </li>
+              ))}
+              {!kycQueue?.rows?.length ? <li className="text-muted">No KYC submissions yet.</li> : null}
+            </ul>
+          </Card>
+
           <Card className="space-y-2 p-4 text-sm text-muted">
             <h2 className="font-display text-lg font-semibold text-fg">Limits &amp; sessions</h2>
             <ul className="list-disc space-y-1 pl-5">

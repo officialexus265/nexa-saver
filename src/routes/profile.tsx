@@ -23,6 +23,8 @@ import {
   revokeSessionById,
   userListPasskeys,
   userDeletePasskey,
+  getMyKyc,
+  submitKycDetails,
   saveBankPayoutDetails,
   adminUpdateContact,
   changeSecurityQuestionFn,
@@ -70,11 +72,20 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
   const [passkeys, setPasskeys] = useState<Array<{ id: string; nickname: string; createdAt: string }>>([]);
   const [passkeyPin, setPasskeyPin] = useState("");
   const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [kycInfo, setKycInfo] = useState<Awaited<ReturnType<typeof getMyKyc>> | null>(null);
+  const [kycForm, setKycForm] = useState({ idType: "national_id", idNumber: "", idName: "" });
+  const [kycBusy, setKycBusy] = useState(false);
 
   useEffect(() => {
     void listActiveSessions()
       .then(setSessions)
       .catch(() => setSessions([]));
+  }, []);
+
+  useEffect(() => {
+    void getMyKyc()
+      .then(setKycInfo)
+      .catch(() => setKycInfo(null));
   }, []);
 
   useEffect(() => {
@@ -154,6 +165,110 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
           <AdminContactForm currentEmail={profile.email} currentPhone={profile.phone} onDone={(m) => setMessage(m)} onError={(e) => setError(e)} />
         </ProfileSection>
       ) : null}
+
+
+      <ProfileSection
+        id="kyc"
+        title="Identity (KYC)"
+        summary={
+          kycInfo?.kyc?.status === "verified"
+            ? "Verified"
+            : kycInfo?.kyc?.status === "pending"
+              ? "Under review"
+              : kycInfo?.kyc?.status === "rejected"
+                ? "Needs update"
+                : "Optional until large withdrawals"
+        }
+        openId={openSection}
+        onToggle={setOpenSection}
+      >
+        <p className="text-sm text-muted">
+          Light identity check for larger withdrawals (from about{" "}
+          {kycInfo?.thresholdKwacha?.toLocaleString() ?? "100,000"} MWK). Smaller withdrawals still work without this.
+          We store your ID type and number for review — no photo upload in this step.
+        </p>
+        {kycInfo?.kyc?.status === "verified" ? (
+          <p className="text-sm text-primary">Your identity is verified. High withdrawals are allowed within your limits.</p>
+        ) : null}
+        {kycInfo?.kyc?.status === "pending" ? (
+          <p className="text-sm text-muted">
+            Submitted{kycInfo.kyc.submittedAt ? ` ${new Date(kycInfo.kyc.submittedAt).toLocaleString()}` : ""}. Name on ID:{" "}
+            {kycInfo.kyc.idName}. Waiting for admin review.
+          </p>
+        ) : null}
+        {kycInfo?.kyc?.status === "rejected" ? (
+          <p className="text-sm text-danger">
+            Previous submission was not accepted
+            {kycInfo.kyc.reviewNote ? `: ${kycInfo.kyc.reviewNote}` : "."} Please correct and resubmit.
+          </p>
+        ) : null}
+        {kycInfo?.kyc?.status !== "verified" && kycInfo?.kyc?.status !== "pending" ? (
+          <form
+            className="mt-3 space-y-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setKycBusy(true);
+              setError(null);
+              void submitKycDetails({
+                data: {
+                  idType: kycForm.idType as "national_id" | "passport" | "drivers_license",
+                  idNumber: kycForm.idNumber,
+                  idName: kycForm.idName,
+                },
+              })
+                .then(() => {
+                  setMessage("Identity details submitted for review.");
+                  return getMyKyc();
+                })
+                .then(setKycInfo)
+                .catch((err) => setError(errMessage(err)))
+                .finally(() => setKycBusy(false));
+            }}
+          >
+            <div className="space-y-1">
+              <Label>ID type</Label>
+              <select
+                className="flex h-11 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm"
+                value={kycForm.idType}
+                onChange={(e) => setKycForm((f) => ({ ...f, idType: e.target.value }))}
+              >
+                {(kycInfo?.idTypes ?? [
+                  { value: "national_id", label: "National ID" },
+                  { value: "passport", label: "Passport" },
+                  { value: "drivers_license", label: "Driver’s licence" },
+                ]).map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label>ID number</Label>
+              <Input
+                value={kycForm.idNumber}
+                onChange={(e) => setKycForm((f) => ({ ...f, idNumber: e.target.value }))}
+                required
+                minLength={4}
+                placeholder="As printed on the document"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Full name on ID</Label>
+              <Input
+                value={kycForm.idName}
+                onChange={(e) => setKycForm((f) => ({ ...f, idName: e.target.value }))}
+                required
+                minLength={2}
+                placeholder="Exactly as on the ID"
+              />
+            </div>
+            <Button type="submit" disabled={kycBusy}>
+              {kycBusy ? "Submitting…" : "Submit for review"}
+            </Button>
+          </form>
+        ) : null}
+      </ProfileSection>
 
       <ProfileSection
         id="security-q"
