@@ -166,7 +166,14 @@ export async function requireAdminTotpElevation(
 ): Promise<void> {
   const status = await getAdminTotpStatus(sql, userId);
   if (!status.isAdmin) throw new Error("Forbidden");
-  if (!status.enabled) return; // not enrolled yet
+  let needs = status.enabled;
+  try {
+    const { hasWebAuthn } = await import("./webauthn.server");
+    if (await hasWebAuthn(sql, userId)) needs = true;
+  } catch {
+    /* table may not exist yet */
+  }
+  if (!needs) return;
   if (await isTotpElevated(sql, userId, sessionToken)) return;
-  throw new Error("Admin 2FA required. Open Admin and enter your authenticator code.");
+  throw new Error("Admin 2FA required. Use your authenticator code or security key.");
 }

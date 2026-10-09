@@ -48,6 +48,11 @@ import {
   adminBeginTotpSetup,
   adminConfirmTotpSetup,
   adminDisableTotp,
+  adminListPasskeys,
+  adminWebAuthnRegisterOptions,
+  adminWebAuthnRegisterVerify,
+  adminDeletePasskey,
+
 
   adminTreasuryWithdraw,
   adminExportSurveyCsv,
@@ -214,6 +219,8 @@ function Console() {
   const [totpCode, setTotpCode] = useState("");
   const [totpMsg, setTotpMsg] = useState<string | null>(null);
   const [totpBusy, setTotpBusy] = useState(false);
+  const [passkeys, setPasskeys] = useState<Array<{ id: string; nickname: string; createdAt: string }>>([]);
+
 
 
 
@@ -232,6 +239,9 @@ function Console() {
     void adminTotpStatus()
       .then(setTotpStatus)
       .catch(() => setTotpStatus(null));
+    void adminListPasskeys()
+      .then(setPasskeys)
+      .catch(() => setPasskeys([]));
   }, []);
 
   useEffect(() => {
@@ -556,6 +566,63 @@ function Console() {
           />
         ) : null}
         {totpMsg ? <p className="text-sm text-muted">{totpMsg}</p> : null}
+        <div className="border-t border-border pt-3">
+          <p className="text-sm font-medium text-fg">Security keys / passkeys</p>
+          <p className="mt-1 text-xs text-muted">
+            Hardware keys (YubiKey, etc.) or platform passkeys. Works as an alternative to the authenticator app.
+          </p>
+          {passkeys.length ? (
+            <ul className="mt-2 space-y-1 text-sm">
+              {passkeys.map((k) => (
+                <li key={k.id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+                  <span>{k.nickname}</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      void adminDeletePasskey({ data: { id: k.id } })
+                        .then(() => adminListPasskeys().then(setPasskeys))
+                        .catch((err) => setTotpMsg(errMessage(err)));
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-xs text-muted">No keys registered yet.</p>
+          )}
+          <Button
+            type="button"
+            className="mt-2"
+            variant="secondary"
+            disabled={totpBusy}
+            onClick={() => {
+              setTotpBusy(true);
+              setTotpMsg(null);
+              void (async () => {
+                try {
+                  const opts = await adminWebAuthnRegisterOptions();
+                  const { startRegistration } = await import("@simplewebauthn/browser");
+                  const att = await startRegistration({ optionsJSON: opts });
+                  await adminWebAuthnRegisterVerify({
+                    data: { response: att, nickname: "Security key" },
+                  });
+                  setPasskeys(await adminListPasskeys());
+                  setTotpMsg("Security key registered. You can use it at the next admin login.");
+                } catch (err) {
+                  setTotpMsg(errMessage(err));
+                } finally {
+                  setTotpBusy(false);
+                }
+              })();
+            }}
+          >
+            {totpBusy ? "Waiting for key…" : "Register security key / passkey"}
+          </Button>
+        </div>
       </Card>
 
       <Card className="space-y-3 p-4">

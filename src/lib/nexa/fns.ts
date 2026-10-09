@@ -448,12 +448,15 @@ export const getMe = createServerFn({ method: "GET" })
     `;
     let needsAdminTotp = false;
     let adminTotpEnabled = false;
+    let adminHasPasskey = false;
     if (fresh.role === "admin") {
       try {
-        const { getAdminTotpStatus, isTotpElevated } = await import("./admin-totp.server");
-        const st = await getAdminTotpStatus(sqlUser, context.userId);
-        adminTotpEnabled = st.enabled;
-        if (st.enabled) {
+        const { isTotpElevated } = await import("./admin-totp.server");
+        const { adminNeedsSecondFactor } = await import("./webauthn.server");
+        const sf = await adminNeedsSecondFactor(sqlUser, context.userId);
+        adminTotpEnabled = sf.totpEnabled;
+        adminHasPasskey = sf.hasPasskey;
+        if (sf.needs) {
           const sessionToken = session?.sessionToken ?? null;
           needsAdminTotp = !(await isTotpElevated(sqlUser, context.userId, sessionToken));
         }
@@ -470,6 +473,7 @@ export const getMe = createServerFn({ method: "GET" })
       demoPayments: demoPaymentsEnabled(),
       needsAdminTotp,
       adminTotpEnabled,
+      adminHasPasskey,
     };
   });
 
@@ -5485,6 +5489,97 @@ export const adminDisableTotp = createServerFn({ method: "POST" })
       actorUserId: context.userId,
       action: "admin_totp_disabled",
       detail: "2FA turned off",
+    });
+    return { ok: true as const };
+  });
+
+
+// —— Admin WebAuthn / passkeys ——
+
+export const adminListPasskeys = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { listWebAuthnCredentials } = await import("./webauthn.server");
+    return listWebAuthnCredentials(await getSql(), context.userId);
+  });
+
+export const adminWebAuthnRegisterOptions = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { getRegistrationOptions } = await import("./webauthn.server");
+    const profile = await loadProfile(context.userId);
+    const name = profile?.email || profile?.username || "admin";
+    return getRegistrationOptions(await getSql(), context.userId, name);
+  });
+
+export const adminWebAuthnRegisterVerify = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ response: z.any(), nickname: z.string().max(80).optional() }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { verifyRegistration } = await import("./webauthn.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const res = await verifyRegistration(sql, context.userId, data.response, data.nickname);
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "admin_webauthn_register",
+      detail: `id=${res.id}`,
+    });
+    return res;
+  });
+
+export const adminWebAuthnAuthOptions = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { getAuthenticationOptions } = await import("./webauthn.server");
+    return getAuthenticationOptions(await getSql(), context.userId);
+  });
+
+export const adminWebAuthnAuthVerify = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ response: z.any() }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { verifyAuthentication } = await import("./webauthn.server");
+    const { markTotpVerified } = await import("./admin-totp.server");
+    const { getSessionUser } = await import("@/lib/auth/verify.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    await verifyAuthentication(sql, context.userId, data.response);
+    const session = await getSessionUser();
+    if (!session?.sessionToken) throw new Error("No session — sign in again.");
+    await markTotpVerified(sql, context.userId, session.sessionToken);
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "admin_webauthn_ok",
+      detail: "session elevated via passkey",
+    });
+    return { ok: true as const };
+  });
+
+export const adminDeletePasskey = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ id: z.string().min(4) }))
+  .handler(async ({ context, data }) => {
+    await requireAdminSensitive(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { deleteWebAuthnCredential } = await import("./webauthn.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    await deleteWebAuthnCredential(sql, context.userId, data.id);
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "admin_webauthn_delete",
+      detail: `id=${data.id}`,
     });
     return { ok: true as const };
   });

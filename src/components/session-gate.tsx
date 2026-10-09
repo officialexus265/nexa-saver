@@ -7,7 +7,15 @@ import { PasswordField } from "@/components/password-field";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { signOut as clientSignOut } from "@/lib/auth/client";
 import { errMessage } from "@/lib/nexa/errors";
-import { adminVerifyTotp, changePasswordFn, getMe, heartbeat, recordPageVisit } from "@/lib/nexa/fns";
+import {
+  adminVerifyTotp,
+  adminWebAuthnAuthOptions,
+  adminWebAuthnAuthVerify,
+  changePasswordFn,
+  getMe,
+  heartbeat,
+  recordPageVisit,
+} from "@/lib/nexa/fns";
 import { I18nProvider } from "@/lib/i18n/client";
 import type { MeResponse, PublicProfile } from "@/lib/nexa/types";
 
@@ -216,8 +224,35 @@ export function SessionGate({
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Admin 2FA</p>
             <h2 className="font-display text-2xl font-semibold">Authenticator code</h2>
             <p className="text-sm text-muted">
-              Enter the 6-digit code from your authenticator app, or a one-time backup code.
+              Use a security key / passkey, or enter the 6-digit authenticator code (or a backup code).
             </p>
+            <Button
+              type="button"
+              className="w-full"
+              disabled={totpBusy}
+              onClick={() => {
+                setTotpBusy(true);
+                setTotpError(null);
+                void (async () => {
+                  try {
+                    const opts = await adminWebAuthnAuthOptions();
+                    const { startAuthentication } = await import("@simplewebauthn/browser");
+                    const assertion = await startAuthentication({ optionsJSON: opts });
+                    await adminWebAuthnAuthVerify({ data: { response: assertion } });
+                    await refresh();
+                  } catch (err) {
+                    setTotpError(errMessage(err));
+                  } finally {
+                    setTotpBusy(false);
+                  }
+                })();
+              }}
+            >
+              {totpBusy ? "Waiting for key…" : "Use security key / passkey"}
+            </Button>
+            <div className="relative py-1 text-center text-xs text-muted">
+              <span className="bg-surface px-2">or authenticator code</span>
+            </div>
             <input
               className="flex h-12 w-full rounded-xl border border-border bg-surface-2 px-3 text-center text-lg tracking-[0.3em] tabular-nums"
               inputMode="numeric"
@@ -228,7 +263,7 @@ export function SessionGate({
             />
             {totpError ? <p className="text-sm text-danger">{totpError}</p> : null}
             <Button type="submit" className="w-full" disabled={totpBusy || totpCode.length < 6}>
-              {totpBusy ? "Checking…" : "Verify and continue"}
+              {totpBusy ? "Checking…" : "Verify code"}
             </Button>
             <Button
               type="button"

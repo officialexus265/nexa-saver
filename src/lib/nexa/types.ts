@@ -31,6 +31,7 @@ export type MeResponse =
       /** Admin must complete TOTP before using admin UI / sensitive actions */
       needsAdminTotp?: boolean;
       adminTotpEnabled?: boolean;
+      adminHasPasskey?: boolean;
     };
 
 export type BalanceResponse =
