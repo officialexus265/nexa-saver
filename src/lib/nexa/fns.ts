@@ -188,6 +188,27 @@ async function loadProfile(userId: string): Promise<ProfileRow | null> {
   return rows[0] ?? null;
 }
 
+/** Max concurrent browser sessions per account (oldest dropped). */
+const MAX_SESSIONS_PER_USER = 12;
+
+async function pruneUserSessions(sql: import("@/lib/db").Sql, userId: string) {
+  try {
+    await sql`delete from "session" where "userId" = ${userId} and "expiresAt" < now()`;
+    // Keep the newest MAX_SESSIONS_PER_USER rows; drop the rest.
+    await sql`
+      delete from "session"
+      where id in (
+        select id from "session"
+        where "userId" = ${userId}
+        order by "updatedAt" desc nulls last
+        offset ${MAX_SESSIONS_PER_USER}
+      )
+    `;
+  } catch {
+    /* non-fatal */
+  }
+}
+
 async function touchSession(userId: string) {
   const { getSql } = await import("@/lib/db");
   const sql = await getSql();
@@ -207,6 +228,7 @@ async function touchSession(userId: string) {
     set "expiresAt" = now() + interval '32 days', "updatedAt" = now()
     where "userId" = ${userId} and "expiresAt" > now()
   `;
+  await pruneUserSessions(sql, userId);
 }
 
 async function requirePinWindow(userId: string) {
@@ -722,6 +744,13 @@ export const startDeposit = createServerFn({ method: "POST" })
     await assertDepositsAllowedAsync(sql);
     const { assertMoneyInfraReady } = await import("./production-guards.server");
     assertMoneyInfraReady("Deposits");
+    const { assertRateLimit: assertRlDeposit } = await import("./rate-limit.server");
+    await assertRlDeposit(sql, {
+      bucket: `deposit-start:${context.userId}`,
+      limit: 15,
+      windowSeconds: 60 * 60,
+      message: "Too many deposit attempts this hour. Try again later.",
+    });
 
     const claim = await claimIdempotencyKey(sql, {
       key: data.idempotencyKey,
@@ -866,6 +895,13 @@ export const startWithdraw = createServerFn({ method: "POST" })
     await assertWithdrawalsAllowedAsync(sql);
     const { assertMoneyInfraReady } = await import("./production-guards.server");
     assertMoneyInfraReady("Withdrawals");
+    const { assertRateLimit: assertRlWithdraw } = await import("./rate-limit.server");
+    await assertRlWithdraw(sql, {
+      bucket: `withdraw-start:${context.userId}`,
+      limit: 20,
+      windowSeconds: 60 * 60,
+      message: "Too many withdrawal attempts this hour. Try again later.",
+    });
     const { getPayoutMethods, assertMethodAllowed } = await import("./payout-methods.server");
     const methods = await getPayoutMethods(sql);
     assertMethodAllowed(methods, data.method ?? "momo");
@@ -2277,7 +2313,14 @@ export const adminForceCreditDeposit = createServerFn({ method: "POST" })
     await requireAdminSensitive(context.userId);
     const { getSql } = await import("@/lib/db");
     const { writeAudit } = await import("./audit.server");
+    const { assertRateLimit } = await import("./rate-limit.server");
     const sql = await getSql();
+    await assertRateLimit(sql, {
+      bucket: `admin-force-credit:${context.userId}`,
+      limit: 40,
+      windowSeconds: 60 * 60,
+      message: "Too many force-credit attempts this hour.",
+    });
     const rows = await sql<{ id: number; kind: string; status: string; user_id: string; gross_tambala: number }>`
       select id, kind, status, user_id, gross_tambala from transactions
       where reference = ${data.reference.trim()} limit 1
@@ -4022,6 +4065,16 @@ export const startTransfer = createServerFn({ method: "POST" })
     const { assertWithdrawalsAllowedAsync } = await import("./kill-switch.server");
     const { getSql: getSqlKs2 } = await import("@/lib/db");
     await assertWithdrawalsAllowedAsync(await getSqlKs2()); // send is tied to withdrawals
+    {
+      const { getSql: g } = await import("@/lib/db");
+      const { assertRateLimit: assertRlTx } = await import("./rate-limit.server");
+      await assertRlTx(await g(), {
+        bucket: `transfer-start:${context.userId}`,
+        limit: 30,
+        windowSeconds: 60 * 60,
+        message: "Too many send attempts this hour. Try again later.",
+      });
+    }
     const { assertMoneyInfraReady } = await import("./production-guards.server");
     assertMoneyInfraReady("Sending");
 

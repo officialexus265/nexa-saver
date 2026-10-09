@@ -21,6 +21,8 @@ import {
   changeLockPreference,
   listActiveSessions,
   revokeSessionById,
+  userListPasskeys,
+  userDeletePasskey,
   saveBankPayoutDetails,
   adminUpdateContact,
   changeSecurityQuestionFn,
@@ -65,11 +67,20 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
   const [lockMinutes, setLockMinutes] = useState(String(profile.lockIdleMinutes ?? 5));
   const [sessions, setSessions] = useState<PublicSession[] | null>(null);
   const [sessionBusy, setSessionBusy] = useState<string | null>(null);
+  const [passkeys, setPasskeys] = useState<Array<{ id: string; nickname: string; createdAt: string }>>([]);
+  const [passkeyPin, setPasskeyPin] = useState("");
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
 
   useEffect(() => {
     void listActiveSessions()
       .then(setSessions)
       .catch(() => setSessions([]));
+  }, []);
+
+  useEffect(() => {
+    void userListPasskeys()
+      .then((list) => setPasskeys(list.map((k) => ({ id: k.id, nickname: k.nickname || "Passkey", createdAt: k.createdAt }))))
+      .catch(() => setPasskeys([]));
   }, []);
 
   async function savePref(next: LoginPref) {
@@ -152,6 +163,71 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
         onToggle={setOpenSection}
       >
         <SecurityQuestionForm onDone={(m) => setMessage(m)} onError={(e) => setError(e)} />
+      </ProfileSection>
+
+      <ProfileSection
+        id="passkeys"
+        title="Security key / passkey"
+        summary={passkeys.length ? `${passkeys.length} registered` : "Not enabled"}
+        openId={openSection}
+        onToggle={setOpenSection}
+      >
+        <p className="text-sm text-muted">
+          When a key is registered, sign-in asks for it after your password. To turn this off, remove every key below
+          (confirm with your withdraw PIN). You can also use email recovery on the passkey screen if you lost the device.
+        </p>
+        {passkeys.length === 0 ? (
+          <p className="text-sm text-muted">No security keys on this account. Add one from the home dashboard banner if you want extra protection.</p>
+        ) : (
+          <ul className="space-y-2">
+            {passkeys.map((k) => (
+              <li key={k.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border px-3 py-2 text-sm">
+                <div>
+                  <p className="font-medium">{k.nickname}</p>
+                  <p className="text-xs text-muted">Added {new Date(k.createdAt).toLocaleString()}</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={passkeyBusy || passkeyPin.length < 4}
+                  onClick={() => {
+                    setPasskeyBusy(true);
+                    setError(null);
+                    void userDeletePasskey({ data: { id: k.id, pin: passkeyPin } })
+                      .then((r) => {
+                        setPasskeys((prev) => prev.filter((x) => x.id !== k.id));
+                        setMessage(
+                          r.stillHasPasskey
+                            ? "Key removed. Other keys still protect this account."
+                            : "All security keys removed. Passkey login is off.",
+                        );
+                        setPasskeyPin("");
+                      })
+                      .catch((err) => setError(errMessage(err)))
+                      .finally(() => setPasskeyBusy(false));
+                  }}
+                >
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {passkeys.length > 0 ? (
+          <div className="mt-3 space-y-1">
+            <Label htmlFor="pk-pin">Withdraw PIN to remove a key</Label>
+            <Input
+              id="pk-pin"
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              value={passkeyPin}
+              onChange={(e) => setPasskeyPin(e.target.value.replace(/\D/g, "").slice(0, 12))}
+              placeholder="PIN"
+            />
+          </div>
+        ) : null}
       </ProfileSection>
 
       <ProfileSection

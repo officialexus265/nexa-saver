@@ -2179,6 +2179,15 @@ function Console() {
               {!opsQueue?.frozenTransfers.length ? <li className="text-muted">None</li> : null}
             </ul>
           </Card>
+          <Card className="space-y-2 p-4 text-sm text-muted">
+            <h2 className="font-display text-lg font-semibold text-fg">Limits &amp; sessions</h2>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Deposits ~15/hour per user · withdrawals ~20/hour · sends ~30/hour</li>
+              <li>Wrong PIN attempts escalate lockouts; force-credit is capped for admin</li>
+              <li>Sessions: 30-day inactivity ends access; max 12 devices — oldest dropped</li>
+              <li>Users can sign out other devices from Profile → Sessions</li>
+            </ul>
+          </Card>
           {opsMsg ? <p className="text-sm text-muted">{opsMsg}</p> : null}
         </div>
       ) : null}
