@@ -216,7 +216,7 @@ function SignupPage() {
   const skipIntro = Boolean(user) || introDone;
 
   return (
-    <AuthFrame aside="Open a vault. Deposits keep 94%. Withdrawals return to the number you register today.">
+    <AuthFrame showTutorials aside="Open a vault. Deposits keep 94%. Withdrawals return to the number you register today.">
       {!skipIntro ? (
         <SignupIntroGate
           onProceed={() => setIntroDone(true)}

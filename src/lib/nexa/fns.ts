@@ -5772,3 +5772,49 @@ export const userConfirmPasskeyRecovery = createServerFn({ method: "POST" })
     });
     return { ok: true as const };
   });
+
+
+// —— Public / admin tutorials (multi-video) ——
+
+export const getPublicTutorials = createServerFn({ method: "GET" }).handler(async () => {
+  const { getSql } = await import("@/lib/db");
+  const { getTutorials } = await import("./tutorials.server");
+  return getTutorials(await getSql());
+});
+
+export const adminGetTutorials = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { getTutorials } = await import("./tutorials.server");
+    return getTutorials(await getSql());
+  });
+
+export const adminSetTutorials = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      items: z.array(
+        z.object({
+          title: z.string().min(1).max(120),
+          description: z.string().max(300).optional(),
+          urlOrId: z.string().min(1).max(300),
+        }),
+      ).max(12),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { setTutorials } = await import("./tutorials.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const saved = await setTutorials(sql, data.items);
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "tutorials_set",
+      detail: `count=${saved.length}`,
+    });
+    return { ok: true as const, items: saved };
+  });

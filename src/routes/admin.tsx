@@ -41,6 +41,9 @@ import {
   adminSetReferralSettings,
   adminGetSignupIntroVideo,
   adminSetSignupIntroVideo,
+  adminGetTutorials,
+  adminSetTutorials,
+
   adminUploadOgImage,
   adminGetSiteFooter,
   adminSetSiteFooter,
@@ -204,6 +207,11 @@ function Console() {
   const [refMsg, setRefMsg] = useState<string | null>(null);
   const [signupVideoUrl, setSignupVideoUrl] = useState("");
   const [signupVideoMsg, setSignupVideoMsg] = useState<string | null>(null);
+  const [tutorialsDraft, setTutorialsDraft] = useState<
+    Array<{ title: string; description: string; urlOrId: string }>
+  >([{ title: "", description: "", urlOrId: "" }]);
+  const [tutorialsMsg, setTutorialsMsg] = useState<string | null>(null);
+
   const [ogBust, setOgBust] = useState(0);
   const [ogUploading, setOgUploading] = useState(false);
   const [footerCompanyName, setFooterCompanyName] = useState("NEXUS265");
@@ -236,6 +244,22 @@ function Console() {
 
 
   useEffect(() => {
+    void adminGetTutorials()
+      .then((list) => {
+        if (list.length) {
+          setTutorialsDraft(
+            list.map((t) => ({
+              title: t.title,
+              description: t.description || "",
+              urlOrId: t.youtubeId,
+            })),
+          );
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     void adminTotpStatus()
       .then(setTotpStatus)
       .catch(() => setTotpStatus(null));
@@ -254,7 +278,7 @@ function Console() {
   }, []);
 
   useEffect(() => {
-    Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone(), adminSecuritySurveyStatus(), adminAnalytics(), adminGetPayoutMethods(), adminGetFeePolicy(), adminGetSendFeeTiers(), adminListTransferReversals(), adminGetLoanPolicy(), adminListLoans({ data: {} }), adminGetReferralSettings(), adminGetSignupIntroVideo()])
+    Promise.all([adminOverview(), adminUsers(), adminTransactions(), getPlatformSupportPhone(), adminSecuritySurveyStatus(), adminAnalytics(), adminGetPayoutMethods(), adminGetFeePolicy(), adminGetSendFeeTiers(), adminListTransferReversals(), adminGetLoanPolicy(), adminListLoans({ data: {} }), adminGetReferralSettings(), adminGetSignupIntroVideo(), adminGetTutorials()])
       .then(([o, u, t, s, sv, an, pm, fp, sft, rev, lp, loansList, refS, introVid]) => {
         setOverview(o);
         setUsers(u);
@@ -825,6 +849,79 @@ function Console() {
           Save explainer video
         </Button>
         {signupVideoMsg ? <p className="text-sm text-muted">{signupVideoMsg}</p> : null}
+      </Card>
+
+      <Card className="space-y-3 p-4">
+        <h2 className="font-display text-lg font-semibold">Tutorial videos</h2>
+        <p className="text-sm text-muted">
+          Shown on the sign-up page under <strong>Tutorials</strong> (next to the brand). Examples: how to sign up,
+          securing the account, fees &amp; charges, how the platform is protected. Leave empty to hide the button.
+        </p>
+        {tutorialsDraft.map((row, i) => (
+          <div key={i} className="space-y-2 rounded-xl border border-border p-3">
+            <p className="text-xs font-medium text-muted">Video {i + 1}</p>
+            <Input
+              placeholder="Title (e.g. How fees work)"
+              value={row.title}
+              onChange={(e) => {
+                const next = [...tutorialsDraft];
+                next[i] = { ...next[i]!, title: e.target.value };
+                setTutorialsDraft(next);
+              }}
+            />
+            <Input
+              placeholder="Short description (optional)"
+              value={row.description}
+              onChange={(e) => {
+                const next = [...tutorialsDraft];
+                next[i] = { ...next[i]!, description: e.target.value };
+                setTutorialsDraft(next);
+              }}
+            />
+            <Input
+              placeholder="YouTube URL or video id"
+              value={row.urlOrId}
+              onChange={(e) => {
+                const next = [...tutorialsDraft];
+                next[i] = { ...next[i]!, urlOrId: e.target.value };
+                setTutorialsDraft(next);
+              }}
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setTutorialsDraft(tutorialsDraft.filter((_, j) => j !== i))}
+            >
+              Remove
+            </Button>
+          </div>
+        ))}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={tutorialsDraft.length >= 12}
+            onClick={() =>
+              setTutorialsDraft([...tutorialsDraft, { title: "", description: "", urlOrId: "" }])
+            }
+          >
+            Add video
+          </Button>
+          <Button
+            type="button"
+            onClick={() => {
+              setTutorialsMsg(null);
+              const items = tutorialsDraft.filter((r) => r.title.trim() && r.urlOrId.trim());
+              void adminSetTutorials({ data: { items } })
+                .then((r) => setTutorialsMsg(`Saved ${r.items.length} tutorial(s).`))
+                .catch((err) => setTutorialsMsg(errMessage(err)));
+            }}
+          >
+            Save tutorials
+          </Button>
+        </div>
+        {tutorialsMsg ? <p className="text-sm text-muted">{tutorialsMsg}</p> : null}
       </Card>
 
       <Card className="space-y-3 p-4">
