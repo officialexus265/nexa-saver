@@ -936,6 +936,7 @@ function SendModal({
 
 
 function LoanPanel() {
+  const { t } = useT();
   const [elig, setElig] = useState<Awaited<ReturnType<typeof getLoanEligibility>> | null>(null);
   const [loans, setLoans] = useState<Awaited<ReturnType<typeof getMyLoans>>>([]);
   const [amount, setAmount] = useState("");
@@ -1091,6 +1092,7 @@ function LoanPanel() {
 
 
 function AffiliatePanel() {
+  const { t } = useT();
   const [st, setSt] = useState<Awaited<ReturnType<typeof getAffiliateStatus>> | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -1197,7 +1199,7 @@ function AffiliatePanel() {
             disabled={!accept || busy || !st.programEnabled}
             onClick={() => void join()}
           >
-            {busy ? "…" : "{t("dash.becomeAffiliate")}"}
+            {busy ? "…" : t("dash.becomeAffiliate")}
           </Button>
         </div>
       ) : (
