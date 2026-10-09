@@ -2,13 +2,15 @@ import { useEffect, useState } from "react";
 import { Modal } from "@/components/modal";
 import { Button } from "@/components/ui/button";
 import { getPublicTutorials, getSignupIntroVideo } from "@/lib/nexa/fns";
+import { useT } from "@/lib/i18n/client";
 
 type Item = { id: string; title: string; description: string; youtubeId: string };
 
 /**
- * Sign-up: “Not familiar with the system?” — only when admin enables the feature.
+ * Sign-up tutorials helper — only when admin enables the feature.
  */
 export function TutorialsButton({ className }: { className?: string }) {
+  const { t } = useT();
   const [featureOn, setFeatureOn] = useState(false);
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Item[]>([]);
@@ -38,28 +40,28 @@ export function TutorialsButton({ className }: { className?: string }) {
   return (
     <>
       <div className={className}>
-        <p className="max-w-[11rem] text-xs leading-snug text-muted">Not familiar with the system?</p>
+        <p className="max-w-[11rem] text-xs leading-snug text-muted">{t("signup.notFamiliar")}</p>
         <div className="mt-1.5 flex flex-col items-end gap-1.5">
           <Button type="button" variant="secondary" size="sm" onClick={() => setOpen(true)}>
-            Tutorials
+            {t("signup.tutorials")}
           </Button>
           {introId ? (
             <Button type="button" variant="secondary" size="sm" onClick={() => setIntroOpen(true)}>
-              Rewatch intro
+              {t("signup.rewatchIntro")}
             </Button>
           ) : null}
         </div>
       </div>
 
-      <Modal open={open && !active} onClose={() => setOpen(false)} title="Tutorials">
+      <Modal open={open && !active} onClose={() => setOpen(false)} title={t("signup.tutorialsTitle")}>
         {items.length === 0 ? (
           <p className="text-sm text-muted">
-            Tutorial videos are being prepared. You can continue signing up — check back here soon.
+            {t("signup.tutorialsEmpty")}
           </p>
         ) : (
           <>
             <p className="text-sm text-muted">
-              Short videos about NEXA-SAVER. Pick one to watch — you can close anytime and continue signing up.
+              {t("signup.tutorialsHint")}
             </p>
             <ul className="mt-4 space-y-2">
               {items.map((it, index) => (

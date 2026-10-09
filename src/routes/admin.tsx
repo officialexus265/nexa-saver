@@ -14,6 +14,11 @@ import {
   adminUsers,
   adminLookupReference,
   adminForceCreditDeposit,
+  adminResolveStuckDeposits,
+  adminResolvePendingDeposit,
+  adminSecurityChecklist,
+  adminSetLaunchSettings,
+  adminGetLaunchSettings,
   adminSetKycThreshold,
   adminReviewKyc,
   adminListKycQueue,
@@ -238,6 +243,14 @@ function Console() {
   const [opsBusy, setOpsBusy] = useState(false);
   const [kycQueue, setKycQueue] = useState<Awaited<ReturnType<typeof adminListKycQueue>> | null>(null);
   const [kycThreshold, setKycThreshold] = useState("100000");
+  const [launchSignup, setLaunchSignup] = useState(true);
+  const [launchBeta, setLaunchBeta] = useState(false);
+  const [launchCap, setLaunchCap] = useState("5000");
+  const [launchBanner, setLaunchBanner] = useState("");
+  const [launchNotes, setLaunchNotes] = useState("");
+  const [securityChecks, setSecurityChecks] = useState<Awaited<ReturnType<typeof adminSecurityChecklist>> | null>(null);
+
+
 
   const [pauseNote, setPauseNote] = useState("");
 
@@ -278,13 +291,25 @@ function Console() {
   useEffect(() => {
     if (adminTab !== "ops") return;
     setOpsMsg(null);
-    void Promise.all([adminGetOpsQueue(), adminGetReconHistory(), adminListKycQueue()])
-      .then(([q, h, kyc]) => {
+    void Promise.all([
+      adminGetOpsQueue(),
+      adminGetReconHistory(),
+      adminListKycQueue(),
+      adminGetLaunchSettings(),
+      adminSecurityChecklist(),
+    ])
+      .then(([q, h, kyc, launch, sec]) => {
         setOpsQueue(q);
         setReconHistory(h);
         if (q.pause.note) setPauseNote(q.pause.note);
         setKycQueue(kyc);
         setKycThreshold(String(kyc.thresholdKwacha));
+        setLaunchSignup(launch.signupEnabled);
+        setLaunchBeta(launch.betaMode);
+        setLaunchCap(String(launch.betaDepositCapKwacha || 5000));
+        setLaunchBanner(launch.publicBanner || "");
+        setLaunchNotes(launch.incidentNotes || "");
+        setSecurityChecks(sec);
       })
       .catch((err) => setOpsMsg(errMessage(err)));
   }, [adminTab]);
@@ -2021,6 +2046,130 @@ function Console() {
       {adminTab === "ops" ? (
         <div className="space-y-5">
           <Card className="space-y-3 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-display text-lg font-semibold">Security checklist</h2>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={opsBusy}
+                onClick={() => {
+                  setOpsBusy(true);
+                  void adminSecurityChecklist()
+                    .then(setSecurityChecks)
+                    .catch((err) => setOpsMsg(errMessage(err)))
+                    .finally(() => setOpsBusy(false));
+                }}
+              >
+                Re-scan
+              </Button>
+            </div>
+            <p className="text-sm text-muted">
+              Automated posture check (no secret values). Fix critical items before real money. Manual pen-test ideas
+              are listed at the bottom.
+            </p>
+            <ul className="space-y-2 text-sm">
+              {(securityChecks?.checks ?? []).map((c) => (
+                <li
+                  key={c.id}
+                  className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-border px-3 py-2"
+                >
+                  <div>
+                    <p className="font-medium">
+                      <span className={c.ok ? "text-primary" : "text-danger"}>{c.ok ? "●" : "○"}</span> {c.label}
+                      <span className="ml-2 text-xs text-muted">{c.severity}</span>
+                    </p>
+                    {!c.ok || c.severity === "info" ? (
+                      <p className="mt-0.5 text-xs text-muted">{c.hint}</p>
+                    ) : null}
+                  </div>
+                  <span className={c.ok ? "text-xs text-primary" : "text-xs text-danger"}>{c.ok ? "OK" : "Fix"}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="rounded-xl border border-border bg-surface-2/50 p-3 text-xs text-muted">
+              <p className="font-medium text-fg">Manual pen-test (you / a friend)</p>
+              <ul className="mt-1 list-disc space-y-1 pl-4">
+                <li>Try opening another user&apos;s deposit ref on /deposit-return while logged in as yourself</li>
+                <li>Try changing profile IDs / user ids in browser network calls</li>
+                <li>Replay a PayChangu webhook without a valid signature (should 401)</li>
+                <li>Brute-force PIN until lockout; confirm escalation timing</li>
+                <li>Admin money actions without 2FA elevation (should fail)</li>
+                <li>Cross-site form post from another origin (should 403)</li>
+              </ul>
+            </div>
+          </Card>
+
+          <Card className="space-y-3 p-4">
+            <h2 className="font-display text-lg font-semibold">Launch &amp; beta</h2>
+            <p className="text-sm text-muted">
+              Pre-public controls: close sign-ups, mark private beta, cap deposits, and keep your incident playbook here.
+            </p>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={launchSignup}
+                onChange={(e) => setLaunchSignup(e.target.checked)}
+              />
+              Allow new sign-ups
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={launchBeta} onChange={(e) => setLaunchBeta(e.target.checked)} />
+              Private beta mode (banner + optional deposit cap)
+            </label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label>Beta max deposit (MWK, 0 = no cap)</Label>
+                <Input value={launchCap} onChange={(e) => setLaunchCap(e.target.value)} />
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <Label>Public banner (login / sign-up)</Label>
+                <Input value={launchBanner} onChange={(e) => setLaunchBanner(e.target.value)} placeholder="Private beta — trusted testers only…" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Incident playbook (admin only)</Label>
+              <textarea
+                className="min-h-[10rem] w-full rounded-xl border border-border bg-surface-2 p-3 text-xs leading-relaxed"
+                value={launchNotes}
+                onChange={(e) => setLaunchNotes(e.target.value)}
+              />
+            </div>
+            <Button
+              type="button"
+              disabled={opsBusy}
+              onClick={() => {
+                setOpsBusy(true);
+                void adminSetLaunchSettings({
+                  data: {
+                    signupEnabled: launchSignup,
+                    betaMode: launchBeta,
+                    betaDepositCapKwacha: Number(launchCap) || 0,
+                    publicBanner: launchBanner,
+                    incidentNotes: launchNotes,
+                  },
+                })
+                  .then(() => setOpsMsg("Launch settings saved."))
+                  .catch((err) => setOpsMsg(errMessage(err)))
+                  .finally(() => setOpsBusy(false));
+              }}
+            >
+              Save launch settings
+            </Button>
+            <div className="rounded-xl border border-border bg-surface-2/50 p-3 text-xs text-muted">
+              <p className="font-medium text-fg">Launch checklist</p>
+              <ul className="mt-1 list-disc space-y-1 pl-4">
+                <li>Production readiness (Overview) all green; demo payments off</li>
+                <li>PayChangu webhook points to this site; test deposit + withdraw in sandbox first</li>
+                <li>Run reconciliation daily (Ops) for two weeks of beta</li>
+                <li>Start with ~10–20 trusted users and a low deposit cap</li>
+                <li>Kill switch + incident notes ready before real money</li>
+                <li>Health check: <code className="text-fg">/api/health</code></li>
+              </ul>
+            </div>
+          </Card>
+
+          <Card className="space-y-3 p-4">
             <h2 className="font-display text-lg font-semibold">Money pause (kill switch)</h2>
             <p className="text-sm text-muted">
               Pause deposits and/or withdrawals in seconds. Env flags NEXA_PAUSE_* still override if set on Vercel.
@@ -2149,7 +2298,34 @@ function Console() {
               Pending deposits and withdrawals. Items older than 15 minutes are marked stuck — use Support desk
               below with the reference after confirming in PayChangu.
             </p>
-            <h3 className="text-sm font-medium">Pending deposits ({opsQueue?.pendingDeposits.length ?? 0})</h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-medium">Pending deposits ({opsQueue?.pendingDeposits.length ?? 0})</h3>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={opsBusy || !(opsQueue?.pendingDeposits.some((d) => d.stuck))}
+                onClick={() => {
+                  setOpsBusy(true);
+                  setOpsMsg(null);
+                  void adminResolveStuckDeposits()
+                    .then(async (res) => {
+                      const c = res.results.filter((r) => r.action === "credited" || r.action === "already_credited").length;
+                      const f = res.results.filter((r) => r.action === "marked_failed").length;
+                      const p = res.results.filter((r) => r.action === "still_pending").length;
+                      setOpsMsg(
+                        `Rechecked ${res.results.length}: ${c} credited, ${f} marked failed (unpaid), ${p} still pending.`,
+                      );
+                      const q = await adminGetOpsQueue();
+                      setOpsQueue(q);
+                    })
+                    .catch((err) => setOpsMsg(errMessage(err)))
+                    .finally(() => setOpsBusy(false));
+                }}
+              >
+                Recheck all stuck with PayChangu
+              </Button>
+            </div>
             <ul className="space-y-2 text-sm">
               {(opsQueue?.pendingDeposits ?? []).map((d) => (
                 <li key={d.reference} className="rounded-xl border border-border px-3 py-2">
@@ -2159,6 +2335,26 @@ function Console() {
                   </p>
                   <p className="text-xs text-muted break-all">{d.reference}</p>
                   <p className="text-xs text-muted">{new Date(d.createdAt).toLocaleString()}</p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="mt-2"
+                    disabled={opsBusy}
+                    onClick={() => {
+                      setOpsBusy(true);
+                      setOpsMsg(null);
+                      void adminResolvePendingDeposit({ data: { reference: d.reference } })
+                        .then(async (r) => {
+                          setOpsMsg(`${d.reference}: ${r.message}`);
+                          const q = await adminGetOpsQueue();
+                          setOpsQueue(q);
+                        })
+                        .catch((err) => setOpsMsg(errMessage(err)))
+                        .finally(() => setOpsBusy(false));
+                    }}
+                  >
+                    Recheck PayChangu
+                  </Button>
                 </li>
               ))}
               {!opsQueue?.pendingDeposits.length ? <li className="text-muted">None</li> : null}
@@ -2472,6 +2668,28 @@ function SupportDesk() {
               <span className="text-muted">PayChangu</span> {result.paychangu.status}
               {result.paychangu.ok ? " (success)" : " (not success)"} · amount {result.paychangu.amount}
             </p>
+          ) : null}
+          {result.tx.kind === "deposit" && result.tx.status === "pending" ? (
+            <Button
+              type="button"
+              className="w-full"
+              loading={busy}
+              onClick={() => {
+                setBusy(true);
+                setErr(null);
+                setMsg(null);
+                void adminResolvePendingDeposit({ data: { reference: result.tx.reference } })
+                  .then((r) => {
+                    setMsg(r.message);
+                    return adminLookupReference({ data: { reference: result.tx.reference } });
+                  })
+                  .then((look) => setResult(look))
+                  .catch((e) => setErr(errMessage(e)))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              Recheck PayChangu (credit or clear)
+            </Button>
           ) : null}
           {result.tx.kind === "deposit" && result.tx.status === "pending" ? (
             <div className="space-y-2 border-t border-border pt-3">

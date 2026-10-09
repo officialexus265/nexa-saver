@@ -132,11 +132,8 @@ function Vault({
 
       {!hasPasskey ? (
         <div className="rounded-xl border border-primary/35 bg-primary/10 px-4 py-3 text-sm">
-          <p className="font-medium text-fg">Secure your account with a hardware key / passkey</p>
-          <p className="mt-1 text-muted">
-            Add a security key or device passkey so only you can open this vault — even if someone knows your password.
-            No authenticator app needed.
-          </p>
+          <p className="font-medium text-fg">{t("dash.passkeyTitle")}</p>
+          <p className="mt-1 text-muted">{t("dash.passkeyBody")}</p>
           <Button
             type="button"
             className="mt-3"
@@ -153,7 +150,7 @@ function Vault({
                     data: { response: att, nickname: "My passkey" },
                   });
                   setHasPasskey(true);
-                  setPasskeyMsg("Passkey saved. Next sign-in will ask for this key.");
+                  setPasskeyMsg(t("dash.passkeySaved"));
                 } catch (err) {
                   setPasskeyMsg(friendlyWebAuthnError(err));
                 } finally {
@@ -162,7 +159,7 @@ function Vault({
               })();
             }}
           >
-            {passkeyBusy ? "Waiting for key…" : "Set up security key / passkey"}
+            {passkeyBusy ? t("dash.passkeyWaiting") : t("dash.passkeyCta")}
           </Button>
           {passkeyMsg ? <p className="mt-2 text-xs text-muted">{passkeyMsg}</p> : null}
         </div>

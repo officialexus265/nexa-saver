@@ -1,6 +1,7 @@
 /**
  * Phrase-level English catalog (full lines users see — not word-by-word).
  * Translation studio edits these keys; published maps overlay EN at runtime.
+ * Phase F: includes passkeys, KYC, tutorials, locks, send, loans, affiliate.
  */
 export const EN_CATALOG = {
   // —— Nav / chrome ——
@@ -31,6 +32,8 @@ export const EN_CATALOG = {
   "common.success": "Done",
   "common.copy": "Copy",
   "common.copied": "Copied",
+  "common.remove": "Remove",
+  "common.submit": "Submit",
 
   // —— Auth ——
   "auth.signIn": "Sign in",
@@ -41,11 +44,12 @@ export const EN_CATALOG = {
   "auth.noAccount": "New here?",
   "auth.hasAccount": "Already have a vault?",
   "auth.loginAside": "A Malawi kwacha vault with a PIN-locked balance and a quiet session.",
-  "auth.signupAside": "Open a vault. Deposits keep most of what you send; withdrawals return to the number you register.",
+  "auth.signupAside":
+    "Open a vault. Deposits keep most of what you send; withdrawals return to the number you register.",
   "auth.identifier": "Username, email, or phone",
   "auth.shareApp": "Share",
 
-  // —— Signup intro ——
+  // —— Signup intro / tutorials ——
   "signup.introTitle": "Before you open a vault",
   "signup.introBody":
     "Are you already familiar with how NEXA-SAVER works (deposits, fees, withdrawals, and locks)?",
@@ -57,6 +61,14 @@ export const EN_CATALOG = {
   "signup.skipVideo": "Skip video",
   "signup.proceed": "Proceed to sign up",
   "signup.ready": "Ready when you are.",
+  "signup.notFamiliar": "Not familiar with the system?",
+  "signup.tutorials": "Tutorials",
+  "signup.rewatchIntro": "Rewatch intro",
+  "signup.tutorialsTitle": "Tutorials",
+  "signup.tutorialsHint":
+    "Short videos about NEXA-SAVER. Pick one to watch — you can close anytime and continue signing up.",
+  "signup.tutorialsEmpty":
+    "Tutorial videos are being prepared. You can continue signing up — check back here soon.",
 
   // —— Dashboard ——
   "dash.welcome": "Welcome back",
@@ -71,138 +83,84 @@ export const EN_CATALOG = {
   "dash.noActivity": "No activity yet.",
   "dash.receivedBag": "Received bag",
   "dash.receivedHint":
-    "Money sent to you stays here until you withdraw it or move it to your main vault. Bank withdrawals take a 700 MWK flat from this bag (not a NEXA fee). MoMo can take the full amount.",
-  "dash.moveToMain": "Move all to main vault (free)",
-  "dash.movedTitle": "Moved to main vault",
-  "dash.movedBody":
-    "Received funds are now in your main balance. Bank withdraws from main still use the 700 MWK bank flat.",
+    "Money sent to you stays here until you withdraw it or move it to your main vault. Bank withdrawals may take a bank flat fee from this bag. MoMo can take the full amount.",
+  "dash.moveToMain": "Move to main vault",
   "dash.verifyPhoneTitle": "Verify your withdrawal number",
   "dash.verifyPhoneBody":
-    "To unlock withdrawals, deposit once from your registered number. That proves the line is active and yours.",
-  "dash.depositToVerify": "Deposit to verify",
-  "dash.holdWithdraw": "Withdrawals on hold",
-  "dash.maxDaily": "Daily max",
-  "dash.loanTitle": "Loan (against self-lock)",
-  "dash.loanHint":
-    "Only while a voluntary withdrawal time-lock is active. Admin locks do not qualify. Max 90% of locked balance. Interest is charged monthly on the amount due.",
-  "dash.loanBlocked": "Withdrawals are locked by the platform. Loans need a self time-lock only.",
-  "dash.affiliateTitle": "Affiliate / referral",
-  "dash.affiliateHint":
-    "Earn a share of a friend’s first deposit only. After that, no further commission from them. Withdraw earnings from the minimum shown (platform fee on withdrawal).",
-  "dash.affiliateTerms":
-    "I accept the affiliate terms: commission only on each referred user’s first deposit; withdrawal fee applies as shown.",
+    "Deposit once from this registered number so we can confirm it is yours before withdrawals.",
+  "dash.verifyPhoneCta": "Deposit to verify",
+  "dash.passkeyTitle": "Secure your account with a hardware key / passkey",
+  "dash.passkeyBody":
+    "Add a security key or device passkey so only you can open this vault — even if someone knows your password. No authenticator app needed.",
+  "dash.passkeyCta": "Set up security key / passkey",
+  "dash.passkeySaved": "Passkey saved. Next sign-in will ask for this key.",
+  "dash.passkeyWaiting": "Waiting for key…",
+  "dash.lockWithdraw": "Lock withdrawals",
+  "dash.loanTitle": "Vault loan",
+  "dash.affiliateTitle": "Affiliate",
   "dash.becomeAffiliate": "Become an affiliate",
-  "dash.shareInvite": "Share invite link",
-  "dash.referralPaused": "Referral program is paused. You can still withdraw earnings you already have.",
 
-  // —— Send ——
-  "send.title": "Send money",
-  "send.intro":
-    "Send the full amount to another NEXA-SAVER account. A small fixed fee is charged from your balance; the recipient gets what you type into their received bag.",
-  "send.amount": "Amount (kwacha)",
-  "send.theirNumber": "Their registered number",
-  "send.lookup": "Look up account",
-  "send.checking": "Checking…",
-  "send.coverTitle": "Cover bank flat (700 MWK)",
-  "send.coverHint":
-    "You also pay 700 so their received bag includes enough for a full bank payout of your amount. When they withdraw the whole bag to bank, 700 covers the bank flat. MoMo never needs the 700. Leave unchecked if they should fund the 700 from the amount alone.",
-  "send.feeLine": "Send fee",
-  "send.theyReceive": "They receive",
-  "send.totalFromYou": "Total from your vault",
-  "send.confirmRecipient": "Confirm recipient",
-  "send.now": "Send now",
-  "send.sending": "Sending…",
-  "send.min": "Minimum send is 100 kwacha.",
-  "send.noMatch": "That number does not match any NEXA-SAVER account.",
+  // —— Passkey challenge ——
+  "passkey.challengeTitle": "Security key / passkey",
+  "passkey.challengeBody":
+    "This account is protected with a key on a device you set up before. Use that same key or device to continue. If you are on a different computer, recover by email below.",
+  "passkey.useKey": "Use security key / passkey",
+  "passkey.waiting": "Waiting for key…",
+  "passkey.recoveryHint": "On a new device without your key?",
+  "passkey.emailCode": "Email me a recovery code",
+  "passkey.recoverySent":
+    "Code sent to {email}. Enter it to remove keys and continue. You can add a new key later on this device.",
+  "passkey.recoveryPlaceholder": "Recovery code",
+  "passkey.removeAndContinue": "Remove keys and continue",
 
-  // —— Withdraw ——
-  "withdraw.title": "Withdraw",
-  "withdraw.revealFirst": "Reveal your balance with your PIN before withdrawing.",
-  "withdraw.checkFirst": "Check balance first",
-  "withdraw.from": "Withdraw from",
-  "withdraw.mainVault": "Main vault",
-  "withdraw.receivedBag": "Received bag",
-  "withdraw.momo": "Mobile money",
-  "withdraw.bank": "Bank",
-  "withdraw.bankFlatTitle": "Bank channel flat fee: 700 MWK",
-  "withdraw.bankFlatBody":
-    "Charged by the bank / PayChangu rail, not NEXA-SAVER. The 700 MWK is taken from the balance you withdraw. MoMo has no 700 flat.",
-  "withdraw.paused": "Withdrawals are paused by the platform.",
-  "withdraw.momoOff": "Mobile money withdrawals are off right now.",
-  "withdraw.bankOff": "Bank withdrawals are off right now.",
-
-  // —— Deposit ——
-  "deposit.title": "Deposit",
-  "deposit.amount": "Amount (kwacha)",
-  "deposit.feeNote": "A platform fee is taken from each deposit; the rest is credited to your vault.",
-
-  // —— Activity kinds ——
-  "tx.deposit": "Deposit",
-  "tx.withdrawal": "Withdrawal",
-  "tx.fee": "Fee",
-  "tx.transfer_out": "Sent",
-  "tx.transfer_in": "Received",
-  "tx.success": "success",
-  "tx.pending": "pending",
-  "tx.failed": "failed",
-  "tx.processing": "processing",
-
-  // —— Profile ——
+  // —— Profile / KYC ——
   "profile.title": "Profile",
+  "profile.kycTitle": "Identity (KYC)",
+  "profile.kycVerified": "Verified",
+  "profile.kycPending": "Under review",
+  "profile.kycRejected": "Needs update",
+  "profile.kycNone": "Optional until large withdrawals",
+  "profile.kycHint":
+    "Light identity check for larger withdrawals. Smaller withdrawals still work without this.",
+  "profile.kycSubmit": "Submit for review",
+  "profile.kycIdType": "ID type",
+  "profile.kycIdNumber": "ID number",
+  "profile.kycIdName": "Full name on ID",
+  "profile.passkeyTitle": "Security key / passkey",
+  "profile.passkeyHint":
+    "When a key is registered, sign-in asks for it after your password. To turn this off, remove every key (confirm with your withdraw PIN).",
+  "profile.passkeyNone": "No security keys on this account.",
+  "profile.passkeyPin": "Withdraw PIN to remove a key",
+  "profile.sessions": "Sessions",
   "profile.changePassword": "Change password",
-  "profile.changePin": "Change PIN",
-  "profile.securityQuestion": "Security question",
-  "profile.vaultLock": "Vault lock",
-  "profile.lockOff": "Do not lock",
-  "profile.lockIdle": "After idle time",
-  "profile.lockLeave": "When I leave the app",
-  "profile.withdrawLock": "Withdrawal time-lock",
-  "profile.sessions": "Active sessions",
-  "profile.signOutSession": "Sign out this session",
-  "profile.phone": "Phone",
-  "profile.email": "Email",
-  "profile.bankDetails": "Bank payout details",
+  "profile.changePin": "Change withdraw PIN",
 
-  // —— Vault lock ——
-  "vault.unlock": "Unlock vault",
-  "vault.locked": "Vault locked",
-  "vault.enterPin": "Enter your PIN",
-
-  // —— Share ——
-  "share.title": "Share NEXA-SAVER",
-  "share.hint": "Tell a friend — no referral code required.",
-  "share.button": "Share app",
-  "share.copied": "Link copied.",
+  // —— Money actions ——
+  "money.depositTitle": "Deposit",
+  "money.withdrawTitle": "Withdraw",
+  "money.sendTitle": "Send money",
+  "money.amount": "Amount (MWK)",
+  "money.confirmPin": "Confirm with PIN",
+  "money.momo": "Mobile money",
+  "money.bank": "Bank",
+  "money.bankFlatNote":
+    "The bank charges a flat fee on bank payouts. That amount is taken from what you request — it is not an extra NEXA percentage fee.",
 
   // —— Legal ——
-  "legal.terms": "Terms of service",
+  "legal.terms": "Terms of use",
   "legal.privacy": "Privacy policy",
-  "legal.acceptTerms": "I accept the terms of service",
-  "legal.acceptPrivacy": "I accept the privacy policy",
+  "legal.conditions": "Terms and conditions",
 
-  // —— Admin (labels only) ——
-  "admin.title": "Admin",
-  "admin.overview": "Overview",
-  "admin.users": "Users",
-  "admin.translations": "Translations",
+  // —— Vault lock ——
+  "lock.title": "Lock withdrawals",
+  "lock.platform": "Withdrawals locked by the platform",
+  "lock.contactAdmin": "Contact admin on WhatsApp",
+  "lock.cooling": "Cooling-off window — you can cancel free until {time}",
+  "lock.until": "Locked until {time}",
 
-  // —— i18n studio ——
-  "i18n.studioTitle": "Translation studio",
-  "i18n.studioHint":
-    "Edit full phrases as users see them (not word-by-word). Save draft privately, then Save & deploy so enabled languages go live.",
-  "i18n.language": "Language",
-  "i18n.addLanguage": "Add language",
-  "i18n.saveDraft": "Save draft",
-  "i18n.deploy": "Save & deploy",
-  "i18n.published": "Published",
-  "i18n.enabled": "Enabled for users",
-  "i18n.preview": "Preview",
-  "i18n.testingHint": "Preview uses your draft. Users only see published & enabled languages.",
-  "i18n.selectPhrase": "Select a phrase to edit",
-  "i18n.englishSource": "English (source)",
-  "i18n.yourTranslation": "Your translation",
-  "i18n.applyLine": "Apply this line",
-  "i18n.deployedOk": "Deployed. Users who pick this language will see published phrases after refresh.",
+  // —— Errors (user-facing soft) ——
+  "error.tryAgain": "Please try again.",
+  "error.network": "Network problem. Check your connection and try again.",
 } as const;
 
 export type MessageKey = keyof typeof EN_CATALOG;

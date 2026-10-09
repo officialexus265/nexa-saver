@@ -209,3 +209,120 @@ export async function getDepositByReference(reference: string) {
   `;
   return rows[0] ?? null;
 }
+
+/**
+ * Re-check a pending deposit with PayChangu:
+ * - success → credit (idempotent)
+ * - failed / cancelled / expired → mark failed (clears stuck queue, no wallet credit)
+ * - still pending / unknown → leave pending
+ */
+export async function resolvePendingDepositWithProvider(reference: string): Promise<{
+  action: "credited" | "already_credited" | "marked_failed" | "still_pending" | "not_found" | "not_deposit";
+  paychanguStatus?: string;
+  message: string;
+}> {
+  const sql = await getSql();
+  const rows = await sql<{
+    id: number;
+    kind: string;
+    status: string;
+    user_id: string;
+    gross_tambala: number;
+  }>`
+    select id, kind, status, user_id, gross_tambala from transactions
+    where reference = ${reference} limit 1
+  `;
+  if (!rows.length) {
+    return { action: "not_found", message: "No transaction with that reference." };
+  }
+  const row = rows[0];
+  if (row.kind !== "deposit") {
+    return { action: "not_deposit", message: "Reference is not a deposit." };
+  }
+  if (row.status === "success") {
+    return { action: "already_credited", message: "Already credited." };
+  }
+  if (row.status !== "pending") {
+    return {
+      action: "still_pending",
+      message: `Deposit is in status "${row.status}" — not pending.`,
+    };
+  }
+
+  const { paychanguConfigured, demoPaymentsEnabled, verifyPayment } = await import("./paychangu.server");
+  if (!paychanguConfigured()) {
+    if (demoPaymentsEnabled()) {
+      return {
+        action: "still_pending",
+        message: "PayChangu not configured (demo mode). Use demo confirm or wait for webhook.",
+      };
+    }
+    return { action: "still_pending", message: "PayChangu is not configured." };
+  }
+
+  let v: { ok: boolean; amount: number; status: string };
+  try {
+    v = await verifyPayment(reference);
+  } catch (err) {
+    return {
+      action: "still_pending",
+      message: `Could not reach PayChangu: ${(err as Error).message}`,
+    };
+  }
+
+  if (v.ok) {
+    const verifiedTambala = await (async () => {
+      const { kwachaToTambala } = await import("./money");
+      return kwachaToTambala(v.amount);
+    })();
+    if (verifiedTambala > 0 && verifiedTambala !== asInt(row.gross_tambala)) {
+      return {
+        action: "still_pending",
+        paychanguStatus: v.status,
+        message: `PayChangu success but amount mismatch (provider ${v.amount} vs our record). Manual review required.`,
+      };
+    }
+    const result = await creditDeposit(reference);
+    return {
+      action: result.already ? "already_credited" : "credited",
+      paychanguStatus: v.status,
+      message: result.already ? "Already credited." : "PayChangu success — wallet credited.",
+    };
+  }
+
+  const st = (v.status || "").toLowerCase();
+  const terminalFail = [
+    "failed",
+    "fail",
+    "cancelled",
+    "canceled",
+    "expired",
+    "rejected",
+    "declined",
+    "error",
+  ].some((x) => st.includes(x));
+
+  if (terminalFail) {
+    await sql`
+      update transactions
+      set status = ${"failed"},
+          note = case
+            when note is null or note = '' then ${"Auto-closed: PayChangu status " + v.status}
+            else note || ${" | Auto-closed: PayChangu status " + v.status}
+          end,
+          completed_at = now()
+      where reference = ${reference} and status = ${"pending"}
+    `;
+    return {
+      action: "marked_failed",
+      paychanguStatus: v.status,
+      message: `PayChangu reports "${v.status}" — deposit marked failed (no credit). Clears stuck pending.`,
+    };
+  }
+
+  return {
+    action: "still_pending",
+    paychanguStatus: v.status,
+    message: `PayChangu still shows "${v.status || "pending"}". Leave as pending until paid or failed.`,
+  };
+}

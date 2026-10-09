@@ -8,6 +8,7 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { signOut as clientSignOut } from "@/lib/auth/client";
 import { errMessage } from "@/lib/nexa/errors";
 import { friendlyWebAuthnError } from "@/lib/nexa/webauthn-errors";
+import { useT } from "@/lib/i18n/client";
 import {
   adminVerifyTotp,
   adminWebAuthnAuthOptions,
@@ -51,6 +52,7 @@ export function SessionGate({
   const [totpError, setTotpError] = useState<string | null>(null);
   const [totpBusy, setTotpBusy] = useState(false);
   const [passkeyRecoverySent, setPasskeyRecoverySent] = useState<string | null>(null);
+  const { t } = useT();
 
 
   const refresh = useCallback(async () => {
@@ -270,7 +272,7 @@ export function SessionGate({
                 })();
               }}
             >
-              {totpBusy ? "Waiting for key…" : "Use security key / passkey"}
+              {totpBusy ? t("passkey.waiting") : t("passkey.useKey")}
             </Button>
             ) : null}
             {showPasskey && showTotp ? (
@@ -313,11 +315,8 @@ export function SessionGate({
         <div className="fixed inset-0 z-[60] grid place-items-center bg-bg/95 p-5">
           <div className="w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6">
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Extra security</p>
-            <h2 className="font-display text-2xl font-semibold">Security key / passkey</h2>
-            <p className="text-sm text-muted">
-              This account is protected with a key on a device you set up before. Use that same key or device to continue.
-              If you are on a different computer (for example at work), recover by email below.
-            </p>
+            <h2 className="font-display text-2xl font-semibold">{t("passkey.challengeTitle")}</h2>
+            <p className="text-sm text-muted">{t("passkey.challengeBody")}</p>
             {totpError ? <p className="text-sm text-danger">{totpError}</p> : null}
             <Button
               type="button"
@@ -341,10 +340,10 @@ export function SessionGate({
                 })();
               }}
             >
-              {totpBusy ? "Waiting for key…" : "Use security key / passkey"}
+              {totpBusy ? t("passkey.waiting") : t("passkey.useKey")}
             </Button>
             <div className="border-t border-border pt-3 space-y-2">
-              <p className="text-xs text-muted">On a new device without your key?</p>
+              <p className="text-xs text-muted">{t("passkey.recoveryHint")}</p>
               <Button
                 type="button"
                 variant="secondary"
@@ -362,17 +361,17 @@ export function SessionGate({
                     .finally(() => setTotpBusy(false));
                 }}
               >
-                Email me a recovery code
+                {t("passkey.emailCode")}
               </Button>
               {passkeyRecoverySent ? (
                 <>
-                  <p className="text-xs text-muted">Code sent to {passkeyRecoverySent}. Enter it to remove keys and continue. You can add a new key later on this device.</p>
+                  <p className="text-xs text-muted">{t("passkey.recoverySent", { email: passkeyRecoverySent })}</p>
                   <input
                     className="flex h-11 w-full rounded-xl border border-border bg-surface-2 px-3 text-center tracking-widest"
                     inputMode="numeric"
                     value={totpCode}
                     onChange={(e) => setTotpCode(e.target.value.replace(/\s/g, "").slice(0, 8))}
-                    placeholder="Recovery code"
+                    placeholder={t("passkey.recoveryPlaceholder")}
                   />
                   <Button
                     type="button"
@@ -391,7 +390,7 @@ export function SessionGate({
                         .finally(() => setTotpBusy(false));
                     }}
                   >
-                    Remove keys and continue
+                    {t("passkey.removeAndContinue")}
                   </Button>
                 </>
               ) : null}

@@ -359,6 +359,10 @@ export const completeProfile = createServerFn({ method: "POST" })
     const { assertRateLimit } = await import("./rate-limit.server");
     const sql = await getSql();
 
+    {
+      const { assertSignupAllowed } = await import("./launch.server");
+      await assertSignupAllowed(sql);
+    }
     await assertRateLimit(sql, {
       bucket: `profile:${context.userId}`,
       limit: 10,
@@ -744,6 +748,16 @@ export const startDeposit = createServerFn({ method: "POST" })
     await requireVerifiedEmail(context.userId);
     const amountErr = validateDepositAmount(data.amountKwacha);
     if (amountErr) throw new Error(amountErr);
+    {
+      const { getSql: getSqlCap } = await import("@/lib/db");
+      const { getBetaDepositCapKwacha } = await import("./launch.server");
+      const cap = await getBetaDepositCapKwacha(await getSqlCap());
+      if (cap != null && data.amountKwacha > cap) {
+        throw new Error(
+          `During private beta, deposits are limited to ${cap.toLocaleString()} MWK per transaction. Try a smaller amount.`,
+        );
+      }
+    }
     const phone = normalizeMwPhone(data.phone);
     if (!phone) throw new Error("Enter a valid Malawi number to deposit from");
 
@@ -844,7 +858,14 @@ export const verifyDeposit = createServerFn({ method: "POST" })
   .validator(z.object({ reference: z.string().min(4) }))
   .handler(async ({ context, data }) => {
     const { getSql } = await import("@/lib/db");
+    const { assertRateLimit } = await import("./rate-limit.server");
     const sql = await getSql();
+    await assertRateLimit(sql, {
+      bucket: `verify-deposit:${context.userId}`,
+      limit: 30,
+      windowSeconds: 60 * 60,
+      message: "Too many payment checks this hour. Wait and try again, or contact support with your reference.",
+    });
     const owned = await sql<{
       id: number;
       status: string;
@@ -2352,6 +2373,14 @@ export const adminForceCreditDeposit = createServerFn({ method: "POST" })
     }
     if (row.status !== "pending") {
       throw new Error(`Cannot credit deposit in status "${row.status}"`);
+    }
+    if (data.skipPaychanguCheck) {
+      const { env, isProduction } = await import("@/lib/env.server");
+      if (isProduction() && env("NEXA_ALLOW_SKIP_PAYCHANGU") !== "true") {
+        throw new Error(
+          "Skipping PayChangu verification is disabled in production. Confirm the payment in PayChangu, or set NEXA_ALLOW_SKIP_PAYCHANGU=true only for emergency support with audit.",
+        );
+      }
     }
     if (!data.skipPaychanguCheck) {
       const { paychanguConfigured, verifyPayment } = await import("./paychangu.server");
@@ -6285,4 +6314,121 @@ export const adminSetKycThreshold = createServerFn({ method: "POST" })
       detail: `kwacha=${v}`,
     });
     return { ok: true as const, thresholdKwacha: v };
+  });
+
+
+// —— Phase G: launch / beta controls ——
+
+export const getPublicLaunchInfo = createServerFn({ method: "GET" }).handler(async () => {
+  const { getSql } = await import("@/lib/db");
+  const { getLaunchSettings } = await import("./launch.server");
+  try {
+    const s = await getLaunchSettings(await getSql());
+    return {
+      signupEnabled: s.signupEnabled,
+      betaMode: s.betaMode,
+      publicBanner: s.betaMode ? s.publicBanner : "",
+      betaDepositCapKwacha: s.betaMode ? s.betaDepositCapKwacha : 0,
+    };
+  } catch {
+    return { signupEnabled: true, betaMode: false, publicBanner: "", betaDepositCapKwacha: 0 };
+  }
+});
+
+export const adminGetLaunchSettings = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { getLaunchSettings, DEFAULT_INCIDENT_NOTES } = await import("./launch.server");
+    const s = await getLaunchSettings(await getSql());
+    return {
+      ...s,
+      incidentNotes: s.incidentNotes || DEFAULT_INCIDENT_NOTES,
+    };
+  });
+
+export const adminSetLaunchSettings = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      signupEnabled: z.boolean().optional(),
+      betaMode: z.boolean().optional(),
+      betaDepositCapKwacha: z.number().min(0).max(50_000_000).optional(),
+      publicBanner: z.string().max(400).optional(),
+      incidentNotes: z.string().max(8000).optional(),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { setLaunchSettings } = await import("./launch.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const s = await setLaunchSettings(sql, data);
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "launch_settings",
+      detail: `signup=${s.signupEnabled} beta=${s.betaMode} cap=${s.betaDepositCapKwacha}`,
+    });
+    return s;
+  });
+
+
+export const adminSecurityChecklist = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { runSecurityChecklist } = await import("./security-checklist.server");
+    return runSecurityChecklist(await getSql());
+  });
+
+
+/** Admin: ask PayChangu about a pending deposit — credit if paid, mark failed if terminal, else leave. */
+export const adminResolvePendingDeposit = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ reference: z.string().min(4).max(80) }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { writeAudit } = await import("./audit.server");
+    const { resolvePendingDepositWithProvider } = await import("./ledger.server");
+    const sql = await getSql();
+    const result = await resolvePendingDepositWithProvider(data.reference.trim());
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "deposit_resolve",
+      detail: `ref=${data.reference.trim()} action=${result.action} pc=${result.paychanguStatus || ""}`,
+    });
+    return result;
+  });
+
+/** Admin: resolve every pending deposit older than 15 minutes via PayChangu. */
+export const adminResolveStuckDeposits = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { writeAudit } = await import("./audit.server");
+    const { resolvePendingDepositWithProvider } = await import("./ledger.server");
+    const sql = await getSql();
+    const rows = await sql<{ reference: string }>`
+      select reference from transactions
+      where kind = 'deposit' and status = 'pending'
+        and created_at < now() - interval '15 minutes'
+      order by created_at asc
+      limit 40
+    `;
+    const results: Array<{ reference: string; action: string; message: string }> = [];
+    for (const r of rows) {
+      const res = await resolvePendingDepositWithProvider(r.reference);
+      results.push({ reference: r.reference, action: res.action, message: res.message });
+    }
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "deposit_resolve_stuck_batch",
+      detail: `count=${results.length} credited=${results.filter((x) => x.action === "credited").length} failed=${results.filter((x) => x.action === "marked_failed").length}`,
+    });
+    return { results };
   });
