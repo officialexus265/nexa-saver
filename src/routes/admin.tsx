@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { errMessage } from "@/lib/nexa/errors";
+import { TotpQr } from "@/components/totp-qr";
 import {
   adminOverview,
   adminTransactions,
@@ -476,8 +477,9 @@ function Console() {
         {totpSetup && !totpStatus?.enabled ? (
           <div className="space-y-3">
             <p className="text-sm text-muted">Scan this QR with your authenticator app, or enter the secret manually.</p>
-            <img src={totpSetup.qrUrl} alt="2FA QR" className="mx-auto rounded-lg border border-border bg-white p-2" width={200} height={200} />
-            <p className="break-all text-center font-mono text-xs text-muted">{totpSetup.secret}</p>
+            <TotpQr otpauthUri={totpSetup.otpauthUri} />
+            <p className="text-center text-xs text-muted">Or enter this secret manually:</p>
+            <p className="break-all text-center font-mono text-xs text-fg">{totpSetup.secret}</p>
             <input
               className="flex h-11 w-full rounded-xl border border-border bg-surface-2 px-3 text-center tracking-widest"
               placeholder="6-digit code"
