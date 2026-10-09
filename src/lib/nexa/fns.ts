@@ -5683,3 +5683,92 @@ export const userDeletePasskey = createServerFn({ method: "POST" })
     });
     return { ok: true as const, stillHasPasskey: await hasWebAuthn(sql, context.userId) };
   });
+
+
+/** Email a 6-digit code so a user on a new device can remove passkeys and get back in. */
+export const userRequestPasskeyRecovery = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { getSql } = await import("@/lib/db");
+    const { hasWebAuthn } = await import("./webauthn.server");
+    const { assertRateLimit } = await import("./rate-limit.server");
+    const { sendMail } = await import("./mail.server");
+    const { createHash, randomInt } = await import("node:crypto");
+    const sql = await getSql();
+    if (!(await hasWebAuthn(sql, context.userId))) {
+      throw new Error("No security key is registered on this account.");
+    }
+    await assertRateLimit(sql, {
+      bucket: `passkey-recovery:${context.userId}`,
+      limit: 5,
+      windowSeconds: 60 * 60,
+      message: "Too many recovery emails. Try again later.",
+    });
+    const profile = await loadProfile(context.userId);
+    if (!profile?.email) throw new Error("No email on this account to send a recovery code.");
+    const code = String(randomInt(100000, 999999));
+    const hash = createHash("sha256").update(`${context.userId}:${code}`).digest("hex");
+    const expires = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    await sql`
+      insert into admin_webauthn_challenges (user_id, challenge, purpose, expires_at)
+      values (${context.userId}, ${hash}, ${"recovery"}, ${expires})
+      on conflict (user_id) do update set
+        challenge = excluded.challenge,
+        purpose = excluded.purpose,
+        expires_at = excluded.expires_at
+    `;
+    const { APP_NAME } = await import("./constants");
+    await sendMail({
+      to: profile.email,
+      subject: `${APP_NAME}: security key recovery code`,
+      text: [
+        `Hi ${profile.first_name || "there"},`,
+        "",
+        `Your recovery code is: ${code}`,
+        "",
+        "It expires in 15 minutes. Use it only if you are removing security keys because you cannot use your usual device.",
+        "If you did not request this, change your password and contact support.",
+        "",
+        `— ${APP_NAME}`,
+      ].join("\n"),
+    });
+    const masked = profile.email.replace(/(.{2})(.*)(@.*)/, (_, a, b, c) => a + "***" + c);
+    return { ok: true as const, emailMasked: masked };
+  });
+
+/** Confirm recovery code: delete all passkeys for this user and elevate session. */
+export const userConfirmPasskeyRecovery = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ code: z.string().min(4).max(12) }))
+  .handler(async ({ context, data }) => {
+    const { getSql } = await import("@/lib/db");
+    const { createHash } = await import("node:crypto");
+    const { markTotpVerified } = await import("./admin-totp.server");
+    const { getSessionUser } = await import("@/lib/auth/verify.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const code = data.code.replace(/\s/g, "");
+    const hash = createHash("sha256").update(`${context.userId}:${code}`).digest("hex");
+    const rows = await sql<{ challenge: string; expires_at: Date | string; purpose: string }>`
+      select challenge, expires_at, purpose from admin_webauthn_challenges
+      where user_id = ${context.userId} and purpose = ${"recovery"} limit 1
+    `;
+    if (!rows.length || rows[0].challenge !== hash) {
+      throw new Error("Invalid or expired recovery code.");
+    }
+    if (new Date(rows[0].expires_at).getTime() < Date.now()) {
+      throw new Error("Recovery code expired. Request a new one.");
+    }
+    await sql`delete from admin_webauthn_challenges where user_id = ${context.userId}`;
+    await sql`delete from admin_webauthn_credentials where user_id = ${context.userId}`;
+    const session = await getSessionUser();
+    if (session?.sessionToken) {
+      await markTotpVerified(sql, context.userId, session.sessionToken);
+    }
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "user_webauthn_recovery",
+      detail: "all passkeys removed via email code",
+    });
+    return { ok: true as const };
+  });

@@ -7,12 +7,15 @@ import { PasswordField } from "@/components/password-field";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { signOut as clientSignOut } from "@/lib/auth/client";
 import { errMessage } from "@/lib/nexa/errors";
+import { friendlyWebAuthnError } from "@/lib/nexa/webauthn-errors";
 import {
   adminVerifyTotp,
   adminWebAuthnAuthOptions,
   adminWebAuthnAuthVerify,
   userWebAuthnAuthOptions,
   userWebAuthnAuthVerify,
+  userRequestPasskeyRecovery,
+  userConfirmPasskeyRecovery,
   changePasswordFn,
   getMe,
   heartbeat,
@@ -47,6 +50,7 @@ export function SessionGate({
   const [totpCode, setTotpCode] = useState("");
   const [totpError, setTotpError] = useState<string | null>(null);
   const [totpBusy, setTotpBusy] = useState(false);
+  const [passkeyRecoverySent, setPasskeyRecoverySent] = useState<string | null>(null);
 
 
   const refresh = useCallback(async () => {
@@ -259,7 +263,7 @@ export function SessionGate({
                     await adminWebAuthnAuthVerify({ data: { response: assertion } });
                     await refresh();
                   } catch (err) {
-                    setTotpError(errMessage(err));
+                    setTotpError(friendlyWebAuthnError(err));
                   } finally {
                     setTotpBusy(false);
                   }
@@ -311,7 +315,8 @@ export function SessionGate({
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Extra security</p>
             <h2 className="font-display text-2xl font-semibold">Security key / passkey</h2>
             <p className="text-sm text-muted">
-              This account is protected with a hardware key or passkey. Confirm it to continue.
+              This account is protected with a key on a device you set up before. Use that same key or device to continue.
+              If you are on a different computer (for example at work), recover by email below.
             </p>
             {totpError ? <p className="text-sm text-danger">{totpError}</p> : null}
             <Button
@@ -329,7 +334,7 @@ export function SessionGate({
                     await userWebAuthnAuthVerify({ data: { response: assertion } });
                     await refresh();
                   } catch (err) {
-                    setTotpError(errMessage(err));
+                    setTotpError(friendlyWebAuthnError(err));
                   } finally {
                     setTotpBusy(false);
                   }
@@ -338,6 +343,59 @@ export function SessionGate({
             >
               {totpBusy ? "Waiting for key…" : "Use security key / passkey"}
             </Button>
+            <div className="border-t border-border pt-3 space-y-2">
+              <p className="text-xs text-muted">On a new device without your key?</p>
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full"
+                disabled={totpBusy}
+                onClick={() => {
+                  setTotpBusy(true);
+                  setTotpError(null);
+                  void userRequestPasskeyRecovery()
+                    .then((r) => {
+                      setTotpError(null);
+                      setPasskeyRecoverySent(r.emailMasked);
+                    })
+                    .catch((err) => setTotpError(errMessage(err)))
+                    .finally(() => setTotpBusy(false));
+                }}
+              >
+                Email me a recovery code
+              </Button>
+              {passkeyRecoverySent ? (
+                <>
+                  <p className="text-xs text-muted">Code sent to {passkeyRecoverySent}. Enter it to remove keys and continue. You can add a new key later on this device.</p>
+                  <input
+                    className="flex h-11 w-full rounded-xl border border-border bg-surface-2 px-3 text-center tracking-widest"
+                    inputMode="numeric"
+                    value={totpCode}
+                    onChange={(e) => setTotpCode(e.target.value.replace(/\s/g, "").slice(0, 8))}
+                    placeholder="Recovery code"
+                  />
+                  <Button
+                    type="button"
+                    className="w-full"
+                    disabled={totpBusy || totpCode.length < 6}
+                    onClick={() => {
+                      setTotpBusy(true);
+                      setTotpError(null);
+                      void userConfirmPasskeyRecovery({ data: { code: totpCode } })
+                        .then(() => {
+                          setTotpCode("");
+                          setPasskeyRecoverySent(null);
+                          return refresh();
+                        })
+                        .catch((err) => setTotpError(errMessage(err)))
+                        .finally(() => setTotpBusy(false));
+                    }}
+                  >
+                    Remove keys and continue
+                  </Button>
+                </>
+              ) : null}
+            </div>
             <Button
               type="button"
               variant="secondary"
