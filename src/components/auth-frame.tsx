@@ -2,6 +2,7 @@ import { BrandLockup } from "@/components/brand";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ShareAppButton } from "@/components/share-app-button";
 import { SiteFooter } from "@/components/site-footer";
+import { LanguageSwitcher } from "@/components/language-switcher";
 import { APP_TAGLINE } from "@/lib/nexa/constants";
 import { TutorialsButton } from "@/components/tutorials-panel";
 
@@ -12,12 +13,13 @@ export function AuthFrame({
 }: {
   children: React.ReactNode;
   aside?: string;
-  /** Sign-up: show Tutorials control near the brand (admin-configured videos). */
+  /** Sign-up: show “Not familiar…” when admin enables tutorials feature. */
   showTutorials?: boolean;
 }) {
   return (
     <div className="nexa-shell grid min-h-dvh place-items-center px-4 py-10">
       <div className="absolute right-4 top-4 flex items-center gap-2">
+        <LanguageSwitcher />
         <ShareAppButton variant="pill" label="Share" />
         <ThemeToggle />
       </div>

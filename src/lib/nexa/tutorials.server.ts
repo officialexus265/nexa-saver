@@ -9,6 +9,27 @@ export type TutorialItem = {
 };
 
 const SETTINGS_KEY = "tutorials_json";
+const FEATURE_KEY = "tutorials_feature_enabled";
+
+export async function isTutorialsFeatureEnabled(sql: Sql): Promise<boolean> {
+  try {
+    const rows = await sql<{ value: string }>`
+      select value from platform_settings where key = ${FEATURE_KEY} limit 1
+    `;
+    return rows[0]?.value === "true";
+  } catch {
+    return false;
+  }
+}
+
+export async function setTutorialsFeatureEnabled(sql: Sql, enabled: boolean): Promise<void> {
+  await sql`
+    insert into platform_settings (key, value, updated_at)
+    values (${FEATURE_KEY}, ${enabled ? "true" : "false"}, now())
+    on conflict (key) do update set value = excluded.value, updated_at = now()
+  `;
+}
+
 
 export async function getTutorials(sql: Sql): Promise<TutorialItem[]> {
   try {

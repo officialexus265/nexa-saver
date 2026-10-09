@@ -717,11 +717,11 @@ export const startDeposit = createServerFn({ method: "POST" })
     if (!paychanguConfigured() && !demoPaymentsEnabled()) {
       throw new Error("Deposits are not available right now. Please try again later.");
     }
-    const { assertDepositsAllowed } = await import("./kill-switch.server");
-    assertDepositsAllowed();
+    const sql = await getSql();
+    const { assertDepositsAllowedAsync } = await import("./kill-switch.server");
+    await assertDepositsAllowedAsync(sql);
     const { assertMoneyInfraReady } = await import("./production-guards.server");
     assertMoneyInfraReady("Deposits");
-    const sql = await getSql();
 
     const claim = await claimIdempotencyKey(sql, {
       key: data.idempotencyKey,
@@ -861,11 +861,11 @@ export const startWithdraw = createServerFn({ method: "POST" })
     if (!paychanguConfigured() && !demoPaymentsEnabled()) {
       throw new Error("Withdrawals are not available right now. Your balance was not touched.");
     }
-    const { assertWithdrawalsAllowed } = await import("./kill-switch.server");
-    assertWithdrawalsAllowed();
+    const sql = await getSql();
+    const { assertWithdrawalsAllowedAsync } = await import("./kill-switch.server");
+    await assertWithdrawalsAllowedAsync(sql);
     const { assertMoneyInfraReady } = await import("./production-guards.server");
     assertMoneyInfraReady("Withdrawals");
-    const sql = await getSql();
     const { getPayoutMethods, assertMethodAllowed } = await import("./payout-methods.server");
     const methods = await getPayoutMethods(sql);
     assertMethodAllowed(methods, data.method ?? "momo");
@@ -1407,7 +1407,7 @@ export const adminOverview = createServerFn({ method: "GET" })
     const { getSql } = await import("@/lib/db");
     const { demoPaymentsEnabled } = await import("./paychangu.server");
     const { getProductionReadiness } = await import("./production-guards.server");
-    const { depositsPaused, withdrawalsPaused } = await import("./kill-switch.server");
+    const { depositsPausedDb, withdrawalsPausedDb } = await import("./kill-switch.server");
     const sql = await getSql();
 
     const users = await sql<{ n: number }>`select count(*)::int as n from profiles where role = ${"user"}`;
@@ -1496,16 +1496,11 @@ export const adminOverview = createServerFn({ method: "GET" })
         withdrawals: asInt(r.withdrawals),
         profit: asInt(r.profit),
       })),
-      productionReadiness: (() => {
-        const base = getProductionReadiness();
-        return {
-          isProduction: base.isProduction,
-          allCriticalOk: base.allCriticalOk,
-          items: base.items,
-          depositsAllowed: !depositsPaused(),
-          withdrawalsAllowed: !withdrawalsPaused(),
-        };
-      })(),
+      productionReadiness: {
+        ...getProductionReadiness(),
+        depositsAllowed: !(await depositsPausedDb(sql)),
+        withdrawalsAllowed: !(await withdrawalsPausedDb(sql)),
+      },
     };
   });
 
@@ -4024,8 +4019,9 @@ export const startTransfer = createServerFn({ method: "POST" })
       throw new Error("Your withdrawals are time-locked, so sending is also paused until the lock ends.");
     }
 
-    const { assertWithdrawalsAllowed } = await import("./kill-switch.server");
-    assertWithdrawalsAllowed(); // send is tied to withdrawals
+    const { assertWithdrawalsAllowedAsync } = await import("./kill-switch.server");
+    const { getSql: getSqlKs2 } = await import("@/lib/db");
+    await assertWithdrawalsAllowedAsync(await getSqlKs2()); // send is tied to withdrawals
     const { assertMoneyInfraReady } = await import("./production-guards.server");
     assertMoneyInfraReady("Sending");
 
@@ -5778,8 +5774,12 @@ export const userConfirmPasskeyRecovery = createServerFn({ method: "POST" })
 
 export const getPublicTutorials = createServerFn({ method: "GET" }).handler(async () => {
   const { getSql } = await import("@/lib/db");
-  const { getTutorials } = await import("./tutorials.server");
-  return getTutorials(await getSql());
+  const { getTutorials, isTutorialsFeatureEnabled } = await import("./tutorials.server");
+  const sql = await getSql();
+  const enabled = await isTutorialsFeatureEnabled(sql);
+  if (!enabled) return { enabled: false as const, items: [] as Awaited<ReturnType<typeof getTutorials>> };
+  const items = await getTutorials(sql);
+  return { enabled: true as const, items };
 });
 
 export const adminGetTutorials = createServerFn({ method: "GET" })
@@ -5787,8 +5787,30 @@ export const adminGetTutorials = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await requireAdmin(context.userId);
     const { getSql } = await import("@/lib/db");
-    const { getTutorials } = await import("./tutorials.server");
-    return getTutorials(await getSql());
+    const { getTutorials, isTutorialsFeatureEnabled } = await import("./tutorials.server");
+    const sql = await getSql();
+    return {
+      enabled: await isTutorialsFeatureEnabled(sql),
+      items: await getTutorials(sql),
+    };
+  });
+
+export const adminSetTutorialsFeature = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ enabled: z.boolean() }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { setTutorialsFeatureEnabled } = await import("./tutorials.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    await setTutorialsFeatureEnabled(sql, data.enabled);
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "tutorials_feature",
+      detail: `enabled=${data.enabled}`,
+    });
+    return { ok: true as const, enabled: data.enabled };
   });
 
 export const adminSetTutorials = createServerFn({ method: "POST" })
@@ -5817,4 +5839,220 @@ export const adminSetTutorials = createServerFn({ method: "POST" })
       detail: `count=${saved.length}`,
     });
     return { ok: true as const, items: saved };
+  });
+
+
+// —— Editable Terms / Privacy (with live placeholders) ——
+
+export const getPublicLegalDoc = createServerFn({ method: "POST" })
+  .validator(z.object({ kind: z.enum(["terms", "privacy"]) }))
+  .handler(async ({ data }) => {
+    const { getSql } = await import("@/lib/db");
+    const { getResolvedLegalDoc } = await import("./legal-docs.server");
+    const { body } = await getResolvedLegalDoc(await getSql(), data.kind);
+    return { body };
+  });
+
+export const adminGetLegalDoc = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ kind: z.enum(["terms", "privacy"]) }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { getLegalDocRaw, LEGAL_PLACEHOLDERS, buildPlaceholderMap } = await import("./legal-docs.server");
+    const sql = await getSql();
+    const body = await getLegalDocRaw(sql, data.kind);
+    const map = await buildPlaceholderMap(sql);
+    return { body, placeholders: LEGAL_PLACEHOLDERS, liveValues: map };
+  });
+
+export const adminSetLegalDoc = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ kind: z.enum(["terms", "privacy"]), body: z.string().max(200_000) }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { setLegalDoc } = await import("./legal-docs.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    await setLegalDoc(sql, data.kind, data.body);
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "legal_doc_set",
+      detail: `kind=${data.kind} len=${data.body.length}`,
+    });
+    return { ok: true as const };
+  });
+
+
+// —— Phase C: ops queue, reconciliation history, in-app money pause ——
+
+export const adminGetOpsQueue = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const stuckCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+
+    const pendingDeposits = await sql<{
+      reference: string;
+      status: string;
+      gross_tambala: number;
+      user_id: string;
+      username: string;
+      first_name: string;
+      last_name: string;
+      created_at: Date | string;
+    }>`
+      select t.reference, t.status, t.gross_tambala, t.user_id, t.created_at,
+             p.username, p.first_name, p.last_name
+      from transactions t
+      join profiles p on p.user_id = t.user_id
+      where t.kind = 'deposit' and t.status = 'pending'
+      order by t.created_at asc
+      limit 80
+    `;
+
+    const processingWithdrawals = await sql<{
+      reference: string;
+      status: string;
+      gross_tambala: number;
+      user_id: string;
+      username: string;
+      first_name: string;
+      last_name: string;
+      created_at: Date | string;
+      phone: string | null;
+    }>`
+      select t.reference, t.status, t.gross_tambala, t.user_id, t.created_at, t.phone,
+             p.username, p.first_name, p.last_name
+      from transactions t
+      join profiles p on p.user_id = t.user_id
+      where t.kind = 'withdrawal' and t.status in ('pending', 'processing')
+      order by t.created_at asc
+      limit 80
+    `;
+
+    let frozenTransfers: Array<{
+      id: number;
+      amount_tambala: number;
+      from_user_id: string;
+      to_user_id: string;
+      frozen_until: Date | string | null;
+      status: string;
+    }> = [];
+    try {
+      frozenTransfers = await sql`
+        select id, amount_tambala, from_user_id, to_user_id, frozen_until, status
+        from transfers
+        where status in ('frozen', 'reversal_requested')
+           or (frozen_until is not null and frozen_until > now())
+        order by id desc
+        limit 50
+      `;
+    } catch {
+      frozenTransfers = [];
+    }
+
+    const { getMoneyPauseStatus } = await import("./kill-switch.server");
+    const pause = await getMoneyPauseStatus(sql);
+
+    return {
+      pause,
+      pendingDeposits: pendingDeposits.map((r) => ({
+        reference: r.reference,
+        status: r.status,
+        grossTambala: Number(r.gross_tambala),
+        userId: r.user_id,
+        name: `${r.first_name} ${r.last_name}`.trim(),
+        username: r.username,
+        createdAt: new Date(r.created_at).toISOString(),
+        stuck: new Date(r.created_at).getTime() < new Date(stuckCutoff).getTime(),
+      })),
+      processingWithdrawals: processingWithdrawals.map((r) => ({
+        reference: r.reference,
+        status: r.status,
+        grossTambala: Number(r.gross_tambala),
+        userId: r.user_id,
+        name: `${r.first_name} ${r.last_name}`.trim(),
+        username: r.username,
+        phone: r.phone,
+        createdAt: new Date(r.created_at).toISOString(),
+        stuck: new Date(r.created_at).getTime() < new Date(stuckCutoff).getTime(),
+      })),
+      frozenTransfers: frozenTransfers.map((r) => ({
+        id: Number(r.id),
+        amountTambala: Number(r.amount_tambala),
+        fromUserId: r.from_user_id,
+        toUserId: r.to_user_id,
+        frozenUntil: r.frozen_until ? new Date(r.frozen_until).toISOString() : null,
+        status: r.status,
+      })),
+    };
+  });
+
+export const adminGetReconHistory = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{
+      id: number;
+      ran_at: Date | string;
+      wallets_sum_tambala: number;
+      ledger_net_tambala: number;
+      deposits_success_tambala: number;
+      withdrawals_success_tambala: number;
+      platform_profit_tambala: number;
+      payout_reserve_tambala: number;
+      pending_stuck: number;
+      balanced: boolean;
+      notes: string | null;
+    }>`
+      select * from reconciliation_runs order by ran_at desc limit 20
+    `;
+    return rows.map((r) => ({
+      id: r.id,
+      ranAt: new Date(r.ran_at).toISOString(),
+      walletsSumTambala: Number(r.wallets_sum_tambala),
+      ledgerNetTambala: Number(r.ledger_net_tambala),
+      depositsSuccessTambala: Number(r.deposits_success_tambala),
+      withdrawalsSuccessTambala: Number(r.withdrawals_success_tambala),
+      platformProfitTambala: Number(r.platform_profit_tambala),
+      payoutReserveTambala: Number(r.payout_reserve_tambala),
+      pendingStuck: Number(r.pending_stuck),
+      balanced: Boolean(r.balanced),
+      notes: r.notes,
+    }));
+  });
+
+export const adminSetMoneyPause = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      deposits: z.boolean().optional(),
+      withdrawals: z.boolean().optional(),
+      note: z.string().max(300).optional(),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { setMoneyPause } = await import("./kill-switch.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const status = await setMoneyPause(sql, {
+      deposits: data.deposits,
+      withdrawals: data.withdrawals,
+      note: data.note,
+      actorUserId: context.userId,
+    });
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "money_pause_set",
+      detail: `dep=${data.deposits} wd=${data.withdrawals} note=${(data.note || "").slice(0, 80)}`,
+    });
+    return status;
   });

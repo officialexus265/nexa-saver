@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState, useRef } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { TranslationStudio } from "@/components/translation-studio";
 import { SessionGate } from "@/components/session-gate";
@@ -14,6 +14,10 @@ import {
   adminUsers,
   adminLookupReference,
   adminForceCreditDeposit,
+  runReconciliationFn,
+  adminSetMoneyPause,
+  adminGetReconHistory,
+  adminGetOpsQueue,
   adminAnnotateTransaction,
   getPlatformSupportPhone,
   setPlatformSupportPhone,
@@ -43,6 +47,10 @@ import {
   adminSetSignupIntroVideo,
   adminGetTutorials,
   adminSetTutorials,
+  adminSetTutorialsFeature,
+  adminGetLegalDoc,
+  adminSetLegalDoc,
+
 
   adminUploadOgImage,
   adminGetSiteFooter,
@@ -211,6 +219,24 @@ function Console() {
     Array<{ title: string; description: string; urlOrId: string }>
   >([{ title: "", description: "", urlOrId: "" }]);
   const [tutorialsMsg, setTutorialsMsg] = useState<string | null>(null);
+  const [tutorialsEnabled, setTutorialsEnabled] = useState(false);
+
+  const [legalKind, setLegalKind] = useState<"terms" | "privacy">("terms");
+  const [legalBody, setLegalBody] = useState("");
+  const [legalPlaceholders, setLegalPlaceholders] = useState<
+    Array<{ key: string; label: string; example: string }>
+  >([]);
+  const [legalLive, setLegalLive] = useState<Record<string, string>>({});
+  const [legalMsg, setLegalMsg] = useState<string | null>(null);
+  const [opsQueue, setOpsQueue] = useState<Awaited<ReturnType<typeof adminGetOpsQueue>> | null>(null);
+  const [reconHistory, setReconHistory] = useState<Awaited<ReturnType<typeof adminGetReconHistory>>>([]);
+  const [reconLatest, setReconLatest] = useState<Awaited<ReturnType<typeof runReconciliationFn>> | null>(null);
+  const [opsMsg, setOpsMsg] = useState<string | null>(null);
+  const [opsBusy, setOpsBusy] = useState(false);
+  const [pauseNote, setPauseNote] = useState("");
+
+  const legalTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
 
   const [ogBust, setOgBust] = useState(0);
   const [ogUploading, setOgUploading] = useState(false);
@@ -237,18 +263,43 @@ function Console() {
 
 
 
-  const [adminTab, setAdminTab] = useState<"overview" | "accounts" | "money" | "tools" | "reversals" | "loans" | "translations">("overview");
+  const [adminTab, setAdminTab] = useState<"overview" | "accounts" | "money" | "tools" | "ops" | "reversals" | "loans" | "translations" | "legal">("overview");
 
 
 
 
 
   useEffect(() => {
+    if (adminTab !== "ops") return;
+    setOpsMsg(null);
+    void Promise.all([adminGetOpsQueue(), adminGetReconHistory()])
+      .then(([q, h]) => {
+        setOpsQueue(q);
+        setReconHistory(h);
+        if (q.pause.note) setPauseNote(q.pause.note);
+      })
+      .catch((err) => setOpsMsg(errMessage(err)));
+  }, [adminTab]);
+
+  useEffect(() => {
+    if (adminTab !== "legal") return;
+    setLegalMsg(null);
+    void adminGetLegalDoc({ data: { kind: legalKind } })
+      .then((r) => {
+        setLegalBody(r.body);
+        setLegalPlaceholders(r.placeholders);
+        setLegalLive(r.liveValues);
+      })
+      .catch((err) => setLegalMsg(errMessage(err)));
+  }, [adminTab, legalKind]);
+
+  useEffect(() => {
     void adminGetTutorials()
-      .then((list) => {
-        if (list.length) {
+      .then((r) => {
+        setTutorialsEnabled(Boolean(r.enabled));
+        if (r.items?.length) {
           setTutorialsDraft(
-            list.map((t) => ({
+            r.items.map((t) => ({
               title: t.title,
               description: t.description || "",
               urlOrId: t.youtubeId,
@@ -355,9 +406,11 @@ function Console() {
     { id: "accounts" as const, label: "Accounts" },
     { id: "money" as const, label: "Fees & payouts" },
     { id: "tools" as const, label: "Tools" },
+    { id: "ops" as const, label: "Ops" },
     { id: "reversals" as const, label: "Send reversals" },
     { id: "loans" as const, label: "Loans" },
     { id: "translations" as const, label: "Translate" },
+    { id: "legal" as const, label: "Legal" },
   ];
 
   return (
@@ -369,6 +422,9 @@ function Console() {
           {overview.demoPayments ? (
             <p className="mt-1 text-sm text-warn">Demo payments are ON. No real money moves.</p>
           ) : null}
+
+
+
         </div>
         <button
           type="button"
@@ -853,9 +909,29 @@ function Console() {
 
       <Card className="space-y-3 p-4">
         <h2 className="font-display text-lg font-semibold">Tutorial videos</h2>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={tutorialsEnabled}
+            onChange={(e) => {
+              const on = e.target.checked;
+              setTutorialsEnabled(on);
+              void adminSetTutorialsFeature({ data: { enabled: on } })
+                .then(() =>
+                  setTutorialsMsg(
+                    on
+                      ? "Tutorials feature ON — sign-up shows “Not familiar with the system?”"
+                      : "Tutorials feature OFF — hidden on sign-up.",
+                  ),
+                )
+                .catch((err) => setTutorialsMsg(errMessage(err)));
+            }}
+          />
+          Show “Not familiar with the system?” / Tutorials on sign-up
+        </label>
         <p className="text-sm text-muted">
-          Shown on the sign-up page under <strong>Tutorials</strong> (next to the brand). Examples: how to sign up,
-          securing the account, fees &amp; charges, how the platform is protected. Leave empty to hide the button.
+          When this is on, every sign-up visitor sees the prompt and Tutorials button. Add videos below so they have
+          something to watch. Turn it off until videos are ready so people are not sent to an empty list.
         </p>
         {tutorialsDraft.map((row, i) => (
           <div key={i} className="space-y-2 rounded-xl border border-border p-3">
@@ -1837,7 +1913,277 @@ function Console() {
         </div>
       ) : null}
 
-      <SupportDesk />
+      {adminTab === "legal" ? (
+      <div className="space-y-5">
+        <Card className="space-y-3 p-4">
+          <h2 className="font-display text-lg font-semibold">Terms &amp; Privacy</h2>
+          <p className="text-sm text-muted">
+            Edit the public documents users accept at sign-up. Insert live figures with the buttons below
+            (for example deposit fee %). When you change fees in Money settings, those placeholders update
+            automatically on the public pages — you do not need to rewrite every number by hand.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant={legalKind === "terms" ? "primary" : "secondary"}
+              size="sm"
+              onClick={() => setLegalKind("terms")}
+            >
+              Terms of use
+            </Button>
+            <Button
+              type="button"
+              variant={legalKind === "privacy" ? "primary" : "secondary"}
+              size="sm"
+              onClick={() => setLegalKind("privacy")}
+            >
+              Privacy policy
+            </Button>
+            <a
+              href={legalKind === "terms" ? "/terms" : "/privacy"}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-9 items-center rounded-xl border border-border px-3 text-sm text-primary"
+            >
+              Preview public page
+            </a>
+          </div>
+          <div>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">Insert live value</p>
+            <div className="flex flex-wrap gap-2">
+              {legalPlaceholders.map((ph) => (
+                <Button
+                  key={ph.key}
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  title={`Live now: ${legalLive[ph.key] ?? ph.example}`}
+                  onClick={() => {
+                    const token = `{{${ph.key}}}`;
+                    const el = legalTextareaRef.current;
+                    if (!el) {
+                      setLegalBody((b) => b + token);
+                      return;
+                    }
+                    const start = el.selectionStart ?? el.value.length;
+                    const end = el.selectionEnd ?? start;
+                    const next = el.value.slice(0, start) + token + el.value.slice(end);
+                    setLegalBody(next);
+                    requestAnimationFrame(() => {
+                      el.focus();
+                      const pos = start + token.length;
+                      el.setSelectionRange(pos, pos);
+                    });
+                  }}
+                >
+                  {ph.label}
+                  <span className="ml-1 text-xs text-muted">({legalLive[ph.key] ?? "…"})</span>
+                </Button>
+              ))}
+            </div>
+          </div>
+          <textarea
+            ref={legalTextareaRef}
+            className="min-h-[28rem] w-full rounded-xl border border-border bg-surface-2 p-3 font-mono text-xs leading-relaxed text-fg outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            value={legalBody}
+            onChange={(e) => setLegalBody(e.target.value)}
+            spellCheck
+          />
+          <p className="text-xs text-muted">
+            Use <code className="text-fg">## Heading</code> for section titles. Blank lines separate paragraphs.
+            Placeholders look like <code className="text-fg">{"{{deposit_fee_percent}}"}</code>.
+          </p>
+          <Button
+            type="button"
+            onClick={() => {
+              setLegalMsg(null);
+              void adminSetLegalDoc({ data: { kind: legalKind, body: legalBody } })
+                .then(() => setLegalMsg("Saved. Public page updates immediately."))
+                .catch((err) => setLegalMsg(errMessage(err)));
+            }}
+          >
+            Save {legalKind === "terms" ? "terms" : "privacy"}
+          </Button>
+          {legalMsg ? <p className="text-sm text-muted">{legalMsg}</p> : null}
+        </Card>
+      </div>
+      ) : null}
+
+      
+      {adminTab === "ops" ? (
+        <div className="space-y-5">
+          <Card className="space-y-3 p-4">
+            <h2 className="font-display text-lg font-semibold">Money pause (kill switch)</h2>
+            <p className="text-sm text-muted">
+              Pause deposits and/or withdrawals in seconds. Env flags NEXA_PAUSE_* still override if set on Vercel.
+              {opsQueue?.pause.envOverride ? (
+                <span className="text-danger"> An environment pause is active — clear it in Vercel to resume fully.</span>
+              ) : null}
+            </p>
+            <div className="flex flex-wrap gap-3 text-sm">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={Boolean(opsQueue?.pause.depositsPaused)}
+                  disabled={opsBusy || opsQueue?.pause.envOverride}
+                  onChange={(e) => {
+                    setOpsBusy(true);
+                    void adminSetMoneyPause({ data: { deposits: e.target.checked, note: pauseNote } })
+                      .then((s) => {
+                        setOpsQueue((q) => (q ? { ...q, pause: s } : q));
+                        setOpsMsg(e.target.checked ? "Deposits paused." : "Deposits allowed.");
+                      })
+                      .catch((err) => setOpsMsg(errMessage(err)))
+                      .finally(() => setOpsBusy(false));
+                  }}
+                />
+                Pause deposits
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={Boolean(opsQueue?.pause.withdrawalsPaused)}
+                  disabled={opsBusy || opsQueue?.pause.envOverride}
+                  onChange={(e) => {
+                    setOpsBusy(true);
+                    void adminSetMoneyPause({ data: { withdrawals: e.target.checked, note: pauseNote } })
+                      .then((s) => {
+                        setOpsQueue((q) => (q ? { ...q, pause: s } : q));
+                        setOpsMsg(e.target.checked ? "Withdrawals paused." : "Withdrawals allowed.");
+                      })
+                      .catch((err) => setOpsMsg(errMessage(err)))
+                      .finally(() => setOpsBusy(false));
+                  }}
+                />
+                Pause withdrawals / send
+              </label>
+            </div>
+            <Input
+              placeholder="Optional note (why paused)"
+              value={pauseNote}
+              onChange={(e) => setPauseNote(e.target.value)}
+            />
+            {opsQueue?.pause.updatedAt ? (
+              <p className="text-xs text-muted">
+                Last change: {new Date(opsQueue.pause.updatedAt).toLocaleString()}
+                {opsQueue.pause.updatedBy ? ` · by ${opsQueue.pause.updatedBy.slice(0, 8)}…` : ""}
+              </p>
+            ) : null}
+          </Card>
+
+          <Card className="space-y-3 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-display text-lg font-semibold">Reconciliation</h2>
+              <Button
+                type="button"
+                disabled={opsBusy}
+                onClick={() => {
+                  setOpsBusy(true);
+                  setOpsMsg(null);
+                  void runReconciliationFn()
+                    .then((r) => {
+                      setReconLatest(r);
+                      setOpsMsg(r.balanced ? "Books look balanced." : `Attention: ${r.notes}`);
+                      return adminGetReconHistory();
+                    })
+                    .then((h) => setReconHistory(h))
+                    .catch((err) => setOpsMsg(errMessage(err)))
+                    .finally(() => setOpsBusy(false));
+                }}
+              >
+                Run check now
+              </Button>
+            </div>
+            {reconLatest ? (
+              <div className="grid gap-2 text-sm sm:grid-cols-2">
+                <p>Wallets sum: {formatKwacha(reconLatest.walletsSumTambala)}</p>
+                <p>Ledger net: {formatKwacha(reconLatest.ledgerNetTambala)}</p>
+                <p>Deposits (success): {formatKwacha(reconLatest.depositsSuccessTambala)}</p>
+                <p>Withdrawals (success): {formatKwacha(reconLatest.withdrawalsSuccessTambala)}</p>
+                <p>Platform profit: {formatKwacha(reconLatest.platformProfitTambala)}</p>
+                <p>Stuck pending: {reconLatest.pendingStuck}</p>
+                <p className={reconLatest.balanced ? "text-primary" : "text-danger"}>
+                  {reconLatest.balanced ? "Balanced" : reconLatest.notes}
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-muted">Run a check to compare wallets, ledger, and fees.</p>
+            )}
+            {reconHistory.length ? (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[28rem] text-left text-xs">
+                  <thead>
+                    <tr className="text-muted">
+                      <th className="py-1 pr-2">When</th>
+                      <th className="py-1 pr-2">OK</th>
+                      <th className="py-1 pr-2">Stuck</th>
+                      <th className="py-1">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reconHistory.map((h) => (
+                      <tr key={h.id} className="border-t border-border">
+                        <td className="py-1.5 pr-2">{new Date(h.ranAt).toLocaleString()}</td>
+                        <td className="py-1.5 pr-2">{h.balanced ? "Yes" : "No"}</td>
+                        <td className="py-1.5 pr-2">{h.pendingStuck}</td>
+                        <td className="py-1.5 text-muted">{h.notes || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </Card>
+
+          <Card className="space-y-3 p-4">
+            <h2 className="font-display text-lg font-semibold">Support queues</h2>
+            <p className="text-sm text-muted">
+              Pending deposits and withdrawals. Items older than 15 minutes are marked stuck — use Support desk
+              below with the reference after confirming in PayChangu.
+            </p>
+            <h3 className="text-sm font-medium">Pending deposits ({opsQueue?.pendingDeposits.length ?? 0})</h3>
+            <ul className="space-y-2 text-sm">
+              {(opsQueue?.pendingDeposits ?? []).map((d) => (
+                <li key={d.reference} className="rounded-xl border border-border px-3 py-2">
+                  <p className="font-medium">
+                    {d.name} @{d.username} · {formatKwacha(d.grossTambala)}
+                    {d.stuck ? <span className="ml-2 text-xs text-danger">stuck</span> : null}
+                  </p>
+                  <p className="text-xs text-muted break-all">{d.reference}</p>
+                  <p className="text-xs text-muted">{new Date(d.createdAt).toLocaleString()}</p>
+                </li>
+              ))}
+              {!opsQueue?.pendingDeposits.length ? <li className="text-muted">None</li> : null}
+            </ul>
+            <h3 className="text-sm font-medium">Processing withdrawals ({opsQueue?.processingWithdrawals.length ?? 0})</h3>
+            <ul className="space-y-2 text-sm">
+              {(opsQueue?.processingWithdrawals ?? []).map((d) => (
+                <li key={d.reference} className="rounded-xl border border-border px-3 py-2">
+                  <p className="font-medium">
+                    {d.name} · {formatKwacha(d.grossTambala)} · {d.status}
+                    {d.stuck ? <span className="ml-2 text-xs text-danger">stuck</span> : null}
+                  </p>
+                  <p className="text-xs text-muted break-all">{d.reference}</p>
+                </li>
+              ))}
+              {!opsQueue?.processingWithdrawals.length ? <li className="text-muted">None</li> : null}
+            </ul>
+            <h3 className="text-sm font-medium">Frozen / reversal transfers ({opsQueue?.frozenTransfers.length ?? 0})</h3>
+            <ul className="space-y-2 text-sm">
+              {(opsQueue?.frozenTransfers ?? []).map((t) => (
+                <li key={t.id} className="rounded-xl border border-border px-3 py-2">
+                  #{t.id} · {formatKwacha(t.amountTambala)} · {t.status}
+                  {t.frozenUntil ? ` · until ${new Date(t.frozenUntil).toLocaleString()}` : ""}
+                </li>
+              ))}
+              {!opsQueue?.frozenTransfers.length ? <li className="text-muted">None</li> : null}
+            </ul>
+          </Card>
+          {opsMsg ? <p className="text-sm text-muted">{opsMsg}</p> : null}
+        </div>
+      ) : null}
+
+<SupportDesk />
     </div>
   );
 }
