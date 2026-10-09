@@ -353,6 +353,72 @@ function Console() {
       </div>
 
       <Card className="space-y-3 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-display text-lg font-semibold">Production readiness</h2>
+          {overview?.productionReadiness ? (
+            <span
+              className={
+                overview.productionReadiness.allCriticalOk &&
+                overview.productionReadiness.depositsAllowed &&
+                overview.productionReadiness.withdrawalsAllowed
+                  ? "rounded-full bg-primary/20 px-3 py-1 text-xs font-medium text-primary"
+                  : "rounded-full bg-danger/15 px-3 py-1 text-xs font-medium text-danger"
+              }
+            >
+              {overview.productionReadiness.isProduction ? "Production" : "Non-production"}
+              {overview.productionReadiness.allCriticalOk ? " · config OK" : " · fix env"}
+            </span>
+          ) : null}
+        </div>
+        <p className="text-sm text-muted">
+          Phase A checks. In production, deposits, withdrawals, and sends stay blocked until critical items are green.
+          Secrets are never shown here — only whether they are set.
+        </p>
+        {overview?.productionReadiness ? (
+          <ul className="space-y-2 text-sm">
+            {overview.productionReadiness.items.map((item) => (
+              <li
+                key={item.id}
+                className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-border bg-surface-2/50 px-3 py-2"
+              >
+                <div>
+                  <p className="font-medium text-fg">
+                    <span className={item.ok ? "text-primary" : "text-danger"}>{item.ok ? "●" : "○"}</span>{" "}
+                    {item.label}
+                    {item.critical ? <span className="text-xs text-muted"> · required</span> : null}
+                  </p>
+                  {!item.ok ? <p className="mt-0.5 text-xs text-muted">{item.hint}</p> : null}
+                </div>
+                <span className={item.ok ? "text-xs text-primary" : "text-xs text-danger"}>
+                  {item.ok ? "OK" : "Missing"}
+                </span>
+              </li>
+            ))}
+            <li className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border px-3 py-2">
+              <span className="font-medium">Deposits kill-switch</span>
+              <span className={overview.productionReadiness.depositsAllowed ? "text-xs text-primary" : "text-xs text-danger"}>
+                {overview.productionReadiness.depositsAllowed ? "Allowed" : "Paused (NEXA_PAUSE_DEPOSITS / ALL)"}
+              </span>
+            </li>
+            <li className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border px-3 py-2">
+              <span className="font-medium">Withdrawals kill-switch</span>
+              <span
+                className={
+                  overview.productionReadiness.withdrawalsAllowed ? "text-xs text-primary" : "text-xs text-danger"
+                }
+              >
+                {overview.productionReadiness.withdrawalsAllowed
+                  ? "Allowed"
+                  : "Paused (NEXA_PAUSE_WITHDRAWALS / ALL)"}
+              </span>
+            </li>
+          </ul>
+        ) : (
+          <p className="text-sm text-muted">Loading checklist…</p>
+        )}
+      </Card>
+
+      <Card className="space-y-3 p-4">
         <h2 className="font-display text-lg font-semibold">Treasury (platform profit)</h2>
         <p className="text-sm text-muted">
           Book profit is fee income from deposits. Saver balances are liabilities — never withdrawn here.

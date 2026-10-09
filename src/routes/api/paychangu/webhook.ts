@@ -59,6 +59,15 @@ export const Route = createFileRoute("/api/paychangu/webhook")({
         const ref = payload.txRef ?? payload.chargeId;
         if (ref && (payload.status === "success" || payload.status === "successful")) {
           try {
+            const { assertMoneyInfraReady } = await import("@/lib/nexa/production-guards.server");
+            try {
+              assertMoneyInfraReady("Webhook credit");
+            } catch (e) {
+              return new Response(JSON.stringify({ ok: false, error: String((e as Error).message) }), {
+                status: 503,
+                headers: { "content-type": "application/json" },
+              });
+            }
             // Do not trust the webhook body alone — re-verify with PayChangu.
             const verified = await verifyPayment(ref);
             if (!verified.ok) {

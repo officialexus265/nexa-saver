@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { getPublicSiteFooter } from "@/lib/nexa/fns";
+import { useT } from "@/lib/i18n/client";
 
 export function SiteFooter({ className }: { className?: string }) {
+  const { t } = useT();
   const [name, setName] = useState("NEXUS265");
   const [url, setUrl] = useState("https://www.facebook.com/");
 
@@ -16,7 +18,7 @@ export function SiteFooter({ className }: { className?: string }) {
 
   return (
     <footer className={className ?? "mt-8 pb-2 text-center text-xs text-faint"}>
-      Developed by{" "}
+      {t("footer.developedBy")}{" "}
       <a
         href={url}
         target="_blank"

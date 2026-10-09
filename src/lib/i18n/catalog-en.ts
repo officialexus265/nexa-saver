@@ -1,157 +1,208 @@
 /**
- * Source-of-truth English UI strings for the whole front end.
- *
- * Each value is a FULL phrase as shown on screen (sentence / button label / hint).
- * Translators replace the whole string with a natural equivalent in the target language
- * (e.g. "I want tea" → "Ndikufuna tiyi"), never word-by-word glosses.
- *
- * Admin translates by key; missing keys fall back to these English values.
+ * Phrase-level English catalog (full lines users see — not word-by-word).
+ * Translation studio edits these keys; published maps overlay EN at runtime.
  */
 export const EN_CATALOG = {
-  // App / shell
-  "app.name": "NEXA-SAVER",
-  "app.tagline": "Quiet money. Clear control.",
+  // —— Nav / chrome ——
   "nav.home": "Home",
   "nav.profile": "Profile",
   "nav.admin": "Admin",
   "nav.signOut": "Sign out",
   "nav.language": "Language",
-  "lang.en": "English",
-  "lang.ny": "Chichewa",
-  "lang.comingSoon": "Coming soon",
+  "nav.share": "Share",
+  "nav.themeDay": "Day",
+  "nav.themeNight": "Night",
+
   "lang.choose": "Choose language",
-  "theme.day": "Day",
-  "theme.night": "Night",
-  "common.save": "Save",
+  "lang.comingSoon": "Coming soon",
+  "lang.english": "English",
+
+  "footer.developedBy": "Developed by",
+
+  // —— Common ——
   "common.cancel": "Cancel",
   "common.close": "Close",
-  "common.continue": "Continue",
+  "common.save": "Save",
   "common.back": "Back",
+  "common.continue": "Continue",
+  "common.confirm": "Confirm",
   "common.loading": "Loading…",
   "common.error": "Something went wrong",
   "common.success": "Done",
-  "common.confirm": "Confirm",
-  "common.search": "Search",
-  "common.optional": "Optional",
-  "common.required": "Required",
+  "common.copy": "Copy",
+  "common.copied": "Copied",
 
-  // Auth
+  // —— Auth ——
   "auth.signIn": "Sign in",
-  "auth.signUp": "Create account",
-  "auth.email": "Email",
+  "auth.signUp": "Sign up",
+  "auth.createVault": "Create your vault",
   "auth.password": "Password",
-  "auth.username": "Username",
-  "auth.phone": "Phone",
   "auth.forgotPassword": "Forgot password?",
-  "auth.noAccount": "No account yet?",
-  "auth.hasAccount": "Already have an account?",
-  "auth.firstName": "First name",
-  "auth.lastName": "Last name",
-  "auth.dateOfBirth": "Date of birth",
-  "auth.gender": "Gender",
-  "auth.pin": "PIN",
-  "auth.securityQuestion": "Security question",
-  "auth.securityAnswer": "Security answer",
-  "auth.acceptTerms": "I accept the Terms of use",
-  "auth.acceptPrivacy": "I accept the Privacy policy",
-  "auth.terms": "Terms of use",
-  "auth.privacy": "Privacy policy",
-  "auth.step.you": "You",
-  "auth.step.contact": "Contact",
-  "auth.step.security": "Security",
-  "auth.step.legal": "Legal",
-  "auth.resetPassword": "Reset password",
-  "auth.newPassword": "New password",
-  "auth.currentPassword": "Current password",
+  "auth.noAccount": "New here?",
+  "auth.hasAccount": "Already have a vault?",
+  "auth.loginAside": "A Malawi kwacha vault with a PIN-locked balance and a quiet session.",
+  "auth.signupAside": "Open a vault. Deposits keep most of what you send; withdrawals return to the number you register.",
+  "auth.identifier": "Username, email, or phone",
+  "auth.shareApp": "Share",
 
-  // Dashboard
-  "dash.balance": "Balance",
-  "dash.hidden": "Hidden",
-  "dash.reveal": "Reveal balance",
-  "dash.deposit": "Deposit",
-  "dash.withdraw": "Withdraw",
-  "dash.activity": "Activity",
+  // —— Signup intro ——
+  "signup.introTitle": "Before you open a vault",
+  "signup.introBody":
+    "Are you already familiar with how NEXA-SAVER works (deposits, fees, withdrawals, and locks)?",
+  "signup.introYes": "Yes — go to sign up",
+  "signup.introNo": "No — show me how it works",
+  "signup.introCancel": "Cancel and go home",
+  "signup.videoTitle": "How NEXA-SAVER works",
+  "signup.videoHint": "Watch the short guide. You can skip anytime.",
+  "signup.skipVideo": "Skip video",
+  "signup.proceed": "Proceed to sign up",
+  "signup.ready": "Ready when you are.",
+
+  // —— Dashboard ——
+  "dash.welcome": "Welcome back",
+  "dash.available": "Available to withdraw",
+  "dash.checkBalance": "Check balance",
   "dash.lifetimeIn": "Lifetime in",
   "dash.lifetimeOut": "out",
-  "dash.dailyCap": "Daily withdraw limit",
-  "dash.remainingToday": "Remaining today",
-  "dash.withdrawHold": "Withdrawals on hold",
-  "dash.lockTitle": "Withdrawal lock",
-  "dash.lockHint": "Optional commitment: deposit anytime, no withdrawals until the date you set.",
-  "dash.lockUntil": "Locked until",
-  "dash.coolingOff": "Free cooling-off until",
-  "dash.unlockEarly": "Unlock early",
-  "dash.cancelLockFree": "Cancel lock free",
-  "dash.lockWithdrawals": "Lock withdrawals",
+  "dash.deposit": "Deposit",
+  "dash.withdraw": "Withdraw",
+  "dash.send": "Send",
+  "dash.activity": "Activity",
+  "dash.noActivity": "No activity yet.",
+  "dash.receivedBag": "Received bag",
+  "dash.receivedHint":
+    "Money sent to you stays here until you withdraw it or move it to your main vault. Bank withdrawals take a 700 MWK flat from this bag (not a NEXA fee). MoMo can take the full amount.",
+  "dash.moveToMain": "Move all to main vault (free)",
+  "dash.movedTitle": "Moved to main vault",
+  "dash.movedBody":
+    "Received funds are now in your main balance. Bank withdraws from main still use the 700 MWK bank flat.",
+  "dash.verifyPhoneTitle": "Verify your withdrawal number",
+  "dash.verifyPhoneBody":
+    "To unlock withdrawals, deposit once from your registered number. That proves the line is active and yours.",
+  "dash.depositToVerify": "Deposit to verify",
+  "dash.holdWithdraw": "Withdrawals on hold",
+  "dash.maxDaily": "Daily max",
+  "dash.loanTitle": "Loan (against self-lock)",
+  "dash.loanHint":
+    "Only while a voluntary withdrawal time-lock is active. Admin locks do not qualify. Max 90% of locked balance. Interest is charged monthly on the amount due.",
+  "dash.loanBlocked": "Withdrawals are locked by the platform. Loans need a self time-lock only.",
+  "dash.affiliateTitle": "Affiliate / referral",
+  "dash.affiliateHint":
+    "Earn a share of a friend’s first deposit only. After that, no further commission from them. Withdraw earnings from the minimum shown (platform fee on withdrawal).",
+  "dash.affiliateTerms":
+    "I accept the affiliate terms: commission only on each referred user’s first deposit; withdrawal fee applies as shown.",
+  "dash.becomeAffiliate": "Become an affiliate",
+  "dash.shareInvite": "Share invite link",
+  "dash.referralPaused": "Referral program is paused. You can still withdraw earnings you already have.",
 
-  // Deposit / withdraw
-  "money.amount": "Amount (kwacha)",
-  "money.minDeposit": "Minimum deposit",
-  "money.minWithdraw": "Minimum withdraw",
-  "money.depositFeeKeep": "The system will keep {pct}% of whatever amount you are depositing",
-  "money.momo": "Mobile money",
-  "money.bank": "Bank",
-  "money.confirmPin": "Confirm with PIN",
-  "money.withdrawToMobile": "Withdraw to mobile",
-  "money.withdrawToBank": "Withdraw to bank",
-  "money.bankFlatFee": "Bank channel flat fee: 700 MWK",
-  "money.bankFlatExplain": "This is charged by the payment / bank rail, not by NEXA-SAVER.",
+  // —— Send ——
+  "send.title": "Send money",
+  "send.intro":
+    "Send the full amount to another NEXA-SAVER account. A small fixed fee is charged from your balance; the recipient gets what you type into their received bag.",
+  "send.amount": "Amount (kwacha)",
+  "send.theirNumber": "Their registered number",
+  "send.lookup": "Look up account",
+  "send.checking": "Checking…",
+  "send.coverTitle": "Cover bank flat (700 MWK)",
+  "send.coverHint":
+    "You also pay 700 so their received bag includes enough for a full bank payout of your amount. When they withdraw the whole bag to bank, 700 covers the bank flat. MoMo never needs the 700. Leave unchecked if they should fund the 700 from the amount alone.",
+  "send.feeLine": "Send fee",
+  "send.theyReceive": "They receive",
+  "send.totalFromYou": "Total from your vault",
+  "send.confirmRecipient": "Confirm recipient",
+  "send.now": "Send now",
+  "send.sending": "Sending…",
+  "send.min": "Minimum send is 100 kwacha.",
+  "send.noMatch": "That number does not match any NEXA-SAVER account.",
 
-  // Profile
+  // —— Withdraw ——
+  "withdraw.title": "Withdraw",
+  "withdraw.revealFirst": "Reveal your balance with your PIN before withdrawing.",
+  "withdraw.checkFirst": "Check balance first",
+  "withdraw.from": "Withdraw from",
+  "withdraw.mainVault": "Main vault",
+  "withdraw.receivedBag": "Received bag",
+  "withdraw.momo": "Mobile money",
+  "withdraw.bank": "Bank",
+  "withdraw.bankFlatTitle": "Bank channel flat fee: 700 MWK",
+  "withdraw.bankFlatBody":
+    "Charged by the bank / PayChangu rail, not NEXA-SAVER. The 700 MWK is taken from the balance you withdraw. MoMo has no 700 flat.",
+  "withdraw.paused": "Withdrawals are paused by the platform.",
+  "withdraw.momoOff": "Mobile money withdrawals are off right now.",
+  "withdraw.bankOff": "Bank withdrawals are off right now.",
+
+  // —— Deposit ——
+  "deposit.title": "Deposit",
+  "deposit.amount": "Amount (kwacha)",
+  "deposit.feeNote": "A platform fee is taken from each deposit; the rest is credited to your vault.",
+
+  // —— Activity kinds ——
+  "tx.deposit": "Deposit",
+  "tx.withdrawal": "Withdrawal",
+  "tx.fee": "Fee",
+  "tx.transfer_out": "Sent",
+  "tx.transfer_in": "Received",
+  "tx.success": "success",
+  "tx.pending": "pending",
+  "tx.failed": "failed",
+  "tx.processing": "processing",
+
+  // —— Profile ——
   "profile.title": "Profile",
   "profile.changePassword": "Change password",
-  "profile.changePin": "Change withdraw PIN",
-  "profile.withdrawalNumber": "Registered withdrawal number",
-  "profile.bankDetails": "Bank payout details",
-  "profile.email": "Email",
-  "profile.vaultLock": "Vault lock",
-  "profile.sessions": "Sessions",
-  "profile.deleteAccount": "Delete account",
-  "profile.signInIdentifier": "Sign-in identifier",
+  "profile.changePin": "Change PIN",
   "profile.securityQuestion": "Security question",
-  "profile.lock.idle": "After idle time",
-  "profile.lock.instant": "When I leave the app",
-  "profile.lock.off": "Do not lock",
+  "profile.vaultLock": "Vault lock",
+  "profile.lockOff": "Do not lock",
+  "profile.lockIdle": "After idle time",
+  "profile.lockLeave": "When I leave the app",
+  "profile.withdrawLock": "Withdrawal time-lock",
+  "profile.sessions": "Active sessions",
+  "profile.signOutSession": "Sign out this session",
+  "profile.phone": "Phone",
+  "profile.email": "Email",
+  "profile.bankDetails": "Bank payout details",
 
-  // Admin
-  "admin.performance": "Performance",
-  "admin.users": "Accounts",
-  "admin.treasury": "Treasury (platform profit)",
-  "admin.fees": "Platform fees",
+  // —— Vault lock ——
+  "vault.unlock": "Unlock vault",
+  "vault.locked": "Vault locked",
+  "vault.enterPin": "Enter your PIN",
+
+  // —— Share ——
+  "share.title": "Share NEXA-SAVER",
+  "share.hint": "Tell a friend — no referral code required.",
+  "share.button": "Share app",
+  "share.copied": "Link copied.",
+
+  // —— Legal ——
+  "legal.terms": "Terms of service",
+  "legal.privacy": "Privacy policy",
+  "legal.acceptTerms": "I accept the terms of service",
+  "legal.acceptPrivacy": "I accept the privacy policy",
+
+  // —— Admin (labels only) ——
+  "admin.title": "Admin",
+  "admin.overview": "Overview",
+  "admin.users": "Users",
   "admin.translations": "Translations",
-  "admin.translate": "Translate",
-  "admin.payoutMethods": "Payout methods",
-  "admin.survey": "Security survey",
 
-  // i18n studio
-  "i18n.studio": "Translation studio",
-  "i18n.studioHint": "Edit phrases for a language. Save draft to keep work private. Save & deploy publishes to all users who select that language.",
+  // —— i18n studio ——
+  "i18n.studioTitle": "Translation studio",
+  "i18n.studioHint":
+    "Edit full phrases as users see them (not word-by-word). Save draft privately, then Save & deploy so enabled languages go live.",
+  "i18n.language": "Language",
   "i18n.addLanguage": "Add language",
-  "i18n.languageCode": "Code (e.g. ny, pt)",
-  "i18n.languageName": "Display name",
   "i18n.saveDraft": "Save draft",
-  "i18n.saveDeploy": "Save & deploy",
-  "i18n.preview": "Open testing preview",
-  "i18n.enabled": "Language enabled for users",
+  "i18n.deploy": "Save & deploy",
   "i18n.published": "Published",
-  "i18n.draft": "Draft",
-  "i18n.searchKeys": "Search phrases…",
-  "i18n.testingAccount": "Testing preview",
-  "i18n.testingHint": "This preview uses your draft translations. Users only see published & enabled languages.",
-  "i18n.backAdmin": "Back to admin",
-  "i18n.noKeys": "No matching phrases",
-  "i18n.deployed": "Published to users",
-  "i18n.draftSaved": "Draft saved (not live yet)",
-
-  // Help / common empty
-  "help.title": "Help",
-  "empty.noActivity": "No activity yet",
-  "empty.noSessions": "No active sessions found",
-  "gate.enterPin": "Enter your PIN",
-  "gate.unlock": "Unlock",
-  "notFound": "Page not found",
-  "notFound.body": "This link is missing or expired.",
-  "notFound.back": "Back to NEXA-SAVER",
+  "i18n.enabled": "Enabled for users",
+  "i18n.preview": "Preview",
+  "i18n.testingHint": "Preview uses your draft. Users only see published & enabled languages.",
+  "i18n.selectPhrase": "Select a phrase to edit",
+  "i18n.englishSource": "English (source)",
+  "i18n.yourTranslation": "Your translation",
+  "i18n.applyLine": "Apply this line",
+  "i18n.deployedOk": "Deployed. Users who pick this language will see published phrases after refresh.",
 } as const;
 
 export type MessageKey = keyof typeof EN_CATALOG;

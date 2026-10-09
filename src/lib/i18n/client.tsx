@@ -10,8 +10,9 @@ type I18nCtx = {
   t: (key: string, vars?: Record<string, string | number>) => string;
   languages: LangInfo[];
   ready: boolean;
-  /** When true, uses draft maps injected by admin preview */
   previewMode: boolean;
+  /** Force re-fetch published maps + language list (after admin deploy). */
+  refresh: () => Promise<void>;
 };
 
 const Ctx = createContext<I18nCtx | null>(null);
@@ -24,6 +25,17 @@ function format(s: string, vars?: Record<string, string | number>) {
     out = out.replace(new RegExp(`\\{${k}\\}`, "g"), String(v));
   }
   return out;
+}
+
+async function loadLangMap(code: string): Promise<Record<string, string>> {
+  if (code === "en") return { ...EN_CATALOG };
+  try {
+    const pub = await getPublishedTranslations({ data: { lang: code } });
+    // Published overlays English so missing keys still show English.
+    return { ...EN_CATALOG, ...(pub || {}) };
+  } catch {
+    return { ...EN_CATALOG };
+  }
 }
 
 export function I18nProvider({
@@ -43,81 +55,88 @@ export function I18nProvider({
   const [ready, setReady] = useState(false);
   const previewMode = Boolean(previewMap);
 
-  useEffect(() => {
+  const bootstrap = useCallback(async () => {
     if (previewMap) {
       setMap({ ...EN_CATALOG, ...previewMap });
       if (previewLang) setLangState(previewLang);
       setReady(true);
       return;
     }
-    let cancelled = false;
-    (async () => {
+    try {
+      const langs = await listPublicLanguages();
+      setLanguages(langs);
+      let preferred = "en";
       try {
-        const langs = await listPublicLanguages();
-        if (cancelled) return;
-        setLanguages(langs);
-        let preferred = "en";
-        try {
-          preferred = localStorage.getItem(STORAGE_KEY) || "en";
-        } catch {
-          preferred = "en";
-        }
-        const allowed = langs.find((l) => l.code === preferred && (l.enabled || l.code === "en"));
-        const code = allowed ? preferred : "en";
-        setLangState(code);
-        if (code === "en") {
-          setMap({ ...EN_CATALOG });
-        } else {
-          const pub = await getPublishedTranslations({ data: { lang: code } });
-          if (!cancelled) setMap({ ...EN_CATALOG, ...pub });
-        }
+        preferred = localStorage.getItem(STORAGE_KEY) || "en";
       } catch {
-        if (!cancelled) setMap({ ...EN_CATALOG });
-      } finally {
-        if (!cancelled) setReady(true);
+        preferred = "en";
       }
-    })();
+      const allowed = langs.find((l) => l.code === preferred && (l.enabled || l.code === "en"));
+      const code = allowed ? preferred : "en";
+      setLangState(code);
+      setMap(await loadLangMap(code));
+    } catch {
+      setMap({ ...EN_CATALOG });
+    } finally {
+      setReady(true);
+    }
+  }, [previewMap, previewLang]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void bootstrap().then(() => {
+      if (cancelled) return;
+    });
     return () => {
       cancelled = true;
     };
-  }, [previewMap, previewLang]);
+  }, [bootstrap]);
 
   const setLang = useCallback(
     async (code: string) => {
-      if (previewMode) return;
-      const info = languages.find((l) => l.code === code);
-      if (!info) return;
-      if (!info.enabled && code !== "en") return;
-      setLangState(code);
-      try {
-        localStorage.setItem(STORAGE_KEY, code);
-      } catch {
-        /* ignore */
-      }
-      if (code === "en") {
-        setMap({ ...EN_CATALOG });
+      if (previewMode) {
+        setLangState(code);
         return;
       }
       try {
-        const pub = await getPublishedTranslations({ data: { lang: code } });
-        setMap({ ...EN_CATALOG, ...pub });
+        // Re-fetch list so a language just enabled after publish is selectable.
+        const langs = await listPublicLanguages();
+        setLanguages(langs);
+        const allowed = langs.find((l) => l.code === code && (l.enabled || l.code === "en"));
+        if (!allowed && code !== "en") {
+          // Not live yet — stay on current / fall back to en.
+          return;
+        }
+        try {
+          localStorage.setItem(STORAGE_KEY, code);
+        } catch {
+          /* ignore */
+        }
+        setLangState(code);
+        setMap(await loadLangMap(code));
       } catch {
+        setLangState("en");
         setMap({ ...EN_CATALOG });
       }
     },
-    [languages, previewMode],
+    [previewMode],
   );
+
+  const refresh = useCallback(async () => {
+    await bootstrap();
+  }, [bootstrap]);
 
   const t = useCallback(
     (key: string, vars?: Record<string, string | number>) => {
-      return format(map[key] ?? en(key), vars);
+      const raw = map[key] ?? en(key);
+      return format(raw, vars);
     },
     [map],
   );
 
   const value = useMemo(
-    () => ({ lang, setLang, t, languages, ready, previewMode }),
-    [lang, setLang, t, languages, ready, previewMode],
+    () => ({ lang, setLang, t, languages, ready, previewMode, refresh }),
+    [lang, setLang, t, languages, ready, previewMode, refresh],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -130,10 +149,11 @@ export function useT() {
       lang: "en",
       setLang: () => undefined,
       t: (key: string, vars?: Record<string, string | number>) => format(en(key), vars),
-      languages: [{ code: "en", name: "English", enabled: true }],
+      languages: [{ code: "en", name: "English", enabled: true, isDefault: true }],
       ready: true,
       previewMode: false,
-    } satisfies I18nCtx;
+      refresh: async () => undefined,
+    };
   }
   return ctx;
 }

@@ -30,7 +30,7 @@ export function AppShell({
           <ThemeToggle className="h-9 px-2.5" />
           {/* Desktop: share in top bar */}
           <div className="hidden md:block">
-            <ShareAppButton variant="nav" label="Share" />
+            <ShareAppButton variant="nav" label={t("nav.share")} />
           </div>
           <div className="hidden items-center gap-1 md:flex">
             <NavLink to="/dashboard" current={pathname}>
@@ -68,7 +68,7 @@ export function AppShell({
       >
         <TabLink to="/dashboard" current={pathname} icon={<LayoutDashboard className="size-5" />} label={t("nav.home")} />
         <TabLink to="/profile" current={pathname} icon={<UserRound className="size-5" />} label={t("nav.profile")} />
-        <ShareAppButton variant="tab" label="Share" />
+        <ShareAppButton variant="tab" label={t("nav.share")} />
         {isAdmin ? (
           <TabLink to="/admin" current={pathname} icon={<Shield className="size-5" />} label={t("nav.admin")} />
         ) : null}

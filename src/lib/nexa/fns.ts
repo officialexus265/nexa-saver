@@ -219,9 +219,14 @@ async function requirePinWindow(userId: string) {
 }
 
 export const bootstrapAdmin = createServerFn({ method: "POST" }).handler(async () => {
+  const { getSql } = await import("@/lib/db");
+  const sql = await getSql();
+  const before = await sql<{ n: number }>`select count(*)::int as n from profiles where role = ${"admin"}`;
+  const hadAdmin = asInt(before[0]?.n) > 0;
   const { ensureAdmin } = await import("./seed-admin.server");
   await ensureAdmin();
-  return { ok: true as const };
+  // ensureAdmin is a no-op when an admin profile already exists (no password reset).
+  return { ok: true as const, alreadyExisted: hadAdmin };
 });
 
 export const checkHandle = createServerFn({ method: "POST" })
@@ -684,6 +689,8 @@ export const startDeposit = createServerFn({ method: "POST" })
     }
     const { assertDepositsAllowed } = await import("./kill-switch.server");
     assertDepositsAllowed();
+    const { assertMoneyInfraReady } = await import("./production-guards.server");
+    assertMoneyInfraReady("Deposits");
     const sql = await getSql();
 
     const claim = await claimIdempotencyKey(sql, {
@@ -826,6 +833,8 @@ export const startWithdraw = createServerFn({ method: "POST" })
     }
     const { assertWithdrawalsAllowed } = await import("./kill-switch.server");
     assertWithdrawalsAllowed();
+    const { assertMoneyInfraReady } = await import("./production-guards.server");
+    assertMoneyInfraReady("Withdrawals");
     const sql = await getSql();
     const { getPayoutMethods, assertMethodAllowed } = await import("./payout-methods.server");
     const methods = await getPayoutMethods(sql);
@@ -1357,6 +1366,8 @@ export const adminOverview = createServerFn({ method: "GET" })
     await requireAdmin(context.userId);
     const { getSql } = await import("@/lib/db");
     const { demoPaymentsEnabled } = await import("./paychangu.server");
+    const { getProductionReadiness } = await import("./production-guards.server");
+    const { depositsPaused, withdrawalsPaused } = await import("./kill-switch.server");
     const sql = await getSql();
 
     const users = await sql<{ n: number }>`select count(*)::int as n from profiles where role = ${"user"}`;
@@ -1445,6 +1456,16 @@ export const adminOverview = createServerFn({ method: "GET" })
         withdrawals: asInt(r.withdrawals),
         profit: asInt(r.profit),
       })),
+      productionReadiness: (() => {
+        const base = getProductionReadiness();
+        return {
+          isProduction: base.isProduction,
+          allCriticalOk: base.allCriticalOk,
+          items: base.items,
+          depositsAllowed: !depositsPaused(),
+          withdrawalsAllowed: !withdrawalsPaused(),
+        };
+      })(),
     };
   });
 
@@ -3843,7 +3864,8 @@ export const adminPublishTranslations = createServerFn({ method: "POST" })
     const sql = await getSql();
     if (data.entries) await saveDraft(sql, data.lang, data.entries);
     const n = await publishLanguage(sql, data.lang);
-    if (data.enable) await setLanguageEnabled(sql, data.lang, true);
+    // Always enable on deploy so users can select the language immediately.
+    await setLanguageEnabled(sql, data.lang, data.enable !== false);
     const { writeAudit } = await import("./audit.server");
     await writeAudit(sql, {
       actorUserId: context.userId,
@@ -3964,6 +3986,8 @@ export const startTransfer = createServerFn({ method: "POST" })
 
     const { assertWithdrawalsAllowed } = await import("./kill-switch.server");
     assertWithdrawalsAllowed(); // send is tied to withdrawals
+    const { assertMoneyInfraReady } = await import("./production-guards.server");
+    assertMoneyInfraReady("Sending");
 
     const { verifySecret } = await import("./crypto");
     if (!(await verifySecret(profile.pin_hash, data.pin))) throw new Error("Incorrect PIN");

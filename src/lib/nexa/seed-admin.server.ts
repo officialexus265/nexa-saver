@@ -39,7 +39,9 @@ async function seedAdmin(): Promise<void> {
   const existing = await sql<{ user_id: string }>`
     select user_id from profiles where role = 'admin' limit 1
   `;
+  // Admin already exists — never re-seed, never reset password/PIN from env.
   if (existing.length) return;
+
 
   const password = resolveInitialPassword();
   if (!password) {

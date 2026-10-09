@@ -303,7 +303,7 @@ export function TranslationStudio() {
               setMsg(null);
               void adminPublishTranslations({ data: { lang, entries: draft, enable: true } })
                 .then((r) => {
-                  setMsg(`Deployed ${r.published} phrases. Language enabled.`);
+                  setMsg(`Deployed ${r.published} phrases and enabled the language. Users: open Language menu (or refresh) and select it. Only phrases in the catalog that you translated will change; the rest stay English until you translate them.`);
                   return adminListLanguages();
                 })
                 .then((list) => setLangs(list.filter((l) => l.code !== "en")))

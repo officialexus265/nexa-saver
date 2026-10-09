@@ -97,6 +97,14 @@ export type AdminOverview = {
   /** Profit still available for admin treasury withdraw (book profit − paid out) */
   treasuryAvailableTambala: number;
   series: Array<{ day: string; deposits: number; withdrawals: number; profit: number }>;
+  /** Phase A: env / money-path readiness (no secret values) */
+  productionReadiness: {
+    isProduction: boolean;
+    allCriticalOk: boolean;
+    items: Array<{ id: string; label: string; ok: boolean; hint: string; critical: boolean }>;
+    depositsAllowed: boolean;
+    withdrawalsAllowed: boolean;
+  };
 };
 
 

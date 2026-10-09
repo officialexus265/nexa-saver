@@ -76,6 +76,7 @@ function Vault({
   demoPayments: boolean;
   emailVerified: boolean;
 }) {
+  const { t } = useT();
   const [balance, setBalance] = useState<BalanceResponse | null>(null);
   const [txs, setTxs] = useState<PublicTx[] | null>(null);
   const [checkOpen, setCheckOpen] = useState(false);
@@ -116,7 +117,7 @@ function Vault({
       <SecuritySurveyGate />
       <HelpFab />
       <div className="stagger-in">
-        <p className="text-sm text-muted">Welcome back</p>
+        <p className="text-sm text-muted">{t("dash.welcome")}</p>
         <h1 className="font-display text-3xl font-semibold">{profile.firstName}</h1>
       </div>
 
@@ -126,7 +127,7 @@ function Vault({
 
       {emailVerified && !profile.phoneVerified ? (
         <div className="rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 text-sm">
-          <p className="font-medium text-fg">Verify your withdrawal number</p>
+          <p className="font-medium text-fg">{t("dash.verifyPhoneTitle")}</p>
           <p className="mt-1 text-muted">
             To unlock withdrawals, deposit once from your registered number{" "}
             <span className="text-fg">{formatPhoneDisplay(profile.phone)}</span>. That proves the line is active and yours.
@@ -138,7 +139,7 @@ function Vault({
       ) : null}
 
       <Card className="relative overflow-hidden p-6">
-        <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Available to withdraw</p>
+        <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">{t("dash.available")}</p>
         <div className="mt-4 flex items-end justify-between gap-3">
           {revealed ? (
             <p className="balance-reveal font-display text-4xl font-semibold tabular-nums">
@@ -156,7 +157,7 @@ function Vault({
         </div>
         {revealed && ((balance as { receivedBalanceTambala?: number }).receivedBalanceTambala ?? 0) > 0 ? (
           <div className="mt-4 rounded-xl border border-border bg-surface-2/60 p-3 text-sm">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted">Received bag</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted">{t("dash.receivedBag")}</p>
             <p className="mt-1 font-display text-xl font-semibold tabular-nums text-fg">
               {formatKwacha((balance as { receivedBalanceTambala?: number }).receivedBalanceTambala ?? 0)}
             </p>
@@ -181,7 +182,7 @@ function Vault({
                   .catch((err) => setSuccess({ title: "Could not move", body: errMessage(err) }));
               }}
             >
-              Move all to main vault (free)
+              {t("dash.moveToMain")}
             </Button>
           </div>
         ) : null}
@@ -1001,7 +1002,7 @@ function LoanPanel() {
   return (
     <Card className="mt-4 space-y-3 p-4">
       <div>
-        <h2 className="font-display text-lg font-semibold">Loan (against self-lock)</h2>
+        <h2 className="font-display text-lg font-semibold">{t("dash.loanTitle")}</h2>
         <p className="text-sm text-muted">
           Only while a voluntary withdrawal time-lock is active. Admin locks do not qualify. Max{" "}
           {elig ? `${Math.round((elig.ltv || 0.9) * 100)}%` : "90%"} of locked balance. Interest{" "}
@@ -1169,7 +1170,7 @@ function AffiliatePanel() {
 
   return (
     <Card className="mt-4 space-y-3 p-4">
-      <h2 className="font-display text-lg font-semibold">Affiliate / referral</h2>
+      <h2 className="font-display text-lg font-semibold">{t("dash.affiliateTitle")}</h2>
       {!st.programEnabled ? (
         <p className="text-sm text-warn">
           Referral program is paused by the platform. You cannot join or earn on new first deposits right now.
@@ -1196,7 +1197,7 @@ function AffiliatePanel() {
             disabled={!accept || busy || !st.programEnabled}
             onClick={() => void join()}
           >
-            {busy ? "…" : "Become an affiliate"}
+            {busy ? "…" : "{t("dash.becomeAffiliate")}"}
           </Button>
         </div>
       ) : (
