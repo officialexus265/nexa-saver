@@ -351,6 +351,7 @@ function Vault({
         open={depositOpen}
         demo={demoPayments}
         depositFeeRate={depositFeeRate}
+        registeredPhone={profile.phone}
         onClose={() => setDepositOpen(false)}
         onSuccess={(title, body) => {
           setDepositOpen(false);
@@ -664,23 +665,35 @@ function DepositModal({
   depositFeeRate = DEPOSIT_FEE_RATE,
   open,
   demo,
+  registeredPhone,
   onClose,
   onSuccess,
 }: {
   depositFeeRate?: number;
   open: boolean;
   demo: boolean;
+  registeredPhone?: string;
   onClose: () => void;
   onSuccess: (title: string, body: string) => void;
 }) {
   const [amount, setAmount] = useState("100");
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(registeredPhone || "");
   const [stage, setStage] = useState<"form" | "confirm" | "pay">("form");
   const [ref, setRef] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const kwacha = parseKwachaInput(amount);
   const split = kwacha ? splitDeposit(kwachaToTambala(kwacha), { depositFeeRate, platformProfitRate: depositFeeRate / 2, payoutReserveRate: depositFeeRate / 2 }) : null;
+
+  // Prefill registered number whenever the modal opens
+  useEffect(() => {
+    if (open) {
+      setPhone((prev) => prev.trim() || registeredPhone || "");
+      setStage("form");
+      setError(null);
+      setRef(null);
+    }
+  }, [open, registeredPhone]);
 
   function reset() {
     setStage("form");
@@ -691,13 +704,19 @@ function DepositModal({
 
   async function start() {
     if (!kwacha) return;
+    const phoneDigits = phone.replace(/\D/g, "");
+    if (phoneDigits.length < 9) {
+      setError("Enter a valid Malawi mobile number (e.g. 09… or 08…, at least 9 digits).");
+      setStage("form");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const res = await startDeposit({
         data: {
           amountKwacha: kwacha,
-          phone,
+          phone: phone.trim(),
           origin: window.location.origin,
           idempotencyKey: crypto.randomUUID(),
         },
@@ -745,9 +764,17 @@ function DepositModal({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="dep-phone">Paying number</Label>
-            <Input id="dep-phone" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Any Airtel or TNM number" />
+            <Input
+              id="dep-phone"
+              inputMode="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="09… or 08…"
+              autoComplete="tel"
+            />
             <p className="text-xs text-muted">
-              To unlock withdrawals, deposit at least once from your registered number (the one on your profile).
+              Pre-filled with your registered number. Change it only if you are paying from another Airtel/TNM line.
+              To verify your profile number, deposit once from that same number.
             </p>
           </div>
           {error ? <p className="text-sm text-danger">{error}</p> : null}
