@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { errMessage } from "@/lib/nexa/errors";
 import { getSecurityQuestion, resetPinWithQuestion, verifyPin } from "@/lib/nexa/fns";
+import { FocusTrap } from "@/components/focus-trap";
 
 export function PinGate({
   title = "Confirm your PIN",
@@ -72,7 +73,7 @@ export function PinGate({
   }
 
   return (
-    <div className="fixed inset-0 z-40 grid place-items-center bg-bg/92 p-5">
+    <FocusTrap label={forgot ? "Reset PIN" : title} className="grid place-items-center bg-bg p-5">
       <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-6 stagger-in">
         <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Locked</p>
         <h2 className="mt-2 font-display text-2xl font-semibold">{forgot ? "Reset PIN" : title}</h2>
@@ -118,6 +119,6 @@ export function PinGate({
           </div>
         )}
       </div>
-    </div>
+    </FocusTrap>
   );
 }

@@ -9,24 +9,29 @@ export function PwaRegister() {
     if (!import.meta.env.PROD || !("serviceWorker" in navigator)) return;
 
     let registration: ServiceWorkerRegistration | undefined;
+    let installingWorker: ServiceWorker | null = null;
+    let cancelled = false;
+
+    const onStateChange = () => {
+      if (cancelled) return;
+      if (installingWorker?.state === "installed" && navigator.serviceWorker.controller) {
+        setUpdateReady(true);
+      }
+    };
 
     const onUpdateFound = () => {
-      const installing = registration?.installing;
-      if (!installing) return;
-      installing.addEventListener("statechange", () => {
-        if (installing.state === "installed" && navigator.serviceWorker.controller) {
-          setUpdateReady(true);
-        }
-      });
+      installingWorker = registration?.installing ?? null;
+      if (!installingWorker) return;
+      installingWorker.addEventListener("statechange", onStateChange);
     };
 
     const register = () => {
       navigator.serviceWorker
         .register("/sw.js")
         .then((reg) => {
+          if (cancelled) return;
           registration = reg;
           reg.addEventListener("updatefound", onUpdateFound);
-          // Already waiting from a previous visit?
           if (reg.waiting && navigator.serviceWorker.controller) setUpdateReady(true);
         })
         .catch((err) => console.warn("[pwa] sw registration failed", err));
@@ -35,25 +40,28 @@ export function PwaRegister() {
     if (document.readyState === "complete") register();
     else window.addEventListener("load", register, { once: true });
 
-    // Periodically check for updates while the tab is open.
     const interval = window.setInterval(() => {
       void registration?.update();
     }, 60 * 60 * 1000);
 
-    return () => window.clearInterval(interval);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      if (registration) registration.removeEventListener("updatefound", onUpdateFound);
+      if (installingWorker) installingWorker.removeEventListener("statechange", onStateChange);
+      // load listener uses { once: true } — no remove needed if it already fired
+    };
   }, []);
 
   function applyUpdate() {
     if (!("serviceWorker" in navigator)) return;
     navigator.serviceWorker.getRegistration().then((reg) => {
       reg?.waiting?.postMessage({ type: "SKIP_WAITING" });
-      // Reload once the new worker takes control.
       navigator.serviceWorker.addEventListener(
         "controllerchange",
         () => window.location.reload(),
         { once: true },
       );
-      // If skipWaiting is handled, also try a soft reload shortly.
       window.setTimeout(() => window.location.reload(), 500);
     });
   }

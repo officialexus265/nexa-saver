@@ -8,6 +8,7 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { signOut as clientSignOut } from "@/lib/auth/client";
 import { errMessage } from "@/lib/nexa/errors";
 import { OfflineScreen, isLikelyOffline } from "@/components/offline-screen";
+import { FocusTrap } from "@/components/focus-trap";
 import { friendlyWebAuthnError } from "@/lib/nexa/webauthn-errors";
 import { useT } from "@/lib/i18n/client";
 import {
@@ -225,7 +226,7 @@ export function SessionGate({
       })}
       
       {!me.needsProfile && me.profile.role === "admin" && me.needsAdminTotp ? (
-        <div className="fixed inset-0 z-[60] grid place-items-center bg-bg/95 p-5">
+        <FocusTrap label="Admin verification" className="grid place-items-center bg-bg p-5">
           {(() => {
             const showPasskey = Boolean(me.adminHasPasskey);
             const showTotp = Boolean(me.adminTotpEnabled);
@@ -317,12 +318,12 @@ export function SessionGate({
           </form>
             );
           })()}
-        </div>
+        </FocusTrap>
       ) : null}
 
       
       {!me.needsProfile && me.profile.role !== "admin" && me.needsUserPasskey ? (
-        <div className="fixed inset-0 z-[60] grid place-items-center bg-bg/95 p-5">
+        <FocusTrap label="Passkey verification" className="grid place-items-center bg-bg p-5">
           <div className="w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6">
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Extra security</p>
             <h2 className="font-display text-2xl font-semibold">{t("passkey.challengeTitle")}</h2>
@@ -414,11 +415,11 @@ export function SessionGate({
               Sign out
             </Button>
           </div>
-        </div>
+        </FocusTrap>
       ) : null}
 
       {profile.mustChangePassword ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-bg/92 p-5">
+        <FocusTrap label="Set a new password" className="grid place-items-center bg-bg p-5">
           <form onSubmit={savePassword} className="w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6">
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">First login</p>
             <h2 className="font-display text-2xl font-semibold">Change the default password</h2>
@@ -443,7 +444,7 @@ export function SessionGate({
               {pwBusy ? "Saving password…" : "Save password"}
             </Button>
           </form>
-        </div>
+        </FocusTrap>
       ) : null}
       {locked === true && !profile.mustChangePassword ? (
         <PinGate

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BrandLockup } from "@/components/brand";
@@ -35,6 +35,13 @@ export function OfflineScreen({
   const [online, setOnline] = useState(
     typeof navigator !== "undefined" ? navigator.onLine : true,
   );
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     const on = () => setOnline(true);
@@ -62,7 +69,9 @@ export function OfflineScreen({
     try {
       onRetry();
     } finally {
-      window.setTimeout(() => setRetrying(false), 800);
+      window.setTimeout(() => {
+        if (mountedRef.current) setRetrying(false);
+      }, 800);
     }
   }
 

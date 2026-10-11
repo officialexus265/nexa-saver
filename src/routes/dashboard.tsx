@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Eye, EyeOff, ArrowDownToLine, ArrowUpFromLine, Send } from "lucide-react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { Modal } from "@/components/modal";
@@ -477,11 +477,19 @@ function ActivityDetailModal({
             ? "Fee details"
             : "Withdrawal details";
 
+  const copyTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
   async function copyRef() {
     try {
       await navigator.clipboard.writeText(tx.reference);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
+      if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = window.setTimeout(() => setCopied(false), 2000);
     } catch {
       window.prompt("Copy reference:", tx.reference);
     }
