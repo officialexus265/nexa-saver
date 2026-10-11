@@ -70,6 +70,10 @@ export type PublicTx = {
   reference: string;
   note: string | null;
   createdAt: string;
+  /** Send fee on transfer_out (hidden as separate activity row). */
+  sendFeeTambala?: number;
+  /** Shared transfer group reference (without _OUT / _IN). */
+  transferGroupRef?: string | null;
 };
 
 export type DepositStart =

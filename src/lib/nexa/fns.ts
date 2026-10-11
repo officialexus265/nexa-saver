@@ -696,12 +696,24 @@ export const listTransactions = createServerFn({ method: "GET" })
       reference: string;
       note: string | null;
       created_at: unknown;
+      send_fee_tambala: number | null;
+      transfer_group_ref: string | null;
     }>`
-      select id, kind, status, gross_tambala, credited_tambala, phone, reference, note, created_at
-      from transactions
-      where user_id = ${context.userId}
-      order by created_at desc
-      limit 40
+      select t.id, t.kind, t.status, t.gross_tambala, t.credited_tambala, t.phone, t.reference, t.note, t.created_at,
+             tr.fee_tambala as send_fee_tambala,
+             tr.reference as transfer_group_ref
+      from transactions t
+      left join transfers tr on tr.out_tx_id = t.id or tr.in_tx_id = t.id
+      where t.user_id = ${context.userId}
+        and not (
+          t.kind = 'fee'
+          and (
+            t.reference like '%\_FEE' escape '\'
+            or coalesce(t.note, '') ilike 'Send fee%'
+          )
+        )
+      order by t.created_at desc
+      limit 50
     `;
     return rows.map((r) => ({
       id: asInt(r.id),
@@ -726,9 +738,11 @@ export const listTransactions = createServerFn({ method: "GET" })
       grossTambala: asInt(r.gross_tambala),
       creditedTambala: asInt(r.credited_tambala),
       phone: r.phone,
-      reference: r.reference,
+      reference: r.transfer_group_ref || r.reference,
       note: r.note,
       createdAt: iso(r.created_at) ?? new Date().toISOString(),
+      sendFeeTambala: r.send_fee_tambala != null ? asInt(r.send_fee_tambala) : undefined,
+      transferGroupRef: r.transfer_group_ref,
     }));
   });
 

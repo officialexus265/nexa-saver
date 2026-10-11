@@ -321,12 +321,19 @@ function Vault({
                     </p>
                     <p className="text-xs text-muted">
                       {tx.status} · {new Date(tx.createdAt).toLocaleString()}
+                      {tx.kind === "transfer_out" && (tx.sendFeeTambala ?? 0) > 0
+                        ? ` · includes ${formatKwacha(tx.sendFeeTambala!, { compact: true })} fee`
+                        : ""}
                     </p>
                   </div>
                   <p className="text-sm tabular-nums">
                     {tx.kind === "deposit" || tx.kind === "transfer_in" ? "+" : "−"}
                     {formatKwacha(
-                      tx.kind === "deposit" || tx.kind === "transfer_in" ? tx.creditedTambala || tx.grossTambala : tx.grossTambala,
+                      tx.kind === "deposit" || tx.kind === "transfer_in"
+                        ? tx.creditedTambala || tx.grossTambala
+                        : tx.kind === "transfer_out"
+                          ? tx.grossTambala + (tx.sendFeeTambala ?? 0)
+                          : tx.grossTambala,
                       { compact: true },
                     )}
                   </p>
@@ -523,12 +530,31 @@ function ActivityDetailModal({
               <dd className="tabular-nums">{formatKwacha(tx.grossTambala)}</dd>
             </div>
             <div className="flex justify-between gap-3">
-              <dt className="text-muted">Fee (6%)</dt>
+              <dt className="text-muted">Platform fee</dt>
               <dd className="tabular-nums">{formatKwacha(feeTambala)}</dd>
             </div>
             <div className="flex justify-between gap-3">
               <dt className="text-muted">Credited to vault</dt>
               <dd className="tabular-nums font-medium text-primary">{formatKwacha(tx.creditedTambala)}</dd>
+            </div>
+          </>
+        ) : tx.kind === "transfer_out" ? (
+          <>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted">Amount sent (recipient got)</dt>
+              <dd className="tabular-nums font-medium">{formatKwacha(tx.grossTambala)}</dd>
+            </div>
+            {(tx.sendFeeTambala ?? 0) > 0 ? (
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted">Send fee</dt>
+                <dd className="tabular-nums">{formatKwacha(tx.sendFeeTambala!)}</dd>
+              </div>
+            ) : null}
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted">Total from your balance</dt>
+              <dd className="tabular-nums font-medium">
+                {formatKwacha(tx.grossTambala + (tx.sendFeeTambala ?? 0))}
+              </dd>
             </div>
           </>
         ) : (
@@ -571,8 +597,8 @@ function ActivityDetailModal({
       {tx.kind === "transfer_out" ? (
         <div className="mt-4 space-y-2 border-t border-border pt-3">
           <p className="text-xs text-muted">
-            Sent the full amount with no cut from what the recipient receives. Platform send fee was charged separately
-            on your balance (if any).
+            One send: the recipient received the full amount above. Any send fee was taken from your balance and is
+            included in this activity (not a separate line).
           </p>
           {tx.phone ? (
             <p className="text-sm">
@@ -1696,7 +1722,10 @@ function WithdrawModal({
   const [bankFinalAck, setBankFinalAck] = useState(false);
   const kwacha = parseKwachaInput(amount);
   const sourceMax = source === "received" ? receivedTambala : maxTambala;
-  const effectiveMax = Math.min(sourceMax, source === "received" ? receivedTambala : dailyRemainingTambala);
+  // When balance is hidden, avoid client-side max of 0 — server enforces funds + daily limits.
+  const effectiveMax = revealed
+    ? Math.min(sourceMax, source === "received" ? receivedTambala : dailyRemainingTambala)
+    : Number.POSITIVE_INFINITY;
   const onHold = Boolean(holdMessage);
   const bankOnHold =
     Boolean(bankHoldUntil) && new Date(bankHoldUntil!).getTime() > Date.now();
@@ -1766,14 +1795,7 @@ function WithdrawModal({
 
   return (
     <Modal open={open} title="Withdraw" onClose={onClose}>
-      {!revealed ? (
-        <div className="space-y-4">
-          <p className="text-sm text-muted">Reveal your balance with your PIN before withdrawing.</p>
-          <Button className="w-full" onClick={onNeedPin}>
-            Check balance first
-          </Button>
-        </div>
-      ) : onHold ? (
+      {onHold ? (
         <div className="space-y-4">
           <p className="text-sm text-muted">{holdMessage}</p>
           <Button className="w-full" variant="secondary" onClick={onClose}>
@@ -1782,6 +1804,12 @@ function WithdrawModal({
         </div>
       ) : (
         <div className="space-y-4">
+          {!revealed ? (
+            <p className="text-xs text-muted">
+              You can withdraw without revealing your balance. If the amount is more than you have (or over today’s
+              limit), the request is declined after you enter your PIN.
+            </p>
+          ) : null}
           {receivedTambala > 0 ? (
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted">Withdraw from</p>
@@ -1876,8 +1904,11 @@ function WithdrawModal({
             <>
               <p className="text-sm text-muted">
                 {method === "momo"
-                  ? `Funds leave to ${formatPhoneDisplay(phone)}. Available now: ${formatKwacha(effectiveMax)}.`
-                  : `Funds leave to ${bankLabel}. Available now: ${formatKwacha(effectiveMax)}.`}
+                  ? `Funds leave to ${formatPhoneDisplay(phone)}.`
+                  : `Funds leave to ${bankLabel}.`}
+                {revealed && Number.isFinite(effectiveMax)
+                  ? ` Available now: ${formatKwacha(effectiveMax)}.`
+                  : " Enter an amount and your PIN — if it is more than you can take, the request is declined."}
               </p>
 
               {method === "bank" ? (

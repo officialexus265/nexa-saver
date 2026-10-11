@@ -7,6 +7,7 @@ import { PasswordField } from "@/components/password-field";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { signOut as clientSignOut } from "@/lib/auth/client";
 import { errMessage } from "@/lib/nexa/errors";
+import { OfflineScreen, isLikelyOffline } from "@/components/offline-screen";
 import { friendlyWebAuthnError } from "@/lib/nexa/webauthn-errors";
 import { useT } from "@/lib/i18n/client";
 import {
@@ -153,9 +154,18 @@ export function SessionGate({
   if (!user) return <Navigate to="/" />;
   if (loadError === "Unauthorized") return <Navigate to="/" />;
   if (loadError) {
+    if (isLikelyOffline(loadError) || typeof navigator !== "undefined" && !navigator.onLine) {
+      return <OfflineScreen message={loadError} onRetry={() => void refresh()} />;
+    }
     return (
-      <div className="grid min-h-dvh place-items-center p-6 text-center">
-        <p className="text-sm text-danger">{loadError}</p>
+      <div className="nexa-shell grid min-h-dvh place-items-center p-6 text-center">
+        <div className="max-w-sm space-y-4">
+          <h1 className="font-display text-xl font-semibold">Couldn’t load your vault</h1>
+          <p className="text-sm text-muted">{loadError}</p>
+          <Button className="w-full" onClick={() => void refresh()}>
+            Try again
+          </Button>
+        </div>
       </div>
     );
   }

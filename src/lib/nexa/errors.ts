@@ -4,6 +4,18 @@ export function errMessage(err: unknown, fallback = "Something went wrong") {
   else if (typeof err === "string" && err) raw = err;
   else return fallback;
 
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes("failed to fetch") ||
+    lower.includes("networkerror") ||
+    lower.includes("network request failed") ||
+    lower.includes("load failed") ||
+    lower.includes("fetch failed") ||
+    lower === "network error"
+  ) {
+    return "Failed to fetch"; // SessionGate maps this to OfflineScreen
+  }
+
   // Zod / server validation often surfaces as a JSON array string
   const trimmed = raw.trim();
   if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
