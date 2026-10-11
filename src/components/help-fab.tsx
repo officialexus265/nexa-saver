@@ -43,12 +43,12 @@ export function HelpFab() {
   if (!lines.length) return null;
 
   return (
-    <div className="pointer-events-none fixed bottom-20 right-4 z-30 flex flex-col items-end gap-0 sm:bottom-8 sm:right-6">
-      {/* Stack only receives clicks when open — opacity-0 links must NOT stay pointer-events-auto */}
+    <div className="pointer-events-none fixed bottom-20 right-4 z-30 flex flex-col items-end sm:bottom-8 sm:right-6">
+      {/* Help lines: explode upward from the FAB */}
       <div
         className={cn(
-          "mb-3 flex flex-col-reverse items-end gap-2 transition-all duration-300",
-          open ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
+          "mb-3 flex flex-col-reverse items-end gap-2.5",
+          open ? "pointer-events-auto" : "pointer-events-none",
         )}
         aria-hidden={!open}
         {...(!open ? ({ inert: true } as React.HTMLAttributes<HTMLDivElement>) : {})}
@@ -61,14 +61,14 @@ export function HelpFab() {
             rel="noopener noreferrer"
             tabIndex={open ? 0 : -1}
             className={cn(
-              "flex items-center gap-3 rounded-full border border-border bg-surface py-2 pl-4 pr-3 shadow-lg transition-all duration-300",
-              open
-                ? "pointer-events-auto translate-y-0 scale-100 opacity-100"
-                : "pointer-events-none translate-y-4 scale-90 opacity-0",
+              "help-fab-chip flex items-center gap-3 rounded-full border border-border bg-surface/95 py-2 pl-4 pr-2.5 shadow-lg backdrop-blur-sm",
+              open ? "help-fab-chip-in" : "help-fab-chip-out",
             )}
-            style={{
-              transitionDelay: open ? `${i * 50}ms` : `${(lines.length - 1 - i) * 30}ms`,
-            }}
+            style={
+              {
+                "--chip-i": open ? i : lines.length - 1 - i,
+              } as React.CSSProperties
+            }
             onClick={(e) => {
               if (!open) {
                 e.preventDefault();
@@ -86,24 +86,51 @@ export function HelpFab() {
         ))}
       </div>
 
+      {/* Main toggle: agent ↔ X with morph */}
       <button
         type="button"
         aria-expanded={open}
         aria-label={open ? "Close help" : "Open help"}
         onClick={() => setOpen((v) => !v)}
-        className="pointer-events-auto relative size-14 shrink-0 overflow-hidden rounded-full bg-white shadow-lg ring-2 ring-primary/40 transition-transform duration-300"
-      >
-        {open ? (
-          <span className="grid size-full place-items-center bg-surface text-fg">
-            <X className="size-6" />
-          </span>
-        ) : (
-          <img
-            src="/help-agent.png"
-            alt="Help"
-            className="absolute inset-0 size-full object-cover object-center"
-          />
+        className={cn(
+          "help-fab-main pointer-events-auto relative size-14 shrink-0 overflow-hidden rounded-full shadow-lg",
+          "ring-2 ring-primary/35 transition-[box-shadow,transform] duration-300 ease-out",
+          "hover:scale-105 hover:ring-primary/60 active:scale-95",
+          open && "help-fab-main-open ring-primary/70 shadow-primary/20",
         )}
+      >
+        {/* Soft pulse ring when closed */}
+        {!open ? <span className="help-fab-pulse" aria-hidden /> : null}
+
+        {/* Agent image */}
+        <img
+          src="/help-agent.png"
+          alt=""
+          className={cn(
+            "absolute inset-0 size-full object-cover object-center transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
+            open
+              ? "scale-50 rotate-[-90deg] opacity-0 blur-sm"
+              : "scale-100 rotate-0 opacity-100 blur-0",
+          )}
+        />
+
+        {/* Close X on tinted plate */}
+        <span
+          className={cn(
+            "absolute inset-0 grid place-items-center bg-surface text-fg transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
+            open
+              ? "scale-100 rotate-0 opacity-100"
+              : "scale-50 rotate-90 opacity-0",
+          )}
+          aria-hidden={!open}
+        >
+          <X
+            className={cn(
+              "size-6 transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
+              open ? "rotate-0 scale-100" : "rotate-90 scale-50",
+            )}
+          />
+        </span>
       </button>
     </div>
   );

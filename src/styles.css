@@ -291,3 +291,64 @@
     border-color: var(--color-primary, #3dcf8e);
   }
 }
+
+
+/* —— Help FAB (agent / close morph + chip rise) —— */
+@keyframes help-fab-pulse {
+  0% { transform: scale(1); opacity: 0.55; }
+  70% { transform: scale(1.55); opacity: 0; }
+  100% { transform: scale(1.55); opacity: 0; }
+}
+.help-fab-pulse {
+  pointer-events: none;
+  position: absolute;
+  inset: -2px;
+  border-radius: 9999px;
+  border: 2px solid color-mix(in oklab, var(--primary, #2dd4a8) 70%, transparent);
+  animation: help-fab-pulse 2.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+.help-fab-main-open {
+  animation: help-fab-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes help-fab-pop {
+  0% { transform: scale(0.85) rotate(-8deg); }
+  60% { transform: scale(1.12) rotate(4deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+.help-fab-chip {
+  transform-origin: bottom right;
+  will-change: transform, opacity, filter;
+}
+.help-fab-chip-in {
+  animation: help-fab-chip-in 0.48s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+  animation-delay: calc(var(--chip-i, 0) * 55ms);
+}
+.help-fab-chip-out {
+  animation: help-fab-chip-out 0.28s cubic-bezier(0.4, 0, 1, 1) both;
+  animation-delay: calc(var(--chip-i, 0) * 35ms);
+  pointer-events: none;
+}
+@keyframes help-fab-chip-in {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.72) rotate(6deg);
+    filter: blur(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+    filter: blur(0);
+  }
+}
+@keyframes help-fab-chip-out {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.85) rotate(-4deg);
+    filter: blur(3px);
+  }
+}
