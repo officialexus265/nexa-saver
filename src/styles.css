@@ -293,14 +293,6 @@
 }
 
 
-
-  100% {
-    opacity: 0;
-    transform: translateY(12px) scale(0.85) rotate(-4deg);
-    filter: blur(3px);
-  }
-}
-
 /* —— Help FAB (light) —— */
 @keyframes help-fab-glow {
   0%, 100% { opacity: 0.35; transform: scale(1); }
