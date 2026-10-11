@@ -24,6 +24,9 @@ export const DEPOSIT_FEE_RATE = 0.06;
 export const PLATFORM_PROFIT_RATE = 0.03;
 export const PAYOUT_FEE_RATE = 0.03;
 
+/** PayChangu MoMo payout rail fee (merchant). Shown as estimate on admin sends. */
+export const MOMO_PAYOUT_RAIL_RATE = 0.018;
+
 /**
  * Daily withdrawal limits (calendar day, Africa/Blantyre).
  *

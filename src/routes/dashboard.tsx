@@ -10,7 +10,7 @@ import { LoadingStatus } from "@/components/ui/spinner";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { DEPOSIT_FEE_RATE, MIN_DEPOSIT_KWACHA, MIN_WITHDRAW_KWACHA, BANK_FLAT_FEE_KWACHA, MIN_BANK_WITHDRAW_KWACHA } from "@/lib/nexa/constants";
+import { DEPOSIT_FEE_RATE, MIN_DEPOSIT_KWACHA, MIN_WITHDRAW_KWACHA, BANK_FLAT_FEE_KWACHA, MIN_BANK_WITHDRAW_KWACHA, MOMO_PAYOUT_RAIL_RATE } from "@/lib/nexa/constants";
 import { errMessage } from "@/lib/nexa/errors";
 import { friendlyWebAuthnError } from "@/lib/nexa/webauthn-errors";
 import { useT } from "@/lib/i18n/client";
@@ -923,6 +923,9 @@ function SendModal({
     }
     return 0;
   })();
+  /** PayChangu MoMo payout estimate (1.8%). Charged by PayChangu, not NEXA. */
+  const railFeeKwacha = kwacha ? Math.round(kwacha * MOMO_PAYOUT_RAIL_RATE) : 0;
+  const railPctLabel = `${(MOMO_PAYOUT_RAIL_RATE * 100).toFixed(1)}%`;
 
   async function lookup() {
     setBusy(true);
@@ -1040,9 +1043,21 @@ function SendModal({
               </>
             ) : null}
             {isAdmin && kwacha ? (
-              <p className="text-sm text-muted">
-                {kwacha} kwacha will leave your main balance to this MoMo number (no NEXA send fee).
-              </p>
+              <div className="rounded-xl border border-border bg-surface-2/60 p-3 text-sm space-y-1">
+                <p>
+                  From your <span className="font-medium text-fg">NEXA main balance</span>:{" "}
+                  <span className="tabular-nums font-semibold">{kwacha} kwacha</span>
+                </p>
+                <p>
+                  Est. PayChangu rail ({railPctLabel}):{" "}
+                  <span className="tabular-nums font-semibold">{railFeeKwacha} kwacha</span>
+                </p>
+                <p className="text-xs text-muted">
+                  NEXA does not take a send fee. PayChangu typically charges ~{railPctLabel} on MoMo payouts from
+                  your PayChangu merchant wallet (about {railFeeKwacha} on this amount). Recipient is paid the
+                  amount you type.
+                </p>
+              </div>
             ) : null}
             <Button type="button" className="w-full" disabled={busy || !phone || !kwacha} onClick={() => void lookup()}>
               {busy ? "Checking…" : isAdmin ? "Look up number" : "Look up account"}
@@ -1083,11 +1098,32 @@ function SendModal({
                 <span>I confirmed this number is correct and want to send off-platform.</span>
               </label>
             ) : null}
-            <p className="text-sm text-muted">
-              {isAdmin
-                ? `Full ${kwacha} kwacha leaves your main balance (PayChangu rail fees may apply on their side).`
-                : `Fee ${feeKwacha} kwacha${coverBankFlat ? " · bank-flat cover 700" : ""} · total from your vault ${kwacha! + feeKwacha + (coverBankFlat ? 700 : 0)} kwacha`}
-            </p>
+            {isAdmin ? (
+              <div className="rounded-xl border border-border bg-surface-2/60 p-3 text-sm space-y-1.5">
+                <div className="flex justify-between gap-2">
+                  <span className="text-muted">From NEXA balance</span>
+                  <span className="tabular-nums font-medium">{kwacha} kwacha</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-muted">PayChangu rail (~{railPctLabel})</span>
+                  <span className="tabular-nums font-medium">{railFeeKwacha} kwacha</span>
+                </div>
+                <div className="flex justify-between gap-2 border-t border-border pt-1.5">
+                  <span className="text-muted">Recipient gets (MoMo)</span>
+                  <span className="tabular-nums font-semibold text-primary">{kwacha} kwacha</span>
+                </div>
+                <p className="text-xs text-muted">
+                  The {railFeeKwacha} kwacha is an estimate of PayChangu&apos;s fee on this payout — charged on your
+                  PayChangu account, not as an extra NEXA deduction. Exact fee is set by PayChangu.
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-muted">
+                Fee {feeKwacha} kwacha
+                {coverBankFlat ? " · bank-flat cover 700" : ""} · total from your vault{" "}
+                {kwacha! + feeKwacha + (coverBankFlat ? 700 : 0)} kwacha
+              </p>
+            )}
             <div className="flex gap-2">
               <Button type="button" variant="secondary" className="flex-1" onClick={() => setStage("form")}>
                 Back
@@ -1106,7 +1142,11 @@ function SendModal({
 
         {stage === "pin" && recipient ? (
           <>
-            <p className="text-sm text-muted">Enter your withdraw PIN to send.</p>
+            <p className="text-sm text-muted">
+              {isAdmin
+                ? `Enter PIN to send ${kwacha} kwacha (est. PayChangu rail ${railFeeKwacha} kwacha at ${railPctLabel}).`
+                : "Enter your withdraw PIN to send."}
+            </p>
             <PinPad value={pin} onChange={setPin} disabled={busy} />
             <Button
               type="button"
