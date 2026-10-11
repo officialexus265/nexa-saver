@@ -74,6 +74,8 @@ import {
 
 
   adminTreasuryWithdraw,
+  adminTreasurySendToPhone,
+  adminLookupMomoRecipient,
   adminExportSurveyCsv,
   adminDeleteUser,
   adminLockUser,
@@ -2488,12 +2490,31 @@ function TreasuryWithdrawForm({
   availableTambala: number;
   onDone: () => void;
 }) {
+  const [mode, setMode] = useState<"self" | "any">("self");
   const [amount, setAmount] = useState("");
   const [pin, setPin] = useState("");
+  const [phone, setPhone] = useState("");
+  const [lookup, setLookup] = useState<Awaited<ReturnType<typeof adminLookupMomoRecipient>> | null>(null);
+  const [confirmOff, setConfirmOff] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const kwacha = Number(amount);
+
+  async function doLookup() {
+    setBusy(true);
+    setErr(null);
+    setLookup(null);
+    setConfirmOff(false);
+    try {
+      const res = await adminLookupMomoRecipient({ data: { phone } });
+      setLookup(res);
+    } catch (e) {
+      setErr(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -2501,16 +2522,35 @@ function TreasuryWithdrawForm({
     setErr(null);
     setMsg(null);
     try {
-      const res = await adminTreasuryWithdraw({
-        data: {
-          amountKwacha: kwacha,
-          pin,
-          idempotencyKey: crypto.randomUUID(),
-        },
-      });
-      setMsg(
-        `Sent. Gross ${formatKwacha(res.grossTambala)} · rail fee ~${formatKwacha(res.feeTambala)} · net to your registered number ${formatKwacha(res.netTambala)}. Ref ${res.reference}`,
-      );
+      if (mode === "self") {
+        const res = await adminTreasuryWithdraw({
+          data: {
+            amountKwacha: kwacha,
+            pin,
+            idempotencyKey: crypto.randomUUID(),
+          },
+        });
+        setMsg(
+          `Sent to your registered number. Gross ${formatKwacha(res.grossTambala)} · rail ~${formatKwacha(res.feeTambala)} · net ${formatKwacha(res.netTambala)}. Ref ${res.reference}`,
+        );
+      } else {
+        if (!lookup) throw new Error("Look up the number first.");
+        const res = await adminTreasurySendToPhone({
+          data: {
+            amountKwacha: kwacha,
+            pin,
+            phone: lookup.phone,
+            confirmedOffPlatform: lookup.onPlatform ? true : confirmOff,
+            idempotencyKey: crypto.randomUUID(),
+          },
+        });
+        setMsg(
+          `Sent to ${lookup.phoneDisplay}. Gross ${formatKwacha(res.grossTambala)} · rail ~${formatKwacha(res.feeTambala)} · net ${formatKwacha(res.netTambala)}. Ref ${res.reference}`,
+        );
+        setLookup(null);
+        setPhone("");
+        setConfirmOff(false);
+      }
       setAmount("");
       setPin("");
       onDone();
@@ -2521,11 +2561,117 @@ function TreasuryWithdrawForm({
     }
   }
 
+  const canSendAny =
+    mode === "any" &&
+    lookup &&
+    (lookup.onPlatform || confirmOff) &&
+    pin.length === 4 &&
+    kwacha > 0;
+
   return (
     <form onSubmit={(e) => void submit(e)} className="space-y-3 border-t border-border pt-3">
       <p className="text-sm text-muted">
-        Withdraw profit to the admin registered mobile number. Available: {formatKwacha(availableTambala)}.
+        Send platform profit via PayChangu MoMo. Available: {formatKwacha(availableTambala)}. ~1.8% rail fee
+        applies (not a NEXA fee).
       </p>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          className={
+            mode === "self"
+              ? "rounded-xl border border-primary bg-primary/10 px-3 py-2 text-sm font-medium"
+              : "rounded-xl border border-border px-3 py-2 text-sm text-muted"
+          }
+          onClick={() => {
+            setMode("self");
+            setLookup(null);
+            setErr(null);
+          }}
+        >
+          My registered number
+        </button>
+        <button
+          type="button"
+          className={
+            mode === "any"
+              ? "rounded-xl border border-primary bg-primary/10 px-3 py-2 text-sm font-medium"
+              : "rounded-xl border border-border px-3 py-2 text-sm text-muted"
+          }
+          onClick={() => {
+            setMode("any");
+            setErr(null);
+          }}
+        >
+          Any Airtel / TNM
+        </button>
+      </div>
+
+      {mode === "any" ? (
+        <div className="space-y-2 rounded-xl border border-border bg-surface-2 p-3">
+          <p className="text-xs text-muted">
+            Recipient does <span className="text-fg">not</span> need a NEXA account. PayChangu does not publish a
+            MoMo name-enquiry API — if they are on NEXA we show their name; otherwise confirm the digits carefully.
+          </p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <Label htmlFor="adm-momo">Recipient number</Label>
+              <Input
+                id="adm-momo"
+                inputMode="tel"
+                value={phone}
+                onChange={(e) => {
+                  setPhone(e.target.value);
+                  setLookup(null);
+                  setConfirmOff(false);
+                }}
+                placeholder="09… or 08…"
+              />
+            </div>
+            <Button type="button" variant="secondary" disabled={busy || phone.trim().length < 8} onClick={() => void doLookup()}>
+              {busy && !lookup ? "Looking up…" : "Look up"}
+            </Button>
+          </div>
+          {lookup ? (
+            <div className="space-y-2 rounded-lg border border-border bg-surface p-3 text-sm">
+              <p>
+                <span className="text-muted">Number</span>{" "}
+                <span className="font-medium tabular-nums">{lookup.phoneDisplay}</span>
+              </p>
+              <p>
+                <span className="text-muted">Network</span> {lookup.operator}
+              </p>
+              {lookup.onPlatform ? (
+                <p>
+                  <span className="text-muted">On NEXA</span>{" "}
+                  <span className="font-medium text-primary">
+                    {lookup.fullName}
+                    {lookup.username ? ` (@${lookup.username})` : ""}
+                  </span>
+                </p>
+              ) : (
+                <p className="text-amber-600 dark:text-amber-400">
+                  Not on NEXA-SAVER — MoMo holder name is not available from PayChangu before send.
+                </p>
+              )}
+              <p className="text-xs text-muted">{lookup.note}</p>
+              {!lookup.onPlatform ? (
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1 size-4"
+                    checked={confirmOff}
+                    onChange={(e) => setConfirmOff(e.target.checked)}
+                  />
+                  <span>
+                    I double-checked this number and accept sending to a wallet not registered on NEXA-SAVER.
+                  </span>
+                </label>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="space-y-1.5">
         <Label htmlFor="try-amt">Amount (kwacha)</Label>
         <Input
@@ -2537,7 +2683,7 @@ function TreasuryWithdrawForm({
         />
         {kwacha > 0 ? (
           <p className="text-xs text-muted">
-            After ~1.8% rail fee you receive about {Math.max(0, Math.round(kwacha * 0.982))} kwacha
+            After ~1.8% rail fee about {Math.max(0, Math.round(kwacha * 0.982))} kwacha lands on the phone
           </p>
         ) : null}
       </div>
@@ -2557,9 +2703,19 @@ function TreasuryWithdrawForm({
       <Button
         type="submit"
         className="h-12 w-full sm:w-auto"
-        disabled={busy || pin.length !== 4 || !kwacha || kwacha <= 0}
+        disabled={
+          busy ||
+          pin.length !== 4 ||
+          !kwacha ||
+          kwacha <= 0 ||
+          (mode === "any" && !canSendAny)
+        }
       >
-        {busy ? "Sending…" : "Withdraw profit"}
+        {busy
+          ? "Sending…"
+          : mode === "self"
+            ? "Withdraw to my number"
+            : "Send to this MoMo number"}
       </Button>
     </form>
   );

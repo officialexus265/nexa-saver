@@ -6449,3 +6449,252 @@ export const adminResolveStuckDeposits = createServerFn({ method: "POST" })
     });
     return { results };
   });
+
+
+/** Admin: resolve a MoMo number before sending. NEXA name if registered; PayChangu has no public name-enquiry API. */
+export const adminLookupMomoRecipient = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ phone: z.string().min(8).max(20) }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { normalizeMwPhone, detectOperator, formatPhoneDisplay } = await import("./phone");
+    const mobile = normalizeMwPhone(data.phone);
+    if (!mobile) throw new Error("Enter a valid Malawi Airtel (09…) or TNM (08…) number.");
+    const op = detectOperator(mobile);
+    const operatorLabel = op === "airtel" ? "Airtel Money" : op === "tnm" ? "TNM Mpamba" : "Mobile money";
+
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{
+      user_id: string;
+      first_name: string;
+      last_name: string;
+      username: string;
+    }>`
+      select user_id, first_name, last_name, username
+      from profiles
+      where phone = ${mobile}
+      limit 3
+    `;
+
+    if (rows.length === 1) {
+      const r = rows[0]!;
+      return {
+        phone: mobile,
+        phoneDisplay: formatPhoneDisplay(mobile),
+        operator: operatorLabel,
+        onPlatform: true as const,
+        fullName: `${r.first_name} ${r.last_name}`.trim(),
+        username: r.username,
+        userId: r.user_id,
+        nameSource: "nexa" as const,
+        note: "Registered on NEXA-SAVER. PayChangu does not publish a MoMo name-enquiry API, so this is the platform name.",
+      };
+    }
+    if (rows.length > 1) {
+      return {
+        phone: mobile,
+        phoneDisplay: formatPhoneDisplay(mobile),
+        operator: operatorLabel,
+        onPlatform: true as const,
+        fullName: `${rows.length} accounts share this number`,
+        username: rows.map((r) => r.username).join(", "),
+        userId: null as string | null,
+        nameSource: "nexa" as const,
+        note: "Multiple NEXA accounts use this number. Confirm carefully before sending.",
+      };
+    }
+
+    return {
+      phone: mobile,
+      phoneDisplay: formatPhoneDisplay(mobile),
+      operator: operatorLabel,
+      onPlatform: false as const,
+      fullName: null as string | null,
+      username: null as string | null,
+      userId: null as string | null,
+      nameSource: "none" as const,
+      note: "Not registered on NEXA-SAVER. PayChangu’s public API does not return the MoMo wallet holder’s name before payout — double-check the digits, then confirm.",
+    };
+  });
+
+/**
+ * Admin: send treasury (platform profit) to any Airtel/TNM number — does not need to be a NEXA user.
+ * Same ~1.8% rail fee estimate as treasury withdraw to admin’s own number.
+ */
+export const adminTreasurySendToPhone = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      amountKwacha: z.number().positive(),
+      pin: pinSchema,
+      phone: z.string().min(8).max(20),
+      /** Must be true after admin reviewed the lookup screen for off-platform numbers. */
+      confirmedOffPlatform: z.boolean().optional(),
+      idempotencyKey: z.string().min(8).max(128),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdminSensitive(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { verifySecret, newReference } = await import("./crypto");
+    const { kwachaToTambala, tambalaToKwacha, formatKwacha } = await import("./money");
+    const { paychanguConfigured, demoPaymentsEnabled, initiateMomoPayout } = await import("./paychangu.server");
+    const { claimIdempotencyKey, storeIdempotencyResponse } = await import("./idempotency.server");
+    const { MIN_WITHDRAW_KWACHA } = await import("./constants");
+    const { normalizeMwPhone, detectOperator, formatPhoneDisplay } = await import("./phone");
+
+    if (!paychanguConfigured() && !demoPaymentsEnabled()) {
+      throw new Error("Payouts are not configured");
+    }
+    if (data.amountKwacha < MIN_WITHDRAW_KWACHA) {
+      throw new Error(`Minimum send is ${MIN_WITHDRAW_KWACHA} kwacha`);
+    }
+
+    const mobile = normalizeMwPhone(data.phone);
+    if (!mobile) throw new Error("Enter a valid Malawi Airtel or TNM number.");
+    if (!detectOperator(mobile)) throw new Error("Only Airtel (09…) and TNM (08…) numbers are supported.");
+
+    const sql = await getSql();
+    const onPlatform = await sql<{ n: number }>`
+      select count(*)::int as n from profiles where phone = ${mobile}
+    `;
+    if (asInt(onPlatform[0]?.n) === 0 && !data.confirmedOffPlatform) {
+      throw new Error(
+        "This number is not on NEXA-SAVER. Confirm the number carefully, then tick “I confirmed this number” before sending.",
+      );
+    }
+
+    const claim = await claimIdempotencyKey(sql, {
+      key: data.idempotencyKey,
+      userId: context.userId,
+      action: "treasury_send_any",
+    });
+    if (claim.hit) return claim.response as {
+      ok: true;
+      reference: string;
+      grossTambala: number;
+      netTambala: number;
+      feeTambala: number;
+      phone: string;
+    };
+
+    const releaseKey = async () => {
+      await sql`delete from idempotency_keys where key = ${data.idempotencyKey} and response_json is null`;
+    };
+
+    const profile = await loadProfile(context.userId);
+    if (!profile) {
+      await releaseKey();
+      throw new Error("Admin profile missing");
+    }
+    if (!(await verifySecret(profile.pin_hash, data.pin))) {
+      await releaseKey();
+      throw new Error("Incorrect PIN");
+    }
+
+    const gross = kwachaToTambala(data.amountKwacha);
+    const fee = Math.round(gross * 0.018);
+    const net = gross - fee;
+    if (net <= 0) {
+      await releaseKey();
+      throw new Error("Amount too small after 1.8% payout fee");
+    }
+
+    const profitRows = await sql<{ profit: number }>`
+      select coalesce(sum(case when kind = 'deposit' and status = 'success' then platform_profit_tambala else 0 end), 0)::bigint as profit
+      from transactions
+    `;
+    const paidRows = await sql<{ paid: number }>`
+      select coalesce(sum(gross_tambala), 0)::bigint as paid
+      from treasury_payouts
+      where status in ('success', 'processing')
+    `;
+    const available = asInt(profitRows[0]?.profit) - asInt(paidRows[0]?.paid);
+    if (gross > available) {
+      await releaseKey();
+      throw new Error(
+        `Not enough platform profit. Available about ${formatKwacha(Math.max(0, available))}.`,
+      );
+    }
+
+    const reference = newReference("ADM");
+    let payoutId: number;
+    try {
+      const inserted = await sql<{ id: number }>`
+        insert into treasury_payouts (
+          admin_user_id, gross_tambala, fee_tambala, net_tambala, phone, reference, status, note
+        ) values (
+          ${context.userId}, ${gross}, ${fee}, ${net}, ${mobile}, ${reference},
+          ${"processing"},
+          ${`Admin send to ${formatPhoneDisplay(mobile)}; ~1.8% rail ${formatKwacha(fee)}; net ${formatKwacha(net)}`}
+        )
+        returning id
+      `;
+      payoutId = inserted[0]!.id;
+    } catch (err) {
+      await releaseKey();
+      throw err;
+    }
+
+    try {
+      if (paychanguConfigured()) {
+        const payout = await initiateMomoPayout({
+          phone: mobile,
+          amountKwacha: tambalaToKwacha(net),
+          chargeId: reference,
+          email: profile.email,
+          firstName: profile.first_name,
+          lastName: profile.last_name,
+        });
+        const status = String(payout.status ?? "").toLowerCase();
+        if (status === "failed" || status === "failure" || status === "rejected") {
+          throw new Error(`Payout rejected (${status})`);
+        }
+      }
+      await sql`
+        update treasury_payouts
+        set status = ${"success"}, completed_at = now()
+        where id = ${payoutId}
+      `;
+      try {
+        await sql`
+          update platform_treasury
+          set balance_tambala = greatest(0, balance_tambala - ${gross}),
+              lifetime_out_tambala = lifetime_out_tambala + ${gross},
+              updated_at = now()
+          where id = 1
+        `;
+      } catch {
+        /* optional table */
+      }
+    } catch (err) {
+      await sql`
+        update treasury_payouts
+        set status = ${"failed"}, note = ${String((err as Error).message ?? "failed")}
+        where id = ${payoutId}
+      `;
+      await releaseKey();
+      throw new Error(
+        "Could not send. Profit was not taken. " +
+          String((err as Error).message ?? "").slice(0, 180),
+      );
+    }
+
+    const result = {
+      ok: true as const,
+      reference,
+      grossTambala: gross,
+      netTambala: net,
+      feeTambala: fee,
+      phone: mobile,
+    };
+    await storeIdempotencyResponse(sql, data.idempotencyKey, result);
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "treasury_send_any",
+      detail: `ref=${reference} to=${mobile} gross=${gross}`,
+    });
+    return result;
+  });
