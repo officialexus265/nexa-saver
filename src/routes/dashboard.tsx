@@ -30,6 +30,8 @@ import {
   getSendFeeTiersPublic,
   lookupSendRecipient,
   startTransfer,
+  adminSendFromWallet,
+  adminLookupSendTarget,
   moveReceivedToMain,
   userWebAuthnRegisterOptions,
   userWebAuthnRegisterVerify,
@@ -351,6 +353,7 @@ function Vault({
       />
       <SendModal
         open={sendOpen}
+        isAdmin={profile.role === "admin"}
         onClose={() => setSendOpen(false)}
         onSuccess={(title, body) => {
           setSendOpen(false);
@@ -874,16 +877,24 @@ function DepositModal({
 
 function SendModal({
   open,
+  isAdmin = false,
   onClose,
   onSuccess,
 }: {
   open: boolean;
+  isAdmin?: boolean;
   onClose: () => void;
   onSuccess: (title: string, body: string) => void;
 }) {
   const [amount, setAmount] = useState("500");
   const [phone, setPhone] = useState("");
-  const [recipient, setRecipient] = useState<{ fullName: string; phone: string } | null>(null);
+  const [recipient, setRecipient] = useState<{
+    fullName: string;
+    phone: string;
+    kind?: "nexa" | "external";
+    operator?: string;
+  } | null>(null);
+  const [confirmExternal, setConfirmExternal] = useState(false);
   const [coverBankFlat, setCoverBankFlat] = useState(false);
   const [pin, setPin] = useState("");
   const [stage, setStage] = useState<"form" | "confirm" | "pin">("form");
@@ -897,6 +908,7 @@ function SendModal({
     setRecipient(null);
     setPin("");
     setError(null);
+    setConfirmExternal(false);
     void getSendFeeTiersPublic()
       .then(setTiers)
       .catch(() => setTiers([]));
@@ -915,11 +927,23 @@ function SendModal({
   async function lookup() {
     setBusy(true);
     setError(null);
+    setConfirmExternal(false);
     try {
       if (!kwacha || kwacha < 100) throw new Error("Minimum send is 100 kwacha.");
-      const res = await lookupSendRecipient({ data: { phone } });
-      setRecipient({ fullName: res.fullName, phone: res.phone });
-      setStage("confirm");
+      if (isAdmin) {
+        const res = await adminLookupSendTarget({ data: { phone } });
+        setRecipient({
+          fullName: res.fullName ?? (res.kind === "external" ? "External MoMo wallet" : "Unknown"),
+          phone: res.phone,
+          kind: res.kind,
+          operator: res.operator,
+        });
+        setStage("confirm");
+      } else {
+        const res = await lookupSendRecipient({ data: { phone } });
+        setRecipient({ fullName: res.fullName, phone: res.phone, kind: "nexa" });
+        setStage("confirm");
+      }
     } catch (e) {
       setRecipient(null);
       setError(errMessage(e));
@@ -933,21 +957,37 @@ function SendModal({
     setError(null);
     try {
       const key = `snd_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-      const res = await startTransfer({
-        data: {
-          amountKwacha: kwacha!,
-          toPhone: recipient!.phone,
-          pin,
-          idempotencyKey: key,
-          coverBankFlat,
-        },
-      });
-      onSuccess(
-        "Sent",
-        `${formatKwacha(res.creditTambala ?? res.amountTambala)} credited to ${res.toName}'s received bag${
-          res.coverBankFlat ? " (includes 700 bank-flat cover)" : ""
-        }. Fee ${formatKwacha(res.feeTambala)} from your balance. Ref ${res.reference}`,
-      );
+      if (isAdmin) {
+        const res = await adminSendFromWallet({
+          data: {
+            amountKwacha: kwacha!,
+            phone: recipient!.phone,
+            pin,
+            confirmedExternal: recipient!.kind === "external" ? confirmExternal : true,
+            idempotencyKey: key,
+          },
+        });
+        onSuccess(
+          "Sent to MoMo",
+          `${formatKwacha(res.amountTambala)} is on the way to ${recipient!.phone} via PayChangu. Taken from your main balance. Ref ${res.reference}`,
+        );
+      } else {
+        const res = await startTransfer({
+          data: {
+            amountKwacha: kwacha!,
+            toPhone: recipient!.phone,
+            pin,
+            idempotencyKey: key,
+            coverBankFlat,
+          },
+        });
+        onSuccess(
+          "Sent",
+          `${formatKwacha(res.creditTambala ?? res.amountTambala)} credited to ${res.toName}'s received bag${
+            res.coverBankFlat ? " (includes 700 bank-flat cover)" : ""
+          }. Fee ${formatKwacha(res.feeTambala)} from your balance. Ref ${res.reference}`,
+        );
+      }
     } catch (e) {
       setError(errMessage(e));
     } finally {
@@ -961,18 +1001,19 @@ function SendModal({
         {stage === "form" ? (
           <>
             <p className="text-sm text-muted">
-              Send the full amount to another NEXA-SAVER account. A small fixed fee is charged from your balance; the
-              recipient gets every kwacha you type.
+              {isAdmin
+                ? "Admin: send from your main balance to any Airtel or TNM number via PayChangu. The number does not need a NEXA account. Full amount leaves your vault (no platform send fee)."
+                : "Send the full amount to another NEXA-SAVER account. A small fixed fee is charged from your balance; the recipient gets every kwacha you type."}
             </p>
             <div className="space-y-1.5">
               <Label>Amount (kwacha)</Label>
               <Input value={amount} inputMode="numeric" onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))} />
             </div>
             <div className="space-y-1.5">
-              <Label>Their registered number</Label>
-              <Input value={phone} inputMode="tel" placeholder="09…" onChange={(e) => setPhone(e.target.value)} />
+              <Label>{isAdmin ? "Recipient MoMo number" : "Their registered number"}</Label>
+              <Input value={phone} inputMode="tel" placeholder="09… or 08…" onChange={(e) => setPhone(e.target.value)} />
             </div>
-            {kwacha ? (
+            {kwacha && !isAdmin ? (
               <>
                 <label className="flex items-start gap-2 rounded-xl border border-border bg-surface-2/50 p-3 text-sm">
                   <input
@@ -998,8 +1039,13 @@ function SendModal({
                 </p>
               </>
             ) : null}
+            {isAdmin && kwacha ? (
+              <p className="text-sm text-muted">
+                {kwacha} kwacha will leave your main balance to this MoMo number (no NEXA send fee).
+              </p>
+            ) : null}
             <Button type="button" className="w-full" disabled={busy || !phone || !kwacha} onClick={() => void lookup()}>
-              {busy ? "Checking…" : "Look up account"}
+              {busy ? "Checking…" : isAdmin ? "Look up number" : "Look up account"}
             </Button>
           </>
         ) : null}
@@ -1012,17 +1058,46 @@ function SendModal({
             <div className="rounded-xl border border-border bg-surface-2 p-3">
               <p className="font-medium text-fg">{recipient.fullName}</p>
               <p className="tabular-nums text-sm text-muted">{recipient.phone}</p>
+              {recipient.operator ? (
+                <p className="mt-1 text-xs text-muted">{recipient.operator}</p>
+              ) : null}
+              {isAdmin && recipient.kind === "external" ? (
+                <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                  Not on NEXA-SAVER. PayChangu cannot show the MoMo name before send — check the number carefully.
+                </p>
+              ) : null}
+              {isAdmin && recipient.kind === "nexa" ? (
+                <p className="mt-2 text-xs text-muted">
+                  On NEXA, but this admin send pays out to their MoMo via PayChangu (not an in-app received bag).
+                </p>
+              ) : null}
             </div>
+            {isAdmin && recipient.kind === "external" ? (
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-1 size-4"
+                  checked={confirmExternal}
+                  onChange={(e) => setConfirmExternal(e.target.checked)}
+                />
+                <span>I confirmed this number is correct and want to send off-platform.</span>
+              </label>
+            ) : null}
             <p className="text-sm text-muted">
-              Fee {feeKwacha} kwacha
-              {coverBankFlat ? " · bank-flat cover 700" : ""} · total from your vault{" "}
-              {kwacha! + feeKwacha + (coverBankFlat ? 700 : 0)} kwacha
+              {isAdmin
+                ? `Full ${kwacha} kwacha leaves your main balance (PayChangu rail fees may apply on their side).`
+                : `Fee ${feeKwacha} kwacha${coverBankFlat ? " · bank-flat cover 700" : ""} · total from your vault ${kwacha! + feeKwacha + (coverBankFlat ? 700 : 0)} kwacha`}
             </p>
             <div className="flex gap-2">
               <Button type="button" variant="secondary" className="flex-1" onClick={() => setStage("form")}>
                 Back
               </Button>
-              <Button type="button" className="flex-1" onClick={() => setStage("pin")}>
+              <Button
+                type="button"
+                className="flex-1"
+                disabled={isAdmin && recipient.kind === "external" && !confirmExternal}
+                onClick={() => setStage("pin")}
+              >
                 Confirm recipient
               </Button>
             </div>
@@ -2022,5 +2097,4 @@ function WithdrawModal({
     </Modal>
   );
 }
-
 

@@ -6698,3 +6698,222 @@ export const adminTreasurySendToPhone = createServerFn({ method: "POST" })
     });
     return result;
   });
+
+
+/** Admin lookup for Send: NEXA user if registered, else external MoMo (no name from PayChangu). */
+export const adminLookupSendTarget = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(z.object({ phone: z.string().min(8).max(20) }))
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { normalizeMwPhone, detectOperator, formatPhoneDisplay } = await import("./phone");
+    const mobile = normalizeMwPhone(data.phone);
+    if (!mobile) throw new Error("Enter a valid Malawi Airtel (09…) or TNM (08…) number.");
+    if (!detectOperator(mobile)) throw new Error("Only Airtel and TNM numbers are supported.");
+    if (mobile === (await loadProfile(context.userId))?.phone) {
+      throw new Error("You cannot send to your own registered number this way — use Withdraw.");
+    }
+
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{
+      user_id: string;
+      first_name: string;
+      last_name: string;
+      username: string;
+      deleted_at: unknown;
+    }>`
+      select user_id, first_name, last_name, username, deleted_at
+      from profiles where phone = ${mobile} limit 1
+    `;
+    const op = detectOperator(mobile);
+    const operator = op === "airtel" ? "Airtel Money" : "TNM Mpamba";
+
+    if (rows.length && !rows[0]!.deleted_at) {
+      const r = rows[0]!;
+      return {
+        kind: "nexa" as const,
+        phone: mobile,
+        phoneDisplay: formatPhoneDisplay(mobile),
+        operator,
+        fullName: `${r.first_name} ${r.last_name}`.trim(),
+        username: r.username,
+        userId: r.user_id,
+      };
+    }
+    return {
+      kind: "external" as const,
+      phone: mobile,
+      phoneDisplay: formatPhoneDisplay(mobile),
+      operator,
+      fullName: null as string | null,
+      username: null as string | null,
+      userId: null as string | null,
+    };
+  });
+
+/**
+ * Admin: debit main wallet and PayChangu-payout to any MoMo number (NEXA or not).
+ * Not a user-to-user transfer — real payout to the phone.
+ */
+export const adminSendFromWallet = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      amountKwacha: z.number().positive(),
+      phone: z.string().min(8).max(20),
+      pin: pinSchema,
+      confirmedExternal: z.boolean().optional(),
+      idempotencyKey: z.string().min(8).max(128),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdminSensitive(context.userId);
+    const profile = await loadProfile(context.userId);
+    if (!profile || profile.role !== "admin") throw new Error("Admin only.");
+
+    const { normalizeMwPhone, detectOperator, formatPhoneDisplay } = await import("./phone");
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { verifySecret, newReference } = await import("./crypto");
+    const { kwachaToTambala, tambalaToKwacha, formatKwacha } = await import("./money");
+    const { paychanguConfigured, demoPaymentsEnabled, initiateMomoPayout } = await import("./paychangu.server");
+    const { claimIdempotencyKey, storeIdempotencyResponse } = await import("./idempotency.server");
+    const { MIN_WITHDRAW_KWACHA } = await import("./constants");
+
+    if (!paychanguConfigured() && !demoPaymentsEnabled()) {
+      throw new Error("Payouts are not configured (PayChangu).");
+    }
+    if (data.amountKwacha < MIN_WITHDRAW_KWACHA) {
+      throw new Error(`Minimum is ${MIN_WITHDRAW_KWACHA} kwacha`);
+    }
+
+    const mobile = normalizeMwPhone(data.phone);
+    if (!mobile || !detectOperator(mobile)) {
+      throw new Error("Enter a valid Airtel or TNM number.");
+    }
+
+    const sql = await getSql();
+    const nexa = await sql<{ n: number }>`
+      select count(*)::int as n from profiles where phone = ${mobile} and deleted_at is null
+    `;
+    const isExternal = asInt(nexa[0]?.n) === 0;
+    if (isExternal && !data.confirmedExternal) {
+      throw new Error("Confirm that this number is correct before sending off-platform.");
+    }
+
+    if (!(await verifySecret(profile.pin_hash, data.pin))) {
+      throw new Error("Incorrect PIN");
+    }
+
+    const claim = await claimIdempotencyKey(sql, {
+      key: data.idempotencyKey,
+      userId: context.userId,
+      action: "admin_wallet_send",
+    });
+    if (claim.hit) {
+      return claim.response as {
+        ok: true;
+        reference: string;
+        amountTambala: number;
+        phone: string;
+      };
+    }
+    const releaseKey = async () => {
+      await sql`delete from idempotency_keys where key = ${data.idempotencyKey} and response_json is null`;
+    };
+
+    const amountTambala = kwachaToTambala(data.amountKwacha);
+    const reference = newReference("AWS"); // admin wallet send
+
+    try {
+      await withTransaction(sql, async (tx) => {
+        const wallets = await tx<{ balance_tambala: number }>`
+          select balance_tambala from wallets where user_id = ${context.userId} for update
+        `;
+        const bal = asInt(wallets[0]?.balance_tambala);
+        if (bal < amountTambala) {
+          throw new Error(
+            `Insufficient main balance. You have ${formatKwacha(bal)}; need ${formatKwacha(amountTambala)}.`,
+          );
+        }
+        await tx`
+          update wallets
+          set balance_tambala = balance_tambala - ${amountTambala},
+              lifetime_withdrawn_tambala = lifetime_withdrawn_tambala + ${amountTambala},
+              updated_at = now()
+          where user_id = ${context.userId}
+        `;
+        await tx`
+          insert into transactions (
+            user_id, kind, status, gross_tambala, credited_tambala,
+            platform_profit_tambala, payout_reserve_tambala, phone, reference, note, completed_at
+          ) values (
+            ${context.userId}, ${"withdrawal"}, ${"processing"}, ${amountTambala}, ${0},
+            ${0}, ${0}, ${mobile}, ${reference},
+            ${`Admin send from main balance to ${formatPhoneDisplay(mobile)}${isExternal ? " (external MoMo)" : " (NEXA user MoMo)"}`},
+            null
+          )
+        `;
+      });
+    } catch (err) {
+      await releaseKey();
+      throw err;
+    }
+
+    try {
+      if (paychanguConfigured()) {
+        const payout = await initiateMomoPayout({
+          phone: mobile,
+          amountKwacha: tambalaToKwacha(amountTambala),
+          chargeId: reference,
+          email: profile.email,
+          firstName: profile.first_name,
+          lastName: profile.last_name,
+        });
+        const status = String(payout.status ?? "").toLowerCase();
+        if (status === "failed" || status === "failure" || status === "rejected") {
+          throw new Error(`PayChangu rejected payout (${status})`);
+        }
+      }
+      await sql`
+        update transactions
+        set status = ${"success"}, completed_at = now()
+        where reference = ${reference} and user_id = ${context.userId}
+      `;
+    } catch (err) {
+      // Refund wallet
+      await sql`
+        update wallets
+        set balance_tambala = balance_tambala + ${amountTambala},
+            lifetime_withdrawn_tambala = greatest(0, lifetime_withdrawn_tambala - ${amountTambala}),
+            updated_at = now()
+        where user_id = ${context.userId}
+      `;
+      await sql`
+        update transactions
+        set status = ${"failed"},
+            note = coalesce(note, '') || ${" | " + String((err as Error).message ?? "failed")},
+            completed_at = now()
+        where reference = ${reference}
+      `;
+      await releaseKey();
+      throw new Error(
+        "Send failed — balance was refunded. " + String((err as Error).message ?? "").slice(0, 160),
+      );
+    }
+
+    const result = {
+      ok: true as const,
+      reference,
+      amountTambala,
+      phone: mobile,
+    };
+    await storeIdempotencyResponse(sql, data.idempotencyKey, result);
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "admin_wallet_send",
+      detail: `ref=${reference} to=${mobile} amount=${amountTambala}`,
+    });
+    return result;
+  });
