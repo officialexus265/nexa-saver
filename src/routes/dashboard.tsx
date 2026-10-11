@@ -267,14 +267,28 @@ function Vault({
       </Card>
 
       <div className="grid grid-cols-3 gap-2 sm:gap-3">
-        <Button className="h-14 text-sm" onClick={() => setDepositOpen(true)}>
-          <ArrowDownToLine className="size-4" /> Deposit
+        <Button
+          className="h-auto min-h-16 flex-col gap-1.5 px-2 py-3 text-xs sm:h-14 sm:min-h-14 sm:flex-row sm:gap-2 sm:px-4 sm:text-sm"
+          onClick={() => setDepositOpen(true)}
+        >
+          <ArrowDownToLine className="size-6 shrink-0 sm:size-5" aria-hidden />
+          <span>Deposit</span>
         </Button>
-        <Button variant="secondary" className="h-14 text-sm" onClick={() => setWithdrawOpen(true)}>
-          <ArrowUpFromLine className="size-4" /> Withdraw
+        <Button
+          variant="secondary"
+          className="h-auto min-h-16 flex-col gap-1.5 px-2 py-3 text-xs sm:h-14 sm:min-h-14 sm:flex-row sm:gap-2 sm:px-4 sm:text-sm"
+          onClick={() => setWithdrawOpen(true)}
+        >
+          <ArrowUpFromLine className="size-6 shrink-0 sm:size-5" aria-hidden />
+          <span>Withdraw</span>
         </Button>
-        <Button variant="secondary" className="h-14 text-sm" onClick={() => setSendOpen(true)}>
-          <Send className="size-4" /> Send
+        <Button
+          variant="secondary"
+          className="h-auto min-h-16 flex-col gap-1.5 px-2 py-3 text-xs sm:h-14 sm:min-h-14 sm:flex-row sm:gap-2 sm:px-4 sm:text-sm"
+          onClick={() => setSendOpen(true)}
+        >
+          <Send className="size-6 shrink-0 sm:size-5" aria-hidden />
+          <span>Send</span>
         </Button>
       </div>
 

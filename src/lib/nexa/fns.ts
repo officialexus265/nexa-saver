@@ -4218,14 +4218,17 @@ export const startTransfer = createServerFn({ method: "POST" })
       const coverNoteOut = coverBankFlat
         ? ` (includes ${formatKwacha(coverTambala)} bank-flat cover)`
         : "";
+      // transactions.reference is UNIQUE — out / in / fee must not share one value
+      const refOut = `${reference}_OUT`;
+      const refIn = `${reference}_IN`;
       const outRows = await tx<{ id: number }>`
         insert into transactions (
           user_id, kind, status, gross_tambala, credited_tambala,
           platform_profit_tambala, payout_reserve_tambala, phone, reference, note, completed_at
         ) values (
           ${context.userId}, ${"transfer_out"}, ${"success"}, ${creditTambala}, ${0},
-          ${0}, ${0}, ${toPhone}, ${reference},
-          ${`Sent ${formatKwacha(amountTambala)} to ${toName} (${toPhone})${coverNoteOut}`}, now()
+          ${0}, ${0}, ${toPhone}, ${refOut},
+          ${`Sent ${formatKwacha(amountTambala)} to ${toName} (${toPhone})${coverNoteOut} · ${reference}`}, now()
         ) returning id
       `;
       const inRows = await tx<{ id: number }>`
@@ -4234,8 +4237,8 @@ export const startTransfer = createServerFn({ method: "POST" })
           platform_profit_tambala, payout_reserve_tambala, phone, reference, note, completed_at
         ) values (
           ${toUserId}, ${"transfer_in"}, ${"success"}, ${creditTambala}, ${creditTambala},
-          ${0}, ${0}, ${profile.phone}, ${reference},
-          ${`Received ${formatKwacha(creditTambala)} from ${profile.first_name} ${profile.last_name} (received bag${coverBankFlat ? "; includes bank-flat cover" : ""})`}, now()
+          ${0}, ${0}, ${profile.phone}, ${refIn},
+          ${`Received ${formatKwacha(creditTambala)} from ${profile.first_name} ${profile.last_name} (received bag${coverBankFlat ? "; includes bank-flat cover" : ""}) · ${reference}`}, now()
         ) returning id
       `;
       let feeTxId: number | null = null;
