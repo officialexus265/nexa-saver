@@ -972,7 +972,7 @@ function SendModal({
         });
         onSuccess(
           "Sent to MoMo",
-          `${formatKwacha(res.amountTambala)} is on the way to ${recipient!.phone} via PayChangu. Taken from your main balance. Ref ${res.reference}`,
+          `${formatKwacha(res.amountTambala)} sent to ${recipient!.phone} from main balance. Ref ${res.reference}`,
         );
       } else {
         const res = await startTransfer({
@@ -1045,17 +1045,12 @@ function SendModal({
             {isAdmin && kwacha ? (
               <div className="rounded-xl border border-border bg-surface-2/60 p-3 text-sm space-y-1">
                 <p>
-                  From your <span className="font-medium text-fg">NEXA main balance</span>:{" "}
+                  From your main balance / recipient gets:{" "}
                   <span className="tabular-nums font-semibold">{kwacha} kwacha</span>
                 </p>
-                <p>
-                  Est. PayChangu rail ({railPctLabel}):{" "}
-                  <span className="tabular-nums font-semibold">{railFeeKwacha} kwacha</span>
-                </p>
                 <p className="text-xs text-muted">
-                  NEXA does not take a send fee. PayChangu typically charges ~{railPctLabel} on MoMo payouts from
-                  your PayChangu merchant wallet (about {railFeeKwacha} on this amount). Recipient is paid the
-                  amount you type.
+                  Same as user withdrawals: no extra {railPctLabel} taken from main balance (rail was covered at
+                  deposit time). No NEXA send fee.
                 </p>
               </div>
             ) : null}
@@ -1101,20 +1096,16 @@ function SendModal({
             {isAdmin ? (
               <div className="rounded-xl border border-border bg-surface-2/60 p-3 text-sm space-y-1.5">
                 <div className="flex justify-between gap-2">
-                  <span className="text-muted">From NEXA balance</span>
-                  <span className="tabular-nums font-medium">{kwacha} kwacha</span>
+                  <span className="text-muted">From main balance</span>
+                  <span className="tabular-nums font-semibold">{kwacha} kwacha</span>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <span className="text-muted">PayChangu rail (~{railPctLabel})</span>
-                  <span className="tabular-nums font-medium">{railFeeKwacha} kwacha</span>
-                </div>
-                <div className="flex justify-between gap-2 border-t border-border pt-1.5">
                   <span className="text-muted">Recipient gets (MoMo)</span>
-                  <span className="tabular-nums font-semibold text-primary">{kwacha} kwacha</span>
+                  <span className="tabular-nums font-medium text-primary">{kwacha} kwacha</span>
                 </div>
                 <p className="text-xs text-muted">
-                  The {railFeeKwacha} kwacha is an estimate of PayChangu&apos;s fee on this payout — charged on your
-                  PayChangu account, not as an extra NEXA deduction. Exact fee is set by PayChangu.
+                  Same as a normal user withdrawal: only this amount leaves main balance. The ~{railPctLabel} rail
+                  is covered by deposit-time reserves / PayChangu float — not a second cut here.
                 </p>
               </div>
             ) : (
@@ -1144,7 +1135,7 @@ function SendModal({
           <>
             <p className="text-sm text-muted">
               {isAdmin
-                ? `Enter PIN to send ${kwacha} kwacha (est. PayChangu rail ${railFeeKwacha} kwacha at ${railPctLabel}).`
+                ? `Enter PIN to send ${kwacha} kwacha from main balance (no extra rail debit).`
                 : "Enter your withdraw PIN to send."}
             </p>
             <PinPad value={pin} onChange={setPin} disabled={busy} />

@@ -6805,6 +6805,11 @@ export const adminSendFromWallet = createServerFn({ method: "POST" })
       throw new Error("Incorrect PIN");
     }
 
+    // Same model as user withdrawals: only the send amount leaves main balance.
+    // Deposit-time payout reserve / PayChangu float covers the ~1.8% rail — not a second debit here.
+    const amountTambala = kwachaToTambala(data.amountKwacha);
+    if (amountTambala <= 0) throw new Error("Amount too small.");
+
     const claim = await claimIdempotencyKey(sql, {
       key: data.idempotencyKey,
       userId: context.userId,
@@ -6815,6 +6820,8 @@ export const adminSendFromWallet = createServerFn({ method: "POST" })
         ok: true;
         reference: string;
         amountTambala: number;
+        feeTambala: number;
+        totalDebitTambala: number;
         phone: string;
       };
     }
@@ -6822,7 +6829,6 @@ export const adminSendFromWallet = createServerFn({ method: "POST" })
       await sql`delete from idempotency_keys where key = ${data.idempotencyKey} and response_json is null`;
     };
 
-    const amountTambala = kwachaToTambala(data.amountKwacha);
     const reference = newReference("AWS"); // admin wallet send
 
     try {
@@ -6850,7 +6856,8 @@ export const adminSendFromWallet = createServerFn({ method: "POST" })
           ) values (
             ${context.userId}, ${"withdrawal"}, ${"processing"}, ${amountTambala}, ${0},
             ${0}, ${0}, ${mobile}, ${reference},
-            ${`Admin send from main balance to ${formatPhoneDisplay(mobile)}${isExternal ? " (external MoMo)" : " (NEXA user MoMo)"}`},
+            ${`Admin send ${formatKwacha(amountTambala)} to ${formatPhoneDisplay(mobile)}` +
+              `${isExternal ? " (external MoMo)" : " (NEXA user MoMo)"}; no extra rail debit on main balance (same as user withdraw)`},
             null
           )
         `;
@@ -6881,7 +6888,6 @@ export const adminSendFromWallet = createServerFn({ method: "POST" })
         where reference = ${reference} and user_id = ${context.userId}
       `;
     } catch (err) {
-      // Refund wallet
       await sql`
         update wallets
         set balance_tambala = balance_tambala + ${amountTambala},
@@ -6906,6 +6912,8 @@ export const adminSendFromWallet = createServerFn({ method: "POST" })
       ok: true as const,
       reference,
       amountTambala,
+      feeTambala: 0,
+      totalDebitTambala: amountTambala,
       phone: mobile,
     };
     await storeIdempotencyResponse(sql, data.idempotencyKey, result);
@@ -6916,4 +6924,168 @@ export const adminSendFromWallet = createServerFn({ method: "POST" })
       detail: `ref=${reference} to=${mobile} amount=${amountTambala}`,
     });
     return result;
+  });
+
+
+/**
+ * Compare NEXA user liabilities + withdrawal reserve vs PayChangu wallet float.
+ * Diff = PayChangu main − user vaults − payout reserve still on wallets.
+ */
+export const adminFundsAudit = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const {
+      paychanguConfigured,
+      demoPaymentsEnabled,
+      getPaychanguWalletBalance,
+    } = await import("./paychangu.server");
+    const { formatKwacha, kwachaToTambala, tambalaToKwacha } = await import("./money");
+
+    const sql = await getSql();
+
+    // User-facing liabilities (exclude soft-deleted profiles)
+    const liability = await sql<{
+      main: number;
+      received: number;
+      reserve: number;
+      users: number;
+    }>`
+      select
+        coalesce(sum(w.balance_tambala), 0)::bigint as main,
+        coalesce(sum(coalesce(w.received_balance_tambala, 0)), 0)::bigint as received,
+        coalesce(sum(coalesce(w.payout_reserve_tambala, 0)), 0)::bigint as reserve,
+        count(*)::int as users
+      from wallets w
+      inner join profiles p on p.user_id = w.user_id
+      where p.deleted_at is null and p.role = ${"user"}
+    `;
+
+    const adminW = await sql<{ main: number; received: number }>`
+      select
+        coalesce(sum(w.balance_tambala), 0)::bigint as main,
+        coalesce(sum(coalesce(w.received_balance_tambala, 0)), 0)::bigint as received
+      from wallets w
+      inner join profiles p on p.user_id = w.user_id
+      where p.deleted_at is null and p.role = ${"admin"}
+    `;
+
+    const pendingOut = await sql<{ n: number; amt: number }>`
+      select
+        count(*)::int as n,
+        coalesce(sum(gross_tambala), 0)::bigint as amt
+      from transactions
+      where kind = ${"withdrawal"} and status in (${"pending"}, ${"processing"})
+    `;
+
+    const userMain = asInt(liability[0]?.main);
+    const userReceived = asInt(liability[0]?.received);
+    const payoutReserve = asInt(liability[0]?.reserve);
+    const userVaults = userMain + userReceived;
+    const adminMain = asInt(adminW[0]?.main);
+    const adminReceived = asInt(adminW[0]?.received);
+
+    let paychangu: {
+      ok: boolean;
+      mainTambala: number;
+      collectionTambala: number;
+      environment: string | null;
+      error: string | null;
+    };
+
+    if (!paychanguConfigured()) {
+      paychangu = {
+        ok: false,
+        mainTambala: 0,
+        collectionTambala: 0,
+        environment: null,
+        error: demoPaymentsEnabled()
+          ? "PayChangu not configured (demo mode)."
+          : "PayChangu secret key missing.",
+      };
+    } else {
+      try {
+        const bal = await getPaychanguWalletBalance();
+        paychangu = {
+          ok: true,
+          mainTambala: kwachaToTambala(bal.mainBalanceKwacha),
+          collectionTambala: kwachaToTambala(bal.collectionBalanceKwacha),
+          environment: bal.environment,
+          error: null,
+        };
+      } catch (err) {
+        paychangu = {
+          ok: false,
+          mainTambala: 0,
+          collectionTambala: 0,
+          environment: null,
+          error: String((err as Error).message ?? err).slice(0, 200),
+        };
+      }
+    }
+
+    // What PayChangu main should cover after setting aside remaining withdrawal-rail reserve
+    const dedicatedForWithdrawal = payoutReserve;
+    const paychanguAfterReserve = paychangu.mainTambala - dedicatedForWithdrawal;
+    // Diff vs money still owed to users in vaults
+    const diffTambala = paychanguAfterReserve - userVaults;
+    // Alternate: full main vs vaults only
+    const diffMainVsVaults = paychangu.mainTambala - userVaults;
+
+    let status: "healthy" | "tight" | "short" | "unavailable" = "unavailable";
+    let summary: string;
+    if (!paychangu.ok) {
+      status = "unavailable";
+      summary = paychangu.error ?? "Could not read PayChangu balance.";
+    } else if (diffTambala >= 0) {
+      status = diffTambala < userVaults * 0.02 ? "tight" : "healthy";
+      summary =
+        status === "healthy"
+          ? `PayChangu main (after withdrawal reserve) covers user vaults with ${formatKwacha(diffTambala)} headroom.`
+          : `Coverage is thin — only ${formatKwacha(diffTambala)} above user vaults after reserve.`;
+    } else {
+      status = "short";
+      summary = `Shortfall of ${formatKwacha(Math.abs(diffTambala))}: user vaults exceed PayChangu main minus withdrawal reserve.`;
+    }
+
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "funds_audit",
+      detail: `status=${status} diff=${diffTambala} pcMain=${paychangu.mainTambala} vaults=${userVaults} reserve=${payoutReserve}`,
+    });
+
+    return {
+      at: new Date().toISOString(),
+      status,
+      summary,
+      nexa: {
+        userCount: asInt(liability[0]?.users),
+        userMainTambala: userMain,
+        userReceivedTambala: userReceived,
+        userVaultsTambala: userVaults,
+        payoutReserveTambala: payoutReserve,
+        adminMainTambala: adminMain,
+        adminReceivedTambala: adminReceived,
+        pendingWithdrawalsCount: asInt(pendingOut[0]?.n),
+        pendingWithdrawalsTambala: asInt(pendingOut[0]?.amt),
+      },
+      paychangu: {
+        ok: paychangu.ok,
+        mainTambala: paychangu.mainTambala,
+        collectionTambala: paychangu.collectionTambala,
+        totalTambala: paychangu.mainTambala + paychangu.collectionTambala,
+        environment: paychangu.environment,
+        error: paychangu.error,
+      },
+      math: {
+        /** PayChangu main − payout reserve still on user wallets */
+        paychanguAfterWithdrawalReserveTambala: paychanguAfterReserve,
+        /** (main − reserve) − user vaults */
+        diffTambala,
+        /** main − user vaults (ignores reserve) */
+        diffMainMinusVaultsTambala: diffMainVsVaults,
+      },
+    };
   });

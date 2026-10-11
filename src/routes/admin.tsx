@@ -10,6 +10,7 @@ import { errMessage } from "@/lib/nexa/errors";
 import { TotpQr } from "@/components/totp-qr";
 import {
   adminOverview,
+  adminFundsAudit,
   adminTransactions,
   adminUsers,
   adminLookupReference,
@@ -138,6 +139,9 @@ function AdminPage() {
 
 function Console() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
+  const [fundsAudit, setFundsAudit] = useState<Awaited<ReturnType<typeof adminFundsAudit>> | null>(null);
+  const [auditBusy, setAuditBusy] = useState(false);
+  const [auditErr, setAuditErr] = useState<string | null>(null);
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [txs, setTxs] = useState<Array<PublicTx & { username: string }>>([]);
   const [error, setError] = useState<string | null>(null);
@@ -765,6 +769,129 @@ function Console() {
             void adminOverview().then(setOverview);
           }}
         />
+      </Card>
+
+      <Card className="space-y-3 p-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-display text-lg font-semibold">Funds audit</h2>
+            <p className="text-sm text-muted">
+              User vaults vs live PayChangu main balance, after withdrawal-rail reserve still on wallets.
+            </p>
+          </div>
+          <Button
+            type="button"
+            className="shrink-0"
+            disabled={auditBusy}
+            onClick={() => {
+              setAuditBusy(true);
+              setAuditErr(null);
+              void adminFundsAudit()
+                .then(setFundsAudit)
+                .catch((e) => setAuditErr(errMessage(e)))
+                .finally(() => setAuditBusy(false));
+            }}
+          >
+            {auditBusy ? "Auditing…" : "Run audit"}
+          </Button>
+        </div>
+        {auditErr ? <p className="text-sm text-danger">{auditErr}</p> : null}
+        {fundsAudit ? (
+          <div className="space-y-3 text-sm">
+            <p
+              className={
+                fundsAudit.status === "healthy"
+                  ? "font-medium text-primary"
+                  : fundsAudit.status === "short"
+                    ? "font-medium text-danger"
+                    : fundsAudit.status === "tight"
+                      ? "font-medium text-amber-600 dark:text-amber-400"
+                      : "text-muted"
+              }
+            >
+              {fundsAudit.summary}
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="space-y-1 rounded-xl border border-border bg-surface-2/50 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted">NEXA (users)</p>
+                <p className="flex justify-between gap-2">
+                  <span className="text-muted">Main vaults</span>
+                  <span className="tabular-nums">{formatKwacha(fundsAudit.nexa.userMainTambala)}</span>
+                </p>
+                <p className="flex justify-between gap-2">
+                  <span className="text-muted">Received bags</span>
+                  <span className="tabular-nums">{formatKwacha(fundsAudit.nexa.userReceivedTambala)}</span>
+                </p>
+                <p className="flex justify-between gap-2 font-medium">
+                  <span>Total for users</span>
+                  <span className="tabular-nums">{formatKwacha(fundsAudit.nexa.userVaultsTambala)}</span>
+                </p>
+                <p className="flex justify-between gap-2">
+                  <span className="text-muted">Withdrawal reserve</span>
+                  <span className="tabular-nums">{formatKwacha(fundsAudit.nexa.payoutReserveTambala)}</span>
+                </p>
+                <p className="flex justify-between gap-2 text-xs text-muted">
+                  <span>Pending withdrawals</span>
+                  <span className="tabular-nums">
+                    {fundsAudit.nexa.pendingWithdrawalsCount} ·{" "}
+                    {formatKwacha(fundsAudit.nexa.pendingWithdrawalsTambala)}
+                  </span>
+                </p>
+              </div>
+              <div className="space-y-1 rounded-xl border border-border bg-surface-2/50 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted">PayChangu</p>
+                {fundsAudit.paychangu.ok ? (
+                  <>
+                    <p className="flex justify-between gap-2">
+                      <span className="text-muted">Main (payout float)</span>
+                      <span className="tabular-nums">{formatKwacha(fundsAudit.paychangu.mainTambala)}</span>
+                    </p>
+                    <p className="flex justify-between gap-2">
+                      <span className="text-muted">Collection</span>
+                      <span className="tabular-nums">{formatKwacha(fundsAudit.paychangu.collectionTambala)}</span>
+                    </p>
+                    <p className="flex justify-between gap-2 text-xs text-muted">
+                      <span>Environment</span>
+                      <span>{fundsAudit.paychangu.environment ?? "—"}</span>
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-danger">{fundsAudit.paychangu.error}</p>
+                )}
+              </div>
+            </div>
+            <div className="space-y-1 rounded-xl border border-border p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted">Diff</p>
+              <p className="flex justify-between gap-2">
+                <span className="text-muted">PayChangu main − withdrawal reserve</span>
+                <span className="tabular-nums">
+                  {formatKwacha(fundsAudit.math.paychanguAfterWithdrawalReserveTambala)}
+                </span>
+              </p>
+              <p className="flex justify-between gap-2 font-semibold">
+                <span>Minus user vaults</span>
+                <span
+                  className={
+                    fundsAudit.math.diffTambala >= 0 ? "tabular-nums text-primary" : "tabular-nums text-danger"
+                  }
+                >
+                  {formatKwacha(fundsAudit.math.diffTambala)}
+                </span>
+              </p>
+              <p className="flex justify-between gap-2 text-xs text-muted">
+                <span>Main − vaults only</span>
+                <span className="tabular-nums">{formatKwacha(fundsAudit.math.diffMainMinusVaultsTambala)}</span>
+              </p>
+              <p className="pt-1 text-xs text-muted">
+                Positive = enough float for user money after setting aside remaining withdrawal reserve. Collection
+                is not in the main diff until it settles to main.
+              </p>
+            </div>
+            <p className="text-xs text-muted">Ran {new Date(fundsAudit.at).toLocaleString()}</p>
+          </div>
+        ) : (
+          <p className="text-sm text-muted">Press Run audit to compare NEXA books with live PayChangu balances.</p>
+        )}
       </Card>
 
       <Card className="h-64 p-4">

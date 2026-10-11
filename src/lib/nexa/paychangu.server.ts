@@ -203,3 +203,28 @@ export async function initiateBankPayout(input: {
     status: String(data?.transaction?.status ?? json.status ?? "pending"),
   };
 }
+
+
+/** Live PayChangu wallet balances (MWK). Main = available for payouts; collection = unsettled deposits. */
+export async function getPaychanguWalletBalance(): Promise<{
+  currency: string;
+  mainBalanceKwacha: number;
+  collectionBalanceKwacha: number;
+  environment: string | null;
+  raw: unknown;
+}> {
+  if (!paychanguConfigured()) {
+    throw new Error("PayChangu is not configured");
+  }
+  const json = await paychanguFetch("/wallet-balance?currency=MWK");
+  const data = (json.data ?? json) as Record<string, unknown>;
+  const main = Number(data.main_balance ?? data.balance ?? 0);
+  const collection = Number(data.collection_balance ?? 0);
+  return {
+    currency: String(data.currency ?? "MWK"),
+    mainBalanceKwacha: Number.isFinite(main) ? main : 0,
+    collectionBalanceKwacha: Number.isFinite(collection) ? collection : 0,
+    environment: data.environment != null ? String(data.environment) : null,
+    raw: data,
+  };
+}
