@@ -6985,6 +6985,32 @@ export const adminFundsAudit = createServerFn({ method: "POST" })
     const userVaults = userMain + userReceived;
     const adminMain = asInt(adminW[0]?.main);
     const adminReceived = asInt(adminW[0]?.received);
+    // Operational money that must be backed by PayChangu float (not profit)
+    const operationalLiability = userVaults + adminMain + adminReceived;
+
+    // System profits — excluded from float coverage (not operating float)
+    const profits = await sql<{ depositProfit: number; sendFees: number; unlockFees: number }>`
+      select
+        coalesce(sum(case when kind = 'deposit' and status = 'success' then platform_profit_tambala else 0 end), 0)::bigint as "depositProfit",
+        coalesce(sum(case when kind = 'fee' and status = 'success' then platform_profit_tambala else 0 end), 0)::bigint as "sendFees",
+        coalesce(sum(case when kind = 'unlock_fee' and status = 'success' then platform_profit_tambala else 0 end), 0)::bigint as "unlockFees"
+      from transactions
+    `;
+    let treasuryPaid = 0;
+    try {
+      const paid = await sql<{ p: number }>`
+        select coalesce(sum(gross_tambala), 0)::bigint as p
+        from treasury_payouts where status in (${"success"}, ${"processing"})
+      `;
+      treasuryPaid = asInt(paid[0]?.p);
+    } catch {
+      /* optional */
+    }
+    const depositProfit = asInt(profits[0]?.depositProfit);
+    const sendFees = asInt(profits[0]?.sendFees);
+    const unlockFees = asInt(profits[0]?.unlockFees);
+    const bookProfitGross = depositProfit + sendFees + unlockFees;
+    const bookProfitRemaining = Math.max(0, bookProfitGross - treasuryPaid);
 
     let paychangu: {
       ok: boolean;
@@ -7025,35 +7051,40 @@ export const adminFundsAudit = createServerFn({ method: "POST" })
       }
     }
 
-    // What PayChangu main should cover after setting aside remaining withdrawal-rail reserve
-    const dedicatedForWithdrawal = payoutReserve;
-    const paychanguAfterReserve = paychangu.mainTambala - dedicatedForWithdrawal;
-    // Diff vs money still owed to users in vaults
-    const diffTambala = paychanguAfterReserve - userVaults;
-    // Alternate: full main vs vaults only
-    const diffMainVsVaults = paychangu.mainTambala - userVaults;
+    // PayChangu main still holds active (not-yet-withdrawn) book profits.
+    // Strip those out so we only compare float that should cover operating liabilities.
+    // If all profits were paid out, remaining = 0 and balances compare as-is.
+    const activeProfitsTambala = bookProfitRemaining;
+    const paychanguForLiabilities =
+      paychangu.mainTambala - activeProfitsTambala - payoutReserve;
+    // Liabilities that need covering
+    const liabilitiesTambala = operationalLiability;
+    const diffTambala = paychanguForLiabilities - liabilitiesTambala;
 
-    let status: "healthy" | "tight" | "short" | "unavailable" = "unavailable";
+    let status: "green" | "red" | "unavailable" = "unavailable";
     let summary: string;
     if (!paychangu.ok) {
       status = "unavailable";
       summary = paychangu.error ?? "Could not read PayChangu balance.";
     } else if (diffTambala >= 0) {
-      status = diffTambala < userVaults * 0.02 ? "tight" : "healthy";
+      status = "green";
       summary =
-        status === "healthy"
-          ? `PayChangu main (after withdrawal reserve) covers user vaults with ${formatKwacha(diffTambala)} headroom.`
-          : `Coverage is thin — only ${formatKwacha(diffTambala)} above user vaults after reserve.`;
+        activeProfitsTambala > 0
+          ? `GREEN — PayChangu main after removing active profits (${formatKwacha(activeProfitsTambala)}) and withdrawal reserve covers operating liabilities with ${formatKwacha(diffTambala)} headroom.`
+          : `GREEN — PayChangu main (no active profit left in float) covers operating liabilities with ${formatKwacha(diffTambala)} headroom.`;
     } else {
-      status = "short";
-      summary = `Shortfall of ${formatKwacha(Math.abs(diffTambala))}: user vaults exceed PayChangu main minus withdrawal reserve.`;
+      status = "red";
+      summary =
+        activeProfitsTambala > 0
+          ? `RED — Shortfall of ${formatKwacha(Math.abs(diffTambala))} after subtracting active profits and withdrawal reserve from PayChangu main.`
+          : `RED — Shortfall of ${formatKwacha(Math.abs(diffTambala))}: operating liabilities exceed PayChangu main minus withdrawal reserve.`;
     }
 
     const { writeAudit } = await import("./audit.server");
     await writeAudit(sql, {
       actorUserId: context.userId,
       action: "funds_audit",
-      detail: `status=${status} diff=${diffTambala} pcMain=${paychangu.mainTambala} vaults=${userVaults} reserve=${payoutReserve}`,
+      detail: `status=${status} diff=${diffTambala} pcMain=${paychangu.mainTambala} activeProfit=${activeProfitsTambala} ops=${operationalLiability} reserve=${payoutReserve}`,
     });
 
     return {
@@ -7068,8 +7099,17 @@ export const adminFundsAudit = createServerFn({ method: "POST" })
         payoutReserveTambala: payoutReserve,
         adminMainTambala: adminMain,
         adminReceivedTambala: adminReceived,
+        operationalLiabilityTambala: operationalLiability,
         pendingWithdrawalsCount: asInt(pendingOut[0]?.n),
         pendingWithdrawalsTambala: asInt(pendingOut[0]?.amt),
+      },
+      excludedProfits: {
+        depositProfitTambala: depositProfit,
+        sendFeesTambala: sendFees,
+        unlockFeesTambala: unlockFees,
+        treasuryPaidOutTambala: treasuryPaid,
+        remainingBookProfitTambala: bookProfitRemaining,
+        note: "Active (not-yet-withdrawn) book profit is subtracted from PayChangu main before comparing to liabilities. Fully paid-out profit is ignored.",
       },
       paychangu: {
         ok: paychangu.ok,
@@ -7080,12 +7120,14 @@ export const adminFundsAudit = createServerFn({ method: "POST" })
         error: paychangu.error,
       },
       math: {
-        /** PayChangu main − payout reserve still on user wallets */
-        paychanguAfterWithdrawalReserveTambala: paychanguAfterReserve,
-        /** (main − reserve) − user vaults */
+        activeProfitsTambala,
+        /** PayChangu main − active profits − withdrawal reserve */
+        paychanguAfterWithdrawalReserveTambala: paychanguForLiabilities,
+        /** that − operating liabilities (users + admin main + admin received) */
         diffTambala,
-        /** main − user vaults (ignores reserve) */
-        diffMainMinusVaultsTambala: diffMainVsVaults,
+        liabilitiesTambala,
+        /** green if >= 0 */
+        covered: diffTambala >= 0,
       },
     };
   });

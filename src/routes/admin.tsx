@@ -776,7 +776,8 @@ function Console() {
           <div>
             <h2 className="font-display text-lg font-semibold">Funds audit</h2>
             <p className="text-sm text-muted">
-              User vaults vs live PayChangu main balance, after withdrawal-rail reserve still on wallets.
+              Operating money (user vaults + admin main + admin received) vs PayChangu main, after withdrawal
+              reserve. Platform profit and NEXA send fees are excluded — those are system income.
             </p>
           </div>
           <Button
@@ -798,33 +799,53 @@ function Console() {
         {auditErr ? <p className="text-sm text-danger">{auditErr}</p> : null}
         {fundsAudit ? (
           <div className="space-y-3 text-sm">
-            <p
+            <div
               className={
-                fundsAudit.status === "healthy"
-                  ? "font-medium text-primary"
-                  : fundsAudit.status === "short"
-                    ? "font-medium text-danger"
-                    : fundsAudit.status === "tight"
-                      ? "font-medium text-amber-600 dark:text-amber-400"
-                      : "text-muted"
+                fundsAudit.status === "green"
+                  ? "rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5 font-medium text-emerald-700 dark:text-emerald-300"
+                  : fundsAudit.status === "red"
+                    ? "rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2.5 font-medium text-red-700 dark:text-red-300"
+                    : "rounded-xl border border-border bg-surface-2/50 px-3 py-2.5 text-muted"
               }
             >
-              {fundsAudit.summary}
-            </p>
+              <p className="text-xs font-semibold uppercase tracking-wide opacity-80">
+                {fundsAudit.status === "green"
+                  ? "● Green — covered"
+                  : fundsAudit.status === "red"
+                    ? "● Red — shortfall"
+                    : "● Unavailable"}
+              </p>
+              <p className="mt-1 text-sm font-medium">{fundsAudit.summary}</p>
+            </div>
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="space-y-1 rounded-xl border border-border bg-surface-2/50 p-3">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted">NEXA (users)</p>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted">Operating balances</p>
                 <p className="flex justify-between gap-2">
-                  <span className="text-muted">Main vaults</span>
+                  <span className="text-muted">User main vaults</span>
                   <span className="tabular-nums">{formatKwacha(fundsAudit.nexa.userMainTambala)}</span>
                 </p>
                 <p className="flex justify-between gap-2">
-                  <span className="text-muted">Received bags</span>
+                  <span className="text-muted">User received bags</span>
                   <span className="tabular-nums">{formatKwacha(fundsAudit.nexa.userReceivedTambala)}</span>
                 </p>
-                <p className="flex justify-between gap-2 font-medium">
-                  <span>Total for users</span>
-                  <span className="tabular-nums">{formatKwacha(fundsAudit.nexa.userVaultsTambala)}</span>
+                <p className="flex justify-between gap-2">
+                  <span className="text-muted">Admin main</span>
+                  <span className="tabular-nums">{formatKwacha(fundsAudit.nexa.adminMainTambala)}</span>
+                </p>
+                <p className="flex justify-between gap-2">
+                  <span className="text-muted">Admin received</span>
+                  <span className="tabular-nums">{formatKwacha(fundsAudit.nexa.adminReceivedTambala)}</span>
+                </p>
+                <p className="flex justify-between gap-2 font-medium border-t border-border pt-1">
+                  <span>Total operating</span>
+                  <span className="tabular-nums">
+                    {formatKwacha(
+                      fundsAudit.nexa.operationalLiabilityTambala ??
+                        fundsAudit.nexa.userVaultsTambala +
+                          fundsAudit.nexa.adminMainTambala +
+                          fundsAudit.nexa.adminReceivedTambala,
+                    )}
+                  </span>
                 </p>
                 <p className="flex justify-between gap-2">
                   <span className="text-muted">Withdrawal reserve</span>
@@ -861,31 +882,78 @@ function Console() {
               </div>
             </div>
             <div className="space-y-1 rounded-xl border border-border p-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted">Diff</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted">Coverage math</p>
               <p className="flex justify-between gap-2">
-                <span className="text-muted">PayChangu main − withdrawal reserve</span>
+                <span className="text-muted">PayChangu main</span>
+                <span className="tabular-nums">{formatKwacha(fundsAudit.paychangu.mainTambala)}</span>
+              </p>
+              <p className="flex justify-between gap-2">
+                <span className="text-muted">− Active profits (not yet withdrawn)</span>
+                <span className="tabular-nums">
+                  {formatKwacha(fundsAudit.math.activeProfitsTambala ?? fundsAudit.excludedProfits?.remainingBookProfitTambala ?? 0)}
+                </span>
+              </p>
+              <p className="flex justify-between gap-2">
+                <span className="text-muted">− Withdrawal reserve</span>
+                <span className="tabular-nums">{formatKwacha(fundsAudit.nexa.payoutReserveTambala)}</span>
+              </p>
+              <p className="flex justify-between gap-2 font-medium">
+                <span>Float for liabilities</span>
                 <span className="tabular-nums">
                   {formatKwacha(fundsAudit.math.paychanguAfterWithdrawalReserveTambala)}
                 </span>
               </p>
-              <p className="flex justify-between gap-2 font-semibold">
-                <span>Minus user vaults</span>
+              <p className="flex justify-between gap-2">
+                <span className="text-muted">− Operating liabilities</span>
+                <span className="tabular-nums">
+                  {formatKwacha(
+                    fundsAudit.math.liabilitiesTambala ??
+                      fundsAudit.nexa.operationalLiabilityTambala ??
+                      fundsAudit.nexa.userVaultsTambala,
+                  )}
+                </span>
+              </p>
+              <p className="flex justify-between gap-2 border-t border-border pt-1.5 text-base font-semibold">
+                <span>Result</span>
                 <span
                   className={
-                    fundsAudit.math.diffTambala >= 0 ? "tabular-nums text-primary" : "tabular-nums text-danger"
+                    fundsAudit.math.diffTambala >= 0
+                      ? "tabular-nums text-emerald-600 dark:text-emerald-400"
+                      : "tabular-nums text-red-600 dark:text-red-400"
                   }
                 >
                   {formatKwacha(fundsAudit.math.diffTambala)}
                 </span>
               </p>
-              <p className="flex justify-between gap-2 text-xs text-muted">
-                <span>Main − vaults only</span>
-                <span className="tabular-nums">{formatKwacha(fundsAudit.math.diffMainMinusVaultsTambala)}</span>
-              </p>
               <p className="pt-1 text-xs text-muted">
-                Positive = enough float for user money after setting aside remaining withdrawal reserve. Collection
-                is not in the main diff until it settles to main.
+                GREEN if result ≥ 0, RED if &lt; 0. If all profits were withdrawn, active profit is 0 and main is
+                compared as-is. Collection balance is not used until settled to main.
               </p>
+              {fundsAudit.excludedProfits ? (
+                <div className="mt-2 space-y-1 border-t border-border pt-2 text-xs text-muted">
+                  <p className="font-medium text-fg">Excluded (system profit — not operating float)</p>
+                  <p className="flex justify-between gap-2">
+                    <span>Deposit profit (book)</span>
+                    <span className="tabular-nums">{formatKwacha(fundsAudit.excludedProfits.depositProfitTambala)}</span>
+                  </p>
+                  <p className="flex justify-between gap-2">
+                    <span>NEXA→NEXA send fees</span>
+                    <span className="tabular-nums">{formatKwacha(fundsAudit.excludedProfits.sendFeesTambala)}</span>
+                  </p>
+                  <p className="flex justify-between gap-2">
+                    <span>Early unlock fees</span>
+                    <span className="tabular-nums">{formatKwacha(fundsAudit.excludedProfits.unlockFeesTambala)}</span>
+                  </p>
+                  <p className="flex justify-between gap-2">
+                    <span>Already paid from treasury</span>
+                    <span className="tabular-nums">{formatKwacha(fundsAudit.excludedProfits.treasuryPaidOutTambala)}</span>
+                  </p>
+                  <p className="flex justify-between gap-2">
+                    <span>Remaining book profit</span>
+                    <span className="tabular-nums">{formatKwacha(fundsAudit.excludedProfits.remainingBookProfitTambala)}</span>
+                  </p>
+                </div>
+              ) : null}
             </div>
             <p className="text-xs text-muted">Ran {new Date(fundsAudit.at).toLocaleString()}</p>
           </div>
