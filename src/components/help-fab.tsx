@@ -44,10 +44,9 @@ export function HelpFab() {
 
   return (
     <div className="pointer-events-none fixed bottom-20 right-4 z-30 flex flex-col items-end sm:bottom-8 sm:right-6">
-      {/* Help lines: explode upward from the FAB */}
       <div
         className={cn(
-          "mb-3 flex flex-col-reverse items-end gap-2.5",
+          "mb-3 flex flex-col-reverse items-end gap-2",
           open ? "pointer-events-auto" : "pointer-events-none",
         )}
         aria-hidden={!open}
@@ -61,14 +60,10 @@ export function HelpFab() {
             rel="noopener noreferrer"
             tabIndex={open ? 0 : -1}
             className={cn(
-              "help-fab-chip flex items-center gap-3 rounded-full border border-border bg-surface/95 py-2 pl-4 pr-2.5 shadow-lg backdrop-blur-sm",
+              "help-fab-chip flex items-center gap-3 rounded-full border border-border bg-surface/95 py-2 pl-4 pr-2.5 shadow-md backdrop-blur-sm",
               open ? "help-fab-chip-in" : "help-fab-chip-out",
             )}
-            style={
-              {
-                "--chip-i": open ? i : lines.length - 1 - i,
-              } as React.CSSProperties
-            }
+            style={{ "--chip-i": open ? i : lines.length - 1 - i } as React.CSSProperties}
             onClick={(e) => {
               if (!open) {
                 e.preventDefault();
@@ -86,48 +81,44 @@ export function HelpFab() {
         ))}
       </div>
 
-      {/* Main toggle: agent ↔ X with morph */}
       <button
         type="button"
         aria-expanded={open}
         aria-label={open ? "Close help" : "Open help"}
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "help-fab-main pointer-events-auto relative size-14 shrink-0 overflow-hidden rounded-full shadow-lg",
-          "ring-2 ring-primary/35 transition-[box-shadow,transform] duration-300 ease-out",
-          "hover:scale-105 hover:ring-primary/60 active:scale-95",
-          open && "help-fab-main-open ring-primary/70 shadow-primary/20",
+          "help-fab-main pointer-events-auto relative size-14 shrink-0 overflow-hidden rounded-full",
+          "bg-white shadow-md ring-1 ring-black/5",
+          "transition-[transform,box-shadow] duration-200 ease-out",
+          "hover:shadow-lg hover:ring-primary/30 active:scale-[0.97]",
+          open && "ring-primary/40 shadow-lg",
         )}
       >
-        {/* Soft pulse ring when closed */}
-        {!open ? <span className="help-fab-pulse" aria-hidden /> : null}
+        {/* Soft idle glow — very light */}
+        {!open ? <span className="help-fab-glow" aria-hidden /> : null}
 
-        {/* Agent image */}
         <img
           src="/help-agent.png"
           alt=""
           className={cn(
-            "absolute inset-0 size-full object-cover object-center transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
-            open
-              ? "scale-50 rotate-[-90deg] opacity-0 blur-sm"
-              : "scale-100 rotate-0 opacity-100 blur-0",
+            "absolute inset-0 size-full object-cover object-center",
+            "transition-opacity duration-250 ease-out",
+            open ? "opacity-0" : "opacity-100",
           )}
         />
 
-        {/* Close X on tinted plate */}
         <span
           className={cn(
-            "absolute inset-0 grid place-items-center bg-surface text-fg transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
-            open
-              ? "scale-100 rotate-0 opacity-100"
-              : "scale-50 rotate-90 opacity-0",
+            "absolute inset-0 grid place-items-center bg-surface text-fg",
+            "transition-opacity duration-250 ease-out",
+            open ? "opacity-100" : "opacity-0",
           )}
           aria-hidden={!open}
         >
           <X
             className={cn(
-              "size-6 transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
-              open ? "rotate-0 scale-100" : "rotate-90 scale-50",
+              "size-5 transition-transform duration-250 ease-out",
+              open ? "scale-100" : "scale-90",
             )}
           />
         </span>
