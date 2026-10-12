@@ -7115,11 +7115,15 @@ export const adminFundsAudit = createServerFn({ method: "POST" })
     }
 
     const activeProfitsTambala = bookProfitRemaining;
-    // remaining reserve = buffer still held for *future* rails (not yet consumed)
-    const paychanguForLiabilities =
-      paychangu.mainTambala - activeProfitsTambala - payoutReserve + railFeesPaidTambala;
     const liabilitiesTambala = operationalLiability;
+    // Deposits often land in PayChangu *collection* until settled to *main*.
+    // Overall solvency uses main + collection; payout capacity is main-only.
+    const pcTotalTambala = paychangu.mainTambala + paychangu.collectionTambala;
+    const adjustTambala = -activeProfitsTambala - payoutReserve + railFeesPaidTambala;
+    const paychanguForLiabilities = pcTotalTambala + adjustTambala;
     const diffTambala = paychanguForLiabilities - liabilitiesTambala;
+    const mainOnlyFloat = paychangu.mainTambala + adjustTambala;
+    const mainOnlyDiffTambala = mainOnlyFloat - liabilitiesTambala;
 
     let status: "green" | "red" | "unavailable" = "unavailable";
     let summary: string;
@@ -7128,12 +7132,22 @@ export const adminFundsAudit = createServerFn({ method: "POST" })
       summary = paychangu.error ?? "Could not read PayChangu balance.";
     } else if (diffTambala >= 0) {
       status = "green";
-      summary =
-        `GREEN — PayChangu float covers operating liabilities with ${formatKwacha(diffTambala)} headroom (profits stripped, remaining reserve set aside, rail fees already paid added back).`;
+      if (paychangu.collectionTambala > 0 && mainOnlyDiffTambala < 0) {
+        summary =
+          `GREEN overall — shortfall is only on main because ${formatKwacha(paychangu.collectionTambala)} is still in collection (e.g. a recent deposit). After PayChangu settles collection → main, payout float matches. Headroom ${formatKwacha(diffTambala)}.`;
+      } else if (paychangu.collectionTambala > 0) {
+        summary =
+          `GREEN — main + collection cover liabilities with ${formatKwacha(diffTambala)} headroom. ${formatKwacha(paychangu.collectionTambala)} still in collection (not yet on main for payouts).`;
+      } else {
+        summary =
+          `GREEN — PayChangu float covers operating liabilities with ${formatKwacha(diffTambala)} headroom.`;
+      }
     } else {
       status = "red";
       summary =
-        `RED — Shortfall of ${formatKwacha(Math.abs(diffTambala))} after profits, remaining withdrawal reserve, and rail fees already paid.`;
+        paychangu.collectionTambala > 0
+          ? `RED — Shortfall of ${formatKwacha(Math.abs(diffTambala))} even after including collection (${formatKwacha(paychangu.collectionTambala)}). Main alone is short ${formatKwacha(Math.abs(Math.min(0, mainOnlyDiffTambala)))}.`
+          : `RED — Shortfall of ${formatKwacha(Math.abs(diffTambala))} after profits, remaining reserve, and rail fees already paid.`;
     }
 
     const { writeAudit } = await import("./audit.server");
@@ -7178,13 +7192,13 @@ export const adminFundsAudit = createServerFn({ method: "POST" })
       math: {
         activeProfitsTambala,
         railFeesPaidTambala,
-        /** PayChangu main − active profits − remaining reserve + rail fees already paid */
+        /** main + collection − profits − remaining reserve + rail fees paid */
         paychanguAfterWithdrawalReserveTambala: paychanguForLiabilities,
-        /** that − operating liabilities (users + admin main + admin received) */
         diffTambala,
         liabilitiesTambala,
-        /** green if >= 0 */
+        mainOnlyDiffTambala,
         covered: diffTambala >= 0,
+        collectionInFloat: paychangu.collectionTambala > 0,
       },
     };
   });

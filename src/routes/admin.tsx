@@ -879,8 +879,8 @@ function Console() {
           <div>
             <h2 className="font-display text-lg font-semibold">Funds audit</h2>
             <p className="text-sm text-muted">
-              Operating money (user vaults + admin main + admin received) vs PayChangu main, after withdrawal
-              reserve. Platform profit and NEXA send fees are excluded — those are system income.
+              Operating money (user vaults + admin main + admin received) vs PayChangu main + collection. Profits
+              excluded; remaining withdrawal reserve set aside; rail fees already paid added back.
             </p>
           </div>
           <Button
@@ -995,6 +995,10 @@ function Console() {
                 <span className="tabular-nums">{formatKwacha(fundsAudit.paychangu.mainTambala)}</span>
               </p>
               <p className="flex justify-between gap-2">
+                <span className="text-muted">+ Collection (unsettled deposits)</span>
+                <span className="tabular-nums">{formatKwacha(fundsAudit.paychangu.collectionTambala)}</span>
+              </p>
+              <p className="flex justify-between gap-2">
                 <span className="text-muted">− Active profits (not yet withdrawn)</span>
                 <span className="tabular-nums">
                   {formatKwacha(fundsAudit.math.activeProfitsTambala ?? fundsAudit.excludedProfits?.remainingBookProfitTambala ?? 0)}
@@ -1027,7 +1031,7 @@ function Console() {
                 </span>
               </p>
               <p className="flex justify-between gap-2 border-t border-border pt-1.5 text-base font-semibold">
-                <span>Result</span>
+                <span>Result (main + collection)</span>
                 <span
                   className={
                     fundsAudit.math.diffTambala >= 0
@@ -1038,10 +1042,24 @@ function Console() {
                   {formatKwacha(fundsAudit.math.diffTambala)}
                 </span>
               </p>
+              {fundsAudit.math.mainOnlyDiffTambala != null ? (
+                <p className="flex justify-between gap-2 text-xs text-muted">
+                  <span>Main only (payout float)</span>
+                  <span
+                    className={
+                      fundsAudit.math.mainOnlyDiffTambala >= 0
+                        ? "tabular-nums text-emerald-600/80 dark:text-emerald-400/80"
+                        : "tabular-nums text-amber-600 dark:text-amber-400"
+                    }
+                  >
+                    {formatKwacha(fundsAudit.math.mainOnlyDiffTambala)}
+                  </span>
+                </p>
+              ) : null}
               <p className="pt-1 text-xs text-muted">
-                GREEN if result ≥ 0, RED if &lt; 0. Rail fees already taken by PayChangu are added back so a
-                correct 1.8% payout does not show as a permanent shortfall. Collection is not used until settled
-                to main.
+                New deposits often sit in <span className="text-fg">collection</span> until PayChangu settles them to
+                main. Overall green can still show main-only tight until settlement. Rail fees already paid are added
+                back so a correct 1.8% payout is not a permanent hole.
               </p>
               {fundsAudit.excludedProfits ? (
                 <div className="mt-2 space-y-1 border-t border-border pt-2 text-xs text-muted">
