@@ -990,8 +990,14 @@ function Console() {
                 </span>
               </p>
               <p className="flex justify-between gap-2">
-                <span className="text-muted">− Withdrawal reserve</span>
+                <span className="text-muted">− Remaining withdrawal reserve</span>
                 <span className="tabular-nums">{formatKwacha(fundsAudit.nexa.payoutReserveTambala)}</span>
+              </p>
+              <p className="flex justify-between gap-2">
+                <span className="text-muted">+ Rail fees already paid (PayChangu)</span>
+                <span className="tabular-nums">
+                  {formatKwacha(fundsAudit.math.railFeesPaidTambala ?? 0)}
+                </span>
               </p>
               <p className="flex justify-between gap-2 font-medium">
                 <span>Float for liabilities</span>
@@ -1022,8 +1028,9 @@ function Console() {
                 </span>
               </p>
               <p className="pt-1 text-xs text-muted">
-                GREEN if result ≥ 0, RED if &lt; 0. If all profits were withdrawn, active profit is 0 and main is
-                compared as-is. Collection balance is not used until settled to main.
+                GREEN if result ≥ 0, RED if &lt; 0. Rail fees already taken by PayChangu are added back so a
+                correct 1.8% payout does not show as a permanent shortfall. Collection is not used until settled
+                to main.
               </p>
               {fundsAudit.excludedProfits ? (
                 <div className="mt-2 space-y-1 border-t border-border pt-2 text-xs text-muted">

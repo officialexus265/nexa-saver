@@ -123,7 +123,7 @@ export async function initiateMomoPayout(input: {
   email: string;
   firstName: string;
   lastName: string;
-}): Promise<{ chargeId: string; status: string }> {
+}): Promise<{ chargeId: string; status: string; feeKwacha: number; amountKwacha: number }> {
   const mobile = normalizeMwPhone(input.phone);
   if (!mobile) throw new Error("Registered number is not a valid Malawi mobile");
   const operator = await operatorRefForPhone(mobile);
@@ -139,10 +139,18 @@ export async function initiateMomoPayout(input: {
       last_name: input.lastName,
     }),
   });
-  const data = json.data as { transaction?: { status?: string; charge_id?: string } } | undefined;
+  const data = (json.data ?? json) as Record<string, unknown>;
+  const tx = (data.transaction ?? data) as Record<string, unknown>;
+  const charges = (tx.transaction_charges ?? data.transaction_charges) as
+    | { amount?: number | string; currency?: string }
+    | undefined;
+  let feeKwacha = Number(charges?.amount ?? 0);
+  if (!Number.isFinite(feeKwacha) || feeKwacha < 0) feeKwacha = 0;
   return {
-    chargeId: data?.transaction?.charge_id ?? input.chargeId,
-    status: String(data?.transaction?.status ?? json.status ?? "pending"),
+    chargeId: String(tx.charge_id ?? data.charge_id ?? input.chargeId),
+    status: String(tx.status ?? json.status ?? "pending"),
+    feeKwacha,
+    amountKwacha: Number(tx.amount ?? input.amountKwacha) || input.amountKwacha,
   };
 }
 

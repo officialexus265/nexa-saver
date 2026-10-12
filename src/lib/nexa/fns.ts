@@ -1133,6 +1133,7 @@ export const startWithdraw = createServerFn({ method: "POST" })
     }
 
     // Outside the DB transaction: talk to PayChangu (or demo).
+    let actualRailFeeTambala: number | null = prepared.reserveShare;
     try {
       if (paychanguConfigured()) {
         const method = data.method ?? "momo";
@@ -1174,6 +1175,13 @@ export const startWithdraw = createServerFn({ method: "POST" })
             lastName: profile.last_name,
           });
           status = String(payout.status ?? "").toLowerCase();
+          const { kwachaToTambala: k2t } = await import("./money");
+          const { MOMO_PAYOUT_RAIL_RATE } = await import("./constants");
+          // Prefer live PayChangu charge; fall back to 1.8% of amount
+          actualRailFeeTambala =
+            payout.feeKwacha > 0
+              ? k2t(payout.feeKwacha)
+              : Math.round(amount * MOMO_PAYOUT_RAIL_RATE);
         }
         if (status === "failed" || status === "failure" || status === "rejected") {
           throw new Error(`Payout rejected by provider (${status})`);
@@ -1183,8 +1191,10 @@ export const startWithdraw = createServerFn({ method: "POST" })
       await withTransaction(async (tx) => {
         await finalizeWithdrawalSuccess(tx, {
           txId: prepared.txId,
+          userId: context.userId,
           amount,
           reserveShare: prepared.reserveShare,
+          actualFeeTambala: actualRailFeeTambala ?? prepared.reserveShare,
         });
       });
       // Near-limit withdrawal may unlock the next daily-cap tier (after 31 days on current tier).
@@ -7080,11 +7090,34 @@ export const adminFundsAudit = createServerFn({ method: "POST" })
 
     // PayChangu main still holds active (not-yet-withdrawn) book profits.
     // Strip those out so we only compare float that should cover operating liabilities.
-    // If all profits were paid out, remaining = 0 and balances compare as-is.
+    // Rail fees already taken by PayChangu left the float but were never user liabilities —
+    // add them back so a correct 1.8% payout does not create a permanent shortfall.
+    let railFeesPaidTambala = 0;
+    try {
+      const fees = await sql<{ n: number }>`
+        select coalesce(sum(amount_tambala), 0)::bigint as n
+        from platform_ledger
+        where entry_type = ${"payout_fee_used"}
+      `;
+      railFeesPaidTambala = asInt(fees[0]?.n);
+    } catch {
+      railFeesPaidTambala = 0;
+    }
+    try {
+      const tf = await sql<{ n: number }>`
+        select coalesce(sum(fee_tambala), 0)::bigint as n
+        from treasury_payouts
+        where status in (${"success"}, ${"processing"})
+      `;
+      railFeesPaidTambala += asInt(tf[0]?.n);
+    } catch {
+      /* optional */
+    }
+
     const activeProfitsTambala = bookProfitRemaining;
+    // remaining reserve = buffer still held for *future* rails (not yet consumed)
     const paychanguForLiabilities =
-      paychangu.mainTambala - activeProfitsTambala - payoutReserve;
-    // Liabilities that need covering
+      paychangu.mainTambala - activeProfitsTambala - payoutReserve + railFeesPaidTambala;
     const liabilitiesTambala = operationalLiability;
     const diffTambala = paychanguForLiabilities - liabilitiesTambala;
 
@@ -7096,15 +7129,11 @@ export const adminFundsAudit = createServerFn({ method: "POST" })
     } else if (diffTambala >= 0) {
       status = "green";
       summary =
-        activeProfitsTambala > 0
-          ? `GREEN — PayChangu main after removing active profits (${formatKwacha(activeProfitsTambala)}) and withdrawal reserve covers operating liabilities with ${formatKwacha(diffTambala)} headroom.`
-          : `GREEN — PayChangu main (no active profit left in float) covers operating liabilities with ${formatKwacha(diffTambala)} headroom.`;
+        `GREEN — PayChangu float covers operating liabilities with ${formatKwacha(diffTambala)} headroom (profits stripped, remaining reserve set aside, rail fees already paid added back).`;
     } else {
       status = "red";
       summary =
-        activeProfitsTambala > 0
-          ? `RED — Shortfall of ${formatKwacha(Math.abs(diffTambala))} after subtracting active profits and withdrawal reserve from PayChangu main.`
-          : `RED — Shortfall of ${formatKwacha(Math.abs(diffTambala))}: operating liabilities exceed PayChangu main minus withdrawal reserve.`;
+        `RED — Shortfall of ${formatKwacha(Math.abs(diffTambala))} after profits, remaining withdrawal reserve, and rail fees already paid.`;
     }
 
     const { writeAudit } = await import("./audit.server");
@@ -7148,7 +7177,8 @@ export const adminFundsAudit = createServerFn({ method: "POST" })
       },
       math: {
         activeProfitsTambala,
-        /** PayChangu main − active profits − withdrawal reserve */
+        railFeesPaidTambala,
+        /** PayChangu main − active profits − remaining reserve + rail fees already paid */
         paychanguAfterWithdrawalReserveTambala: paychanguForLiabilities,
         /** that − operating liabilities (users + admin main + admin received) */
         diffTambala,

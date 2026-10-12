@@ -151,18 +151,49 @@ export async function creditDeposit(reference: string): Promise<CreditResult> {
 
 export async function finalizeWithdrawalSuccess(
   tx: Sql,
-  opts: { txId: number; amount: number; reserveShare: number },
+  opts: {
+    txId: number;
+    userId: string;
+    amount: number;
+    /** Reserve already taken at start */
+    reserveShare: number;
+    /** Actual PayChangu rail fee (tambala); true-ups reserve to match real cost */
+    actualFeeTambala?: number;
+  },
 ): Promise<void> {
+  const actual =
+    opts.actualFeeTambala != null && Number.isFinite(opts.actualFeeTambala) && opts.actualFeeTambala >= 0
+      ? Math.round(opts.actualFeeTambala)
+      : opts.reserveShare;
+  const delta = actual - opts.reserveShare;
+  if (delta > 0) {
+    await tx`
+      update wallets
+      set payout_reserve_tambala = greatest(payout_reserve_tambala - ${delta}, 0),
+          updated_at = now()
+      where user_id = ${opts.userId}
+    `;
+  } else if (delta < 0) {
+    const restore = -delta;
+    await tx`
+      update wallets
+      set payout_reserve_tambala = payout_reserve_tambala + ${restore},
+          updated_at = now()
+      where user_id = ${opts.userId}
+    `;
+  }
   await tx`
     update transactions
-    set status = ${"success"}, completed_at = now()
+    set status = ${"success"},
+        payout_reserve_tambala = ${actual},
+        completed_at = now()
     where id = ${opts.txId} and status in (${"pending"}, ${"processing"})
   `;
   await tx`
     insert into platform_ledger (transaction_id, entry_type, amount_tambala)
     values
       (${opts.txId}, ${"withdrawal"}, ${opts.amount}),
-      (${opts.txId}, ${"payout_fee_used"}, ${opts.reserveShare})
+      (${opts.txId}, ${"payout_fee_used"}, ${actual})
   `;
 }
 
