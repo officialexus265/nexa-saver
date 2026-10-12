@@ -7489,3 +7489,168 @@ export const adminTreasuryHistory = createServerFn({ method: "POST" })
       },
     };
   });
+
+
+/**
+ * Reverse past "funds-audit shortage cover" debits from admin main.
+ * Those were ledger-only (no PayChangu movement) when the audit math was wrong.
+ */
+export const adminListAuditCovers = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{
+      id: number;
+      reference: string;
+      gross_tambala: number;
+      completed_at: string | null;
+      note: string | null;
+    }>`
+      select id, reference, gross_tambala, completed_at, note
+      from transactions
+      where user_id = ${context.userId}
+        and kind = ${"withdrawal"}
+        and status = ${"success"}
+        and reference like ${"BAL_%"}
+        and note ilike ${"%Funds-audit shortage cover%"}
+        and note not ilike ${"%RESTORED%"}
+      order by completed_at desc nulls last, id desc
+    `;
+    const total = rows.reduce((s, r) => s + asInt(r.gross_tambala), 0);
+    return {
+      totalTambala: total,
+      count: rows.length,
+      items: rows.map((r) => ({
+        id: r.id,
+        reference: r.reference,
+        amountTambala: asInt(r.gross_tambala),
+        at: r.completed_at,
+        note: r.note,
+      })),
+    };
+  });
+
+export const adminRestoreAuditCovers = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      pin: pinSchema,
+      /** Restore all open covers, or a single reference */
+      reference: z.string().min(4).max(80).optional(),
+      idempotencyKey: z.string().min(8).max(128),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdminSensitive(context.userId);
+    const profile = await loadProfile(context.userId);
+    if (!profile || profile.role !== "admin") throw new Error("Admin only.");
+
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { verifySecret, newReference } = await import("./crypto");
+    const { formatKwacha } = await import("./money");
+    const { claimIdempotencyKey, storeIdempotencyResponse } = await import("./idempotency.server");
+
+    if (!(await verifySecret(profile.pin_hash, data.pin))) {
+      throw new Error("Incorrect PIN");
+    }
+
+    const sql = await getSql();
+    const claim = await claimIdempotencyKey(sql, {
+      key: data.idempotencyKey,
+      userId: context.userId,
+      action: "audit_cover_restore",
+    });
+    if (claim.hit) {
+      return claim.response as {
+        ok: true;
+        restoredTambala: number;
+        count: number;
+        reference: string;
+      };
+    }
+    const releaseKey = async () => {
+      await sql`delete from idempotency_keys where key = ${data.idempotencyKey} and response_json is null`;
+    };
+
+    const covers = data.reference
+      ? await sql<{ id: number; reference: string; gross_tambala: number }>`
+          select id, reference, gross_tambala
+          from transactions
+          where user_id = ${context.userId}
+            and kind = ${"withdrawal"}
+            and status = ${"success"}
+            and reference = ${data.reference}
+            and note ilike ${"%Funds-audit shortage cover%"}
+            and note not ilike ${"%RESTORED%"}
+        `
+      : await sql<{ id: number; reference: string; gross_tambala: number }>`
+          select id, reference, gross_tambala
+          from transactions
+          where user_id = ${context.userId}
+            and kind = ${"withdrawal"}
+            and status = ${"success"}
+            and reference like ${"BAL_%"}
+            and note ilike ${"%Funds-audit shortage cover%"}
+            and note not ilike ${"%RESTORED%"}
+          order by id asc
+        `;
+
+    if (!covers.length) {
+      await releaseKey();
+      throw new Error("No audit-cover write-offs left to restore.");
+    }
+
+    const total = covers.reduce((s, r) => s + asInt(r.gross_tambala), 0);
+    const restoreRef = newReference("BALR");
+
+    try {
+      await withTransaction(async (tx) => {
+        await tx`
+          update wallets
+          set balance_tambala = balance_tambala + ${total},
+              lifetime_withdrawn_tambala = greatest(0, lifetime_withdrawn_tambala - ${total}),
+              lifetime_deposited_tambala = lifetime_deposited_tambala + ${total},
+              updated_at = now()
+          where user_id = ${context.userId}
+        `;
+        for (const c of covers) {
+          await tx`
+            update transactions
+            set note = coalesce(note, '') || ${" | RESTORED to admin main via " + restoreRef}
+            where id = ${c.id}
+          `;
+        }
+        await tx`
+          insert into transactions (
+            user_id, kind, status, gross_tambala, credited_tambala,
+            platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
+          ) values (
+            ${context.userId}, ${"deposit"}, ${"success"}, ${total}, ${total},
+            ${0}, ${0}, ${restoreRef},
+            ${`Restored ${formatKwacha(total)} audit-cover write-off(s) to admin main (${covers.length} entry/entries) — miscalculation reversal`},
+            now()
+          )
+        `;
+      });
+    } catch (err) {
+      await releaseKey();
+      throw err;
+    }
+
+    const result = {
+      ok: true as const,
+      restoredTambala: total,
+      count: covers.length,
+      reference: restoreRef,
+    };
+    await storeIdempotencyResponse(sql, data.idempotencyKey, result);
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "audit_cover_restore",
+      detail: `ref=${restoreRef} total=${total} count=${covers.length}`,
+    });
+    return result;
+  });

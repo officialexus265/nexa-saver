@@ -15,6 +15,8 @@ import {
   adminTreasuryHistory,
   adminTreasuryToMain,
   adminCoverAuditShortage,
+  adminRestoreAuditCovers,
+  adminListAuditCovers,
   adminTransactions,
   adminUsers,
   adminLookupReference,
@@ -149,6 +151,11 @@ function Console() {
   const [coverPin, setCoverPin] = useState("");
   const [coverBusy, setCoverBusy] = useState(false);
   const [coverSuccess, setCoverSuccess] = useState<{ amountTambala: number; reference: string } | null>(null);
+  const [auditCovers, setAuditCovers] = useState<Awaited<ReturnType<typeof adminListAuditCovers>> | null>(null);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restorePin, setRestorePin] = useState("");
+  const [restoreSuccess, setRestoreSuccess] = useState<{ amountTambala: number; count: number; reference: string } | null>(null);
+
 
   const [histFrom, setHistFrom] = useState(() => {
     const d = new Date();
@@ -884,7 +891,11 @@ function Console() {
               setAuditBusy(true);
               setAuditErr(null);
               void adminFundsAudit()
-                .then(setFundsAudit)
+                .then((r) => {
+                  setFundsAudit(r);
+                  return adminListAuditCovers();
+                })
+                .then(setAuditCovers)
                 .catch((e) => setAuditErr(errMessage(e)))
                 .finally(() => setAuditBusy(false));
             }}
@@ -1104,6 +1115,7 @@ function Console() {
                           try {
                             const next = await adminFundsAudit();
                             setFundsAudit(next);
+                            setAuditCovers(await adminListAuditCovers());
                           } catch {
                             /* cover succeeded; audit refresh optional */
                           }
@@ -1118,12 +1130,108 @@ function Console() {
               </div>
             ) : null}
 
+            
+            {auditCovers && auditCovers.count > 0 ? (
+              <div className="space-y-2 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3">
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                  Past audit covers on admin main ({auditCovers.count})
+                </p>
+                <p className="text-xs text-muted">
+                  These were ledger-only write-offs when the audit math was wrong — nothing left PayChangu.
+                  Total {formatKwacha(auditCovers.totalTambala)} can be put back on admin main.
+                </p>
+                <ul className="max-h-28 space-y-1 overflow-y-auto text-xs text-muted">
+                  {auditCovers.items.map((it) => (
+                    <li key={it.reference} className="flex justify-between gap-2">
+                      <span className="truncate font-mono">{it.reference}</span>
+                      <span className="tabular-nums">{formatKwacha(it.amountTambala)}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <Label htmlFor="restore-pin">Admin PIN</Label>
+                    <Input
+                      id="restore-pin"
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={4}
+                      value={restorePin}
+                      onChange={(e) => setRestorePin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      placeholder="PIN"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    disabled={restoreBusy || restorePin.length !== 4}
+                    onClick={() => {
+                      setRestoreBusy(true);
+                      setAuditErr(null);
+                      void adminRestoreAuditCovers({
+                        data: {
+                          pin: restorePin,
+                          idempotencyKey: `restore-covers-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+                        },
+                      })
+                        .then(async (r) => {
+                          setRestorePin("");
+                          setRestoreSuccess({
+                            amountTambala: r.restoredTambala,
+                            count: r.count,
+                            reference: r.reference,
+                          });
+                          setAuditCovers(await adminListAuditCovers());
+                          try {
+                            setFundsAudit(await adminFundsAudit());
+                          } catch {
+                            /* optional */
+                          }
+                        })
+                        .catch((e) => setAuditErr(errMessage(e)))
+                        .finally(() => setRestoreBusy(false));
+                    }}
+                  >
+                    {restoreBusy
+                      ? "Restoring…"
+                      : `Restore ${formatKwacha(auditCovers.totalTambala)} to main`}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
             <p className="text-xs text-muted">Ran {new Date(fundsAudit.at).toLocaleString()}</p>
           </div>
         ) : (
           <p className="text-sm text-muted">Press Run audit to compare NEXA books with live PayChangu balances.</p>
         )}
       </Card>
+
+      <Modal
+        open={!!restoreSuccess}
+        title="Audit covers restored"
+        onClose={() => setRestoreSuccess(null)}
+      >
+        {restoreSuccess ? (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+              <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">
+                {formatKwacha(restoreSuccess.amountTambala)} put back on admin main
+                ({restoreSuccess.count} write-off{restoreSuccess.count === 1 ? "" : "s"}).
+              </p>
+              <p className="mt-1 text-xs text-muted">
+                These were only book entries from the old audit math — not real PayChangu payouts.
+              </p>
+            </div>
+            <div className="rounded-xl border border-border bg-surface-2/60 px-3 py-2.5 text-sm">
+              <p className="text-xs uppercase tracking-wide text-muted">Reference</p>
+              <p className="mt-0.5 break-all font-mono text-xs tabular-nums">{restoreSuccess.reference}</p>
+            </div>
+            <Button type="button" className="w-full" onClick={() => setRestoreSuccess(null)}>
+              Done
+            </Button>
+          </div>
+        ) : null}
+      </Modal>
 
       <Modal
         open={!!coverSuccess}
