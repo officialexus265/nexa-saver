@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState, useRef } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { TranslationStudio } from "@/components/translation-studio";
 import { SessionGate } from "@/components/session-gate";
+import { Modal } from "@/components/modal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -147,6 +148,8 @@ function Console() {
   const [auditErr, setAuditErr] = useState<string | null>(null);
   const [coverPin, setCoverPin] = useState("");
   const [coverBusy, setCoverBusy] = useState(false);
+  const [coverSuccess, setCoverSuccess] = useState<{ amountTambala: number; reference: string } | null>(null);
+
   const [histFrom, setHistFrom] = useState(() => {
     const d = new Date();
     d.setFullYear(d.getFullYear() - 1);
@@ -1087,13 +1090,17 @@ function Console() {
                           idempotencyKey: `cover-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
                         },
                       })
-                        .then((r) => {
+                        .then(async (r) => {
                           setCoverPin("");
                           setAuditErr(null);
-                          alert(`Covered ${formatKwacha(r.deductedTambala)}. Ref ${r.reference}. Re-run audit.`);
-                          return adminFundsAudit();
+                          setCoverSuccess({ amountTambala: r.deductedTambala, reference: r.reference });
+                          try {
+                            const next = await adminFundsAudit();
+                            setFundsAudit(next);
+                          } catch {
+                            /* cover succeeded; audit refresh optional */
+                          }
                         })
-                        .then(setFundsAudit)
                         .catch((e) => setAuditErr(errMessage(e)))
                         .finally(() => setCoverBusy(false));
                     }}
@@ -1110,6 +1117,35 @@ function Console() {
           <p className="text-sm text-muted">Press Run audit to compare NEXA books with live PayChangu balances.</p>
         )}
       </Card>
+
+      <Modal
+        open={!!coverSuccess}
+        title="Shortfall covered"
+        onClose={() => setCoverSuccess(null)}
+      >
+        {coverSuccess ? (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+              <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">
+                {formatKwacha(coverSuccess.amountTambala)} was deducted from admin main balance.
+              </p>
+              <p className="mt-1 text-xs text-muted">
+                Operating books are balanced to neutral against the last audit shortfall.
+              </p>
+            </div>
+            <div className="rounded-xl border border-border bg-surface-2/60 px-3 py-2.5 text-sm">
+              <p className="text-xs uppercase tracking-wide text-muted">Reference</p>
+              <p className="mt-0.5 break-all font-mono text-xs tabular-nums text-fg">{coverSuccess.reference}</p>
+            </div>
+            <p className="text-xs text-muted">
+              You can withdraw via MoMo next to compare PayChangu&apos;s live rail fee with the system figures.
+            </p>
+            <Button type="button" className="w-full" onClick={() => setCoverSuccess(null)}>
+              Done
+            </Button>
+          </div>
+        ) : null}
+      </Modal>
 
       <Card className="h-64 p-4">
         {chart.length ? (

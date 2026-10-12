@@ -1069,11 +1069,13 @@ export const startWithdraw = createServerFn({ method: "POST" })
       const amountErr = validateWithdrawAmount(data.amountKwacha, balance);
       if (amountErr) throw new Error(amountErr);
 
+      // Consume deposit-time withdrawal reserve at PayChangu MoMo rail rate (1.8%).
+      const { MOMO_PAYOUT_RAIL_RATE } = await import("./constants");
       const reserveShare =
         source === "main"
           ? Math.min(
               asInt(wallets[0]?.payout_reserve_tambala),
-              Math.round(amount * (0.03 / 0.94)),
+              Math.round(amount * MOMO_PAYOUT_RAIL_RATE),
             )
           : 0;
 
