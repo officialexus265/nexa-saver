@@ -6857,7 +6857,7 @@ export const adminSendFromWallet = createServerFn({ method: "POST" })
     const reference = newReference("AWS"); // admin wallet send
 
     try {
-      await withTransaction(sql, async (tx) => {
+      await withTransaction(async (tx) => {
         const wallets = await tx<{ balance_tambala: number }>`
           select balance_tambala from wallets where user_id = ${context.userId} for update
         `;
@@ -7198,7 +7198,7 @@ export const adminCoverAuditShortage = createServerFn({ method: "POST" })
     const reference = newReference("BAL");
 
     try {
-      await withTransaction(sql, async (tx) => {
+      await withTransaction(async (tx) => {
         const wallets = await tx<{ balance_tambala: number }>`
           select balance_tambala from wallets where user_id = ${context.userId} for update
         `;
@@ -7317,7 +7317,7 @@ export const adminTreasuryToMain = createServerFn({ method: "POST" })
 
     const reference = newReference("T2M");
     try {
-      await withTransaction(sql, async (tx) => {
+      await withTransaction(async (tx) => {
         await tx`
           insert into treasury_payouts (
             admin_user_id, gross_tambala, fee_tambala, net_tambala, phone, reference, status, note, completed_at
