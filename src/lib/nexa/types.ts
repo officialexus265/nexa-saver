@@ -97,14 +97,18 @@ export type AdminOverview = {
   totalWithdrawalsTambala: number;
   userBalancesTambala: number;
   platformProfitTambala: number;
+  /** NEXA→NEXA send fees collected */
+  sendFeesTambala: number;
   earlyUnlockFeesTambala: number;
   loanInterestTambala: number;
+  /** Sum of all platform income components before treasury payouts */
+  totalPlatformProfitTambala: number;
   payoutReserveTambala: number;
   pendingCount: number;
   demoPayments: boolean;
   /** Profit already paid out via treasury withdrawals */
   treasuryPaidOutTambala: number;
-  /** Profit still available for admin treasury withdraw (book profit − paid out) */
+  /** Profit still available for admin treasury withdraw (all income − paid out) */
   treasuryAvailableTambala: number;
   series: Array<{ day: string; deposits: number; withdrawals: number; profit: number }>;
   /** Phase A: env / money-path readiness (no secret values) */

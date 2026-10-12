@@ -1565,16 +1565,41 @@ export const adminOverview = createServerFn({ method: "GET" })
     } catch {
       loanInterest = 0;
     }
-    // Withdrawable = deposit book profit + unlock fees + loan interest − treasury already paid out
-    const available = Math.max(0, bookProfit + unlockFees + loanInterest - paidOut);
+    let sendFees = 0;
+    try {
+      const sf = await sql<{ fees: number }>`
+        select coalesce(sum(platform_profit_tambala), 0)::bigint as fees
+        from transactions
+        where kind = ${"fee"} and status = ${"success"}
+          and note ilike ${"%Send fee%"}
+      `;
+      sendFees = asInt(sf[0]?.fees);
+      if (sendFees === 0) {
+        const sf2 = await sql<{ fees: number }>`
+          select coalesce(sum(platform_profit_tambala), 0)::bigint as fees
+          from transactions
+          where kind = ${"fee"} and status = ${"success"}
+            and note not ilike ${"%Early withdrawal unlock%"}
+            and note is distinct from ${"Loan interest"}
+        `;
+        sendFees = asInt(sf2[0]?.fees);
+      }
+    } catch {
+      sendFees = 0;
+    }
+    const totalPlatformProfit = bookProfit + unlockFees + loanInterest + sendFees;
+    // Withdrawable = all platform income − treasury already paid out
+    const available = Math.max(0, totalPlatformProfit - paidOut);
     return {
       userCount: asInt(users[0]?.n),
       totalDepositsTambala: asInt(money[0]?.deposits),
       totalWithdrawalsTambala: asInt(money[0]?.withdrawals),
       userBalancesTambala: asInt(wallet[0]?.bal),
       platformProfitTambala: bookProfit,
+      sendFeesTambala: sendFees,
       earlyUnlockFeesTambala: unlockFees,
       loanInterestTambala: loanInterest,
+      totalPlatformProfitTambala: totalPlatformProfit,
       payoutReserveTambala: asInt(wallet[0]?.res),
       pendingCount: asInt(money[0]?.pending),
       demoPayments: demoPaymentsEnabled(),
@@ -7128,6 +7153,307 @@ export const adminFundsAudit = createServerFn({ method: "POST" })
         liabilitiesTambala,
         /** green if >= 0 */
         covered: diffTambala >= 0,
+      },
+    };
+  });
+
+
+/** Debit admin main balance by the funds-audit shortfall so operating books sit at neutral vs PayChangu math. */
+export const adminCoverAuditShortage = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      pin: pinSchema,
+      shortfallTambala: z.number().int().positive(),
+      idempotencyKey: z.string().min(8).max(128),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdminSensitive(context.userId);
+    const profile = await loadProfile(context.userId);
+    if (!profile || profile.role !== "admin") throw new Error("Admin only.");
+
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { verifySecret, newReference } = await import("./crypto");
+    const { formatKwacha } = await import("./money");
+    const { claimIdempotencyKey, storeIdempotencyResponse } = await import("./idempotency.server");
+
+    if (!(await verifySecret(profile.pin_hash, data.pin))) {
+      throw new Error("Incorrect PIN");
+    }
+
+    const sql = await getSql();
+    const claim = await claimIdempotencyKey(sql, {
+      key: data.idempotencyKey,
+      userId: context.userId,
+      action: "audit_cover_shortage",
+    });
+    if (claim.hit) return claim.response as { ok: true; deductedTambala: number; reference: string };
+
+    const releaseKey = async () => {
+      await sql`delete from idempotency_keys where key = ${data.idempotencyKey} and response_json is null`;
+    };
+
+    const shortfall = data.shortfallTambala;
+    const reference = newReference("BAL");
+
+    try {
+      await withTransaction(sql, async (tx) => {
+        const wallets = await tx<{ balance_tambala: number }>`
+          select balance_tambala from wallets where user_id = ${context.userId} for update
+        `;
+        const bal = asInt(wallets[0]?.balance_tambala);
+        if (bal < shortfall) {
+          throw new Error(
+            `Admin main balance ${formatKwacha(bal)} is less than shortfall ${formatKwacha(shortfall)}. Top up main first.`,
+          );
+        }
+        await tx`
+          update wallets
+          set balance_tambala = balance_tambala - ${shortfall},
+              lifetime_withdrawn_tambala = lifetime_withdrawn_tambala + ${shortfall},
+              updated_at = now()
+          where user_id = ${context.userId}
+        `;
+        await tx`
+          insert into transactions (
+            user_id, kind, status, gross_tambala, credited_tambala,
+            platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
+          ) values (
+            ${context.userId}, ${"withdrawal"}, ${"success"}, ${shortfall}, ${0},
+            ${0}, ${0}, ${reference},
+            ${`Funds-audit shortage cover ${formatKwacha(shortfall)} — balance neutral vs PayChangu float`},
+            now()
+          )
+        `;
+      });
+    } catch (err) {
+      await releaseKey();
+      throw err;
+    }
+
+    const result = { ok: true as const, deductedTambala: shortfall, reference };
+    await storeIdempotencyResponse(sql, data.idempotencyKey, result);
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "audit_cover_shortage",
+      detail: `ref=${reference} shortfall=${shortfall}`,
+    });
+    return result;
+  });
+
+/**
+ * Move platform profit into admin main balance (ledger only).
+ * 1.8% rail estimate is deducted from the amount credited to main (same as treasury withdraw rail).
+ */
+export const adminTreasuryToMain = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      amountKwacha: z.number().positive(),
+      pin: pinSchema,
+      idempotencyKey: z.string().min(8).max(128),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdminSensitive(context.userId);
+    const profile = await loadProfile(context.userId);
+    if (!profile || profile.role !== "admin") throw new Error("Admin only.");
+
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { verifySecret, newReference } = await import("./crypto");
+    const { kwachaToTambala, formatKwacha } = await import("./money");
+    const { claimIdempotencyKey, storeIdempotencyResponse } = await import("./idempotency.server");
+    const { MIN_WITHDRAW_KWACHA, MOMO_PAYOUT_RAIL_RATE } = await import("./constants");
+
+    if (data.amountKwacha < MIN_WITHDRAW_KWACHA) {
+      throw new Error(`Minimum is ${MIN_WITHDRAW_KWACHA} kwacha`);
+    }
+    if (!(await verifySecret(profile.pin_hash, data.pin))) {
+      throw new Error("Incorrect PIN");
+    }
+
+    const sql = await getSql();
+    const claim = await claimIdempotencyKey(sql, {
+      key: data.idempotencyKey,
+      userId: context.userId,
+      action: "treasury_to_main",
+    });
+    if (claim.hit) {
+      return claim.response as { ok: true; reference: string; grossTambala: number; netTambala: number; feeTambala: number };
+    }
+    const releaseKey = async () => {
+      await sql`delete from idempotency_keys where key = ${data.idempotencyKey} and response_json is null`;
+    };
+
+    const gross = kwachaToTambala(data.amountKwacha);
+    const fee = Math.round(gross * MOMO_PAYOUT_RAIL_RATE);
+    const net = gross - fee;
+    if (net <= 0) {
+      await releaseKey();
+      throw new Error("Amount too small after 1.8% fee");
+    }
+
+    // Same available pool as overview
+    const profitRows = await sql<{ p: number }>`
+      select coalesce(sum(case when kind = 'deposit' and status = 'success' then platform_profit_tambala else 0 end), 0)::bigint as p
+      from transactions
+    `;
+    const feeIncome = await sql<{ p: number }>`
+      select coalesce(sum(case when kind = 'fee' and status = 'success' then coalesce(platform_profit_tambala, gross_tambala) else 0 end), 0)::bigint as p
+      from transactions
+    `;
+    const paidRows = await sql<{ paid: number }>`
+      select coalesce(sum(gross_tambala), 0)::bigint as paid
+      from treasury_payouts
+      where status in (${"success"}, ${"processing"})
+    `;
+    const available = Math.max(0, asInt(profitRows[0]?.p) + asInt(feeIncome[0]?.p) - asInt(paidRows[0]?.paid));
+    if (gross > available) {
+      await releaseKey();
+      throw new Error(`Only ${formatKwacha(available)} withdrawable profit available`);
+    }
+
+    const reference = newReference("T2M");
+    try {
+      await withTransaction(sql, async (tx) => {
+        await tx`
+          insert into treasury_payouts (
+            admin_user_id, gross_tambala, fee_tambala, net_tambala, phone, reference, status, note, completed_at
+          ) values (
+            ${context.userId}, ${gross}, ${fee}, ${net}, ${null}, ${reference},
+            ${"success"},
+            ${`Treasury to admin main; ${(MOMO_PAYOUT_RAIL_RATE * 100).toFixed(1)}% rail ${formatKwacha(fee)}; net ${formatKwacha(net)}`},
+            now()
+          )
+        `;
+        await tx`
+          insert into wallets (user_id, balance_tambala, lifetime_deposited_tambala, lifetime_withdrawn_tambala)
+          values (${context.userId}, ${net}, ${net}, 0)
+          on conflict (user_id) do update set
+            balance_tambala = wallets.balance_tambala + ${net},
+            lifetime_deposited_tambala = wallets.lifetime_deposited_tambala + ${net},
+            updated_at = now()
+        `;
+        await tx`
+          insert into transactions (
+            user_id, kind, status, gross_tambala, credited_tambala,
+            platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
+          ) values (
+            ${context.userId}, ${"deposit"}, ${"success"}, ${gross}, ${net},
+            ${fee}, ${0}, ${reference},
+            ${`Treasury → main balance; net ${formatKwacha(net)} after ${(MOMO_PAYOUT_RAIL_RATE * 100).toFixed(1)}%`},
+            now()
+          )
+        `;
+      });
+    } catch (err) {
+      await releaseKey();
+      throw err;
+    }
+
+    const result = { ok: true as const, reference, grossTambala: gross, netTambala: net, feeTambala: fee };
+    await storeIdempotencyResponse(sql, data.idempotencyKey, result);
+    const { writeAudit } = await import("./audit.server");
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "treasury_to_main",
+      detail: `ref=${reference} gross=${gross} net=${net} fee=${fee}`,
+    });
+    return result;
+  });
+
+/** Monthly platform profit vs treasury withdrawals for a date range. */
+export const adminTreasuryHistory = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      from: z.string().min(4).max(32),
+      to: z.string().min(4).max(32),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+
+    const from = new Date(data.from);
+    const to = new Date(data.to);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+      throw new Error("Invalid date range");
+    }
+    if (to < from) throw new Error("End date must be after start date");
+
+    const profitMonths = await sql<{ month: string; deposit_profit: number; fee_income: number }>`
+      select
+        to_char(date_trunc('month', created_at), 'YYYY-MM') as month,
+        coalesce(sum(case when kind = 'deposit' and status = 'success' then platform_profit_tambala else 0 end), 0)::bigint as deposit_profit,
+        coalesce(sum(case when kind = 'fee' and status = 'success' then coalesce(platform_profit_tambala, gross_tambala) else 0 end), 0)::bigint as fee_income
+      from transactions
+      where created_at >= ${from.toISOString()} and created_at < (${to.toISOString()}::timestamptz + interval '1 day')
+      group by 1
+      order by 1
+    `;
+
+    let payoutMonths: Array<{ month: string; paid: number }> = [];
+    try {
+      payoutMonths = await sql<{ month: string; paid: number }>`
+        select
+          to_char(date_trunc('month', coalesce(completed_at, created_at)), 'YYYY-MM') as month,
+          coalesce(sum(gross_tambala), 0)::bigint as paid
+        from treasury_payouts
+        where status in (${"success"}, ${"processing"})
+          and coalesce(completed_at, created_at) >= ${from.toISOString()}
+          and coalesce(completed_at, created_at) < (${to.toISOString()}::timestamptz + interval '1 day')
+        group by 1
+        order by 1
+      `;
+    } catch {
+      payoutMonths = [];
+    }
+
+    const months = new Set<string>();
+    for (const r of profitMonths) months.add(String(r.month));
+    for (const r of payoutMonths) months.add(String(r.month));
+    const sorted = [...months].sort();
+
+    const payoutMap = new Map(payoutMonths.map((r) => [String(r.month), asInt(r.paid)]));
+    const profitMap = new Map(
+      profitMonths.map((r) => [
+        String(r.month),
+        { deposit: asInt(r.deposit_profit), fees: asInt(r.fee_income) },
+      ]),
+    );
+
+    const rows = sorted.map((month) => {
+      const p = profitMap.get(month) ?? { deposit: 0, fees: 0 };
+      const paid = payoutMap.get(month) ?? 0;
+      return {
+        month,
+        depositProfitTambala: p.deposit,
+        feeIncomeTambala: p.fees,
+        totalProfitTambala: p.deposit + p.fees,
+        treasuryWithdrawnTambala: paid,
+      };
+    });
+
+    const totals = rows.reduce(
+      (a, r) => ({
+        profit: a.profit + r.totalProfitTambala,
+        withdrawn: a.withdrawn + r.treasuryWithdrawnTambala,
+      }),
+      { profit: 0, withdrawn: 0 },
+    );
+
+    return {
+      from: data.from,
+      to: data.to,
+      months: rows,
+      totals: {
+        profitTambala: totals.profit,
+        withdrawnTambala: totals.withdrawn,
+        netTambala: totals.profit - totals.withdrawn,
       },
     };
   });

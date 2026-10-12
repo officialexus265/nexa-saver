@@ -11,6 +11,9 @@ import { TotpQr } from "@/components/totp-qr";
 import {
   adminOverview,
   adminFundsAudit,
+  adminTreasuryHistory,
+  adminTreasuryToMain,
+  adminCoverAuditShortage,
   adminTransactions,
   adminUsers,
   adminLookupReference,
@@ -142,6 +145,18 @@ function Console() {
   const [fundsAudit, setFundsAudit] = useState<Awaited<ReturnType<typeof adminFundsAudit>> | null>(null);
   const [auditBusy, setAuditBusy] = useState(false);
   const [auditErr, setAuditErr] = useState<string | null>(null);
+  const [coverPin, setCoverPin] = useState("");
+  const [coverBusy, setCoverBusy] = useState(false);
+  const [histFrom, setHistFrom] = useState(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 1);
+    return d.toISOString().slice(0, 10);
+  });
+  const [histTo, setHistTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [histBusy, setHistBusy] = useState(false);
+  const [histErr, setHistErr] = useState<string | null>(null);
+  const [treasuryHistory, setTreasuryHistory] = useState<Awaited<ReturnType<typeof adminTreasuryHistory>> | null>(null);
+
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [txs, setTxs] = useState<Array<PublicTx & { username: string }>>([]);
   const [error, setError] = useState<string | null>(null);
@@ -751,11 +766,24 @@ function Console() {
           Treasury cash-out uses deposit book profit, early-unlock fees, and loan interest collected from users, minus what you already paid out. ~1.8% applies on the mobile-money rail.
         </p>
         {overview ? (
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <SurveyStat label="System profit (book)" value={formatKwacha(overview.platformProfitTambala)} />
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <SurveyStat label="Deposit profit" value={formatKwacha(overview.platformProfitTambala)} />
+            <SurveyStat label="Send fees (NEXA→NEXA)" value={formatKwacha(overview.sendFeesTambala ?? 0)} />
             <SurveyStat label="Early unlock fees" value={formatKwacha(overview.earlyUnlockFeesTambala ?? 0)} />
+            <SurveyStat label="Loan interest" value={formatKwacha(overview.loanInterestTambala ?? 0)} />
+            <SurveyStat
+              label="All platform profits"
+              value={formatKwacha(
+                overview.totalPlatformProfitTambala ??
+                  overview.platformProfitTambala +
+                    (overview.sendFeesTambala ?? 0) +
+                    (overview.earlyUnlockFeesTambala ?? 0) +
+                    (overview.loanInterestTambala ?? 0),
+              )}
+            />
+            <SurveyStat label="Withdrawable total" value={formatKwacha(overview.treasuryAvailableTambala)} />
+            <SurveyStat label="Already paid out" value={formatKwacha(overview.treasuryPaidOutTambala)} />
             <SurveyStat label="Saver balances (liability)" value={formatKwacha(overview.userBalancesTambala)} />
-            <SurveyStat label="Withdrawable profit" value={formatKwacha(overview.treasuryAvailableTambala)} />
           </div>
         ) : null}
         {overview && overview.treasuryPaidOutTambala > 0 ? (
@@ -769,6 +797,71 @@ function Console() {
             void adminOverview().then(setOverview);
           }}
         />
+
+        <div className="mt-4 space-y-3 border-t border-border pt-4">
+          <h3 className="font-medium">Profit history</h3>
+          <p className="text-xs text-muted">
+            Pick a period to see monthly platform profits and treasury withdrawals.
+          </p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <div className="space-y-1">
+              <Label htmlFor="hist-from">From</Label>
+              <Input id="hist-from" type="date" value={histFrom} onChange={(e) => setHistFrom(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="hist-to">To</Label>
+              <Input id="hist-to" type="date" value={histTo} onChange={(e) => setHistTo(e.target.value)} />
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={histBusy}
+              onClick={() => {
+                setHistBusy(true);
+                setHistErr(null);
+                void adminTreasuryHistory({ data: { from: histFrom, to: histTo } })
+                  .then(setTreasuryHistory)
+                  .catch((e) => setHistErr(errMessage(e)))
+                  .finally(() => setHistBusy(false));
+              }}
+            >
+              {histBusy ? "Fetching…" : "Fetch history"}
+            </Button>
+          </div>
+          {histErr ? <p className="text-sm text-danger">{histErr}</p> : null}
+          {treasuryHistory ? (
+            <div className="space-y-2 overflow-x-auto text-sm">
+              <p className="text-xs text-muted">
+                Total profit {formatKwacha(treasuryHistory.totals.profitTambala)} · Withdrawn{" "}
+                {formatKwacha(treasuryHistory.totals.withdrawnTambala)} · Net{" "}
+                {formatKwacha(treasuryHistory.totals.netTambala)}
+              </p>
+              <table className="w-full min-w-[28rem] border-collapse text-left text-xs">
+                <thead>
+                  <tr className="border-b border-border text-muted">
+                    <th className="py-1.5 pr-2 font-medium">Month</th>
+                    <th className="py-1.5 pr-2 font-medium">Deposit profit</th>
+                    <th className="py-1.5 pr-2 font-medium">Fee income</th>
+                    <th className="py-1.5 pr-2 font-medium">Total made</th>
+                    <th className="py-1.5 font-medium">Withdrawn</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {treasuryHistory.months.map((m) => (
+                    <tr key={m.month} className="border-b border-border/60">
+                      <td className="py-1.5 pr-2 tabular-nums">{m.month}</td>
+                      <td className="py-1.5 pr-2 tabular-nums">{formatKwacha(m.depositProfitTambala)}</td>
+                      <td className="py-1.5 pr-2 tabular-nums">{formatKwacha(m.feeIncomeTambala)}</td>
+                      <td className="py-1.5 pr-2 tabular-nums font-medium">{formatKwacha(m.totalProfitTambala)}</td>
+                      <td className="py-1.5 tabular-nums">{formatKwacha(m.treasuryWithdrawnTambala)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
+
       </Card>
 
       <Card className="space-y-3 p-4">
@@ -955,6 +1048,62 @@ function Console() {
                 </div>
               ) : null}
             </div>
+            
+            {fundsAudit.status === "red" && fundsAudit.math.diffTambala < 0 ? (
+              <div className="space-y-2 rounded-xl border border-red-500/40 bg-red-500/5 p-3">
+                <p className="text-sm font-medium text-red-700 dark:text-red-300">
+                  Balance the shortfall from admin main
+                </p>
+                <p className="text-xs text-muted">
+                  Deducts {formatKwacha(Math.abs(fundsAudit.math.diffTambala))} from your admin main balance so
+                  operating books sit at neutral. Then withdraw via MoMo to test whether PayChangu&apos;s live rail
+                  matches the system figures.
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <Label htmlFor="cover-pin">Admin PIN</Label>
+                    <Input
+                      id="cover-pin"
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={4}
+                      value={coverPin}
+                      onChange={(e) => setCoverPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      placeholder="PIN"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="border-red-500/50"
+                    disabled={coverBusy || coverPin.length !== 4}
+                    onClick={() => {
+                      setCoverBusy(true);
+                      setAuditErr(null);
+                      void adminCoverAuditShortage({
+                        data: {
+                          pin: coverPin,
+                          shortfallTambala: Math.abs(fundsAudit.math.diffTambala),
+                          idempotencyKey: `cover-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+                        },
+                      })
+                        .then((r) => {
+                          setCoverPin("");
+                          setAuditErr(null);
+                          alert(`Covered ${formatKwacha(r.deductedTambala)}. Ref ${r.reference}. Re-run audit.`);
+                          return adminFundsAudit();
+                        })
+                        .then(setFundsAudit)
+                        .catch((e) => setAuditErr(errMessage(e)))
+                        .finally(() => setCoverBusy(false));
+                    }}
+                  >
+                    {coverBusy ? "Covering…" : `Cover ${formatKwacha(Math.abs(fundsAudit.math.diffTambala))} shortfall`}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
             <p className="text-xs text-muted">Ran {new Date(fundsAudit.at).toLocaleString()}</p>
           </div>
         ) : (
@@ -2685,7 +2834,7 @@ function TreasuryWithdrawForm({
   availableTambala: number;
   onDone: () => void;
 }) {
-  const [mode, setMode] = useState<"self" | "any">("self");
+  const [mode, setMode] = useState<"self" | "any" | "main">("self");
   const [amount, setAmount] = useState("");
   const [pin, setPin] = useState("");
   const [phone, setPhone] = useState("");
@@ -2717,7 +2866,18 @@ function TreasuryWithdrawForm({
     setErr(null);
     setMsg(null);
     try {
-      if (mode === "self") {
+      if (mode === "main") {
+        const res = await adminTreasuryToMain({
+          data: {
+            amountKwacha: kwacha,
+            pin,
+            idempotencyKey: crypto.randomUUID(),
+          },
+        });
+        setMsg(
+          `Moved to admin main balance. Gross ${formatKwacha(res.grossTambala)} · 1.8% ${formatKwacha(res.feeTambala)} · net credited ${formatKwacha(res.netTambala)}. Ref ${res.reference}`,
+        );
+      } else if (mode === "self") {
         const res = await adminTreasuryWithdraw({
           data: {
             amountKwacha: kwacha,
@@ -2766,10 +2926,10 @@ function TreasuryWithdrawForm({
   return (
     <form onSubmit={(e) => void submit(e)} className="space-y-3 border-t border-border pt-3">
       <p className="text-sm text-muted">
-        Send platform profit via PayChangu MoMo. Available: {formatKwacha(availableTambala)}. ~1.8% rail fee
-        applies (not a NEXA fee).
+        Available: {formatKwacha(availableTambala)}. MoMo payout or move to admin main both take ~1.8%. Moving to
+        main is ledger-only (no PayChangu send).
       </p>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <button
           type="button"
           className={
@@ -2798,6 +2958,21 @@ function TreasuryWithdrawForm({
           }}
         >
           Any Airtel / TNM
+        </button>
+        <button
+          type="button"
+          className={
+            mode === "main"
+              ? "rounded-xl border border-primary bg-primary/10 px-3 py-2 text-sm font-medium"
+              : "rounded-xl border border-border px-3 py-2 text-sm text-muted"
+          }
+          onClick={() => {
+            setMode("main");
+            setLookup(null);
+            setErr(null);
+          }}
+        >
+          To admin main balance
         </button>
       </div>
 
@@ -2878,7 +3053,9 @@ function TreasuryWithdrawForm({
         />
         {kwacha > 0 ? (
           <p className="text-xs text-muted">
-            After ~1.8% rail fee about {Math.max(0, Math.round(kwacha * 0.982))} kwacha lands on the phone
+            {mode === "main"
+              ? `After 1.8%, about ${Math.max(0, Math.round(kwacha * 0.982))} kwacha is credited to admin main balance`
+              : `After ~1.8% rail fee about ${Math.max(0, Math.round(kwacha * 0.982))} kwacha lands on the phone`}
           </p>
         ) : null}
       </div>
@@ -2908,9 +3085,11 @@ function TreasuryWithdrawForm({
       >
         {busy
           ? "Sending…"
-          : mode === "self"
-            ? "Withdraw to my number"
-            : "Send to this MoMo number"}
+          : mode === "main"
+            ? "Send to main balance"
+            : mode === "self"
+              ? "Withdraw to my number"
+              : "Send to this MoMo number"}
       </Button>
     </form>
   );
