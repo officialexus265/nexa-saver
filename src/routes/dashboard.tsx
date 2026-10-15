@@ -462,9 +462,17 @@ function ActivityDetailModal({
   onClose: () => void;
   onReversalRequested?: () => void;
 }) {
+  // All hooks must run every render (React rules). Never put hooks after an early return.
   const [copied, setCopied] = useState(false);
   const [revBusy, setRevBusy] = useState(false);
   const [revMsg, setRevMsg] = useState<string | null>(null);
+  const copyTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
   if (!tx) return null;
 
   const when = new Date(tx.createdAt);
@@ -479,13 +487,6 @@ function ActivityDetailModal({
           : tx.kind === "fee"
             ? "Fee details"
             : "Withdrawal details";
-
-  const copyTimerRef = useRef<number | null>(null);
-  useEffect(() => {
-    return () => {
-      if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
-    };
-  }, []);
 
   async function copyRef() {
     try {
