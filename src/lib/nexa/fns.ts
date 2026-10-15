@@ -819,7 +819,7 @@ export const startDeposit = createServerFn({ method: "POST" })
           platform_profit_tambala, payout_reserve_tambala, phone, reference, note
         ) values (
           ${context.userId}, ${"deposit"}, ${"pending"}, ${split.gross}, ${split.credited},
-          ${split.profit}, ${split.reserve}, ${phone}, ${reference},
+          ${split.platformProfit}, ${split.reserve}, ${phone}, ${reference},
           ${`Deposit ${formatKwacha(split.gross)} from ${phone}`}
         )
       `;
@@ -3903,7 +3903,7 @@ export const adminSetFeePolicy = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator(
     z.object({
-      depositFeePercent: z.number().min(0).max(20),
+      depositFeePercent: z.number().min(3.5).max(20),
       earlyUnlockBasePercent: z.number().min(0).max(10),
       earlyUnlockCapPercent: z.number().min(0).max(10),
     }),
