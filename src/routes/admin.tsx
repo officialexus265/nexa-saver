@@ -15,6 +15,7 @@ import {
   adminTreasuryHistory,
   adminTreasuryToMain,
   adminCoverAuditShortage,
+  adminRecalculatePayoutReserve,
   adminRestoreAuditCovers,
   adminListAuditCovers,
   adminTransactions,
@@ -147,6 +148,12 @@ function Console() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [fundsAudit, setFundsAudit] = useState<Awaited<ReturnType<typeof adminFundsAudit>> | null>(null);
   const [auditBusy, setAuditBusy] = useState(false);
+  const [reserveRecalcBusy, setReserveRecalcBusy] = useState(false);
+  const [reserveRecalcPin, setReserveRecalcPin] = useState("");
+  const [reserveRecalcMsg, setReserveRecalcMsg] = useState<string | null>(null);
+  const [reserveRecalcResult, setReserveRecalcResult] = useState<Awaited<
+    ReturnType<typeof adminRecalculatePayoutReserve>
+  > | null>(null);
   const [auditErr, setAuditErr] = useState<string | null>(null);
   const [coverPin, setCoverPin] = useState("");
   const [coverBusy, setCoverBusy] = useState(false);
@@ -872,6 +879,116 @@ function Console() {
           ) : null}
         </div>
 
+      </Card>
+
+
+      <Card className="space-y-4 p-5">
+        <div>
+          <h2 className="font-display text-lg font-semibold">Recalculate payout reserve (2%)</h2>
+          <p className="text-sm text-muted">
+            Compares total user liabilities to the 2% withdrawal-reserve target. If reserve is short, tops up the gap
+            from the platform profit bag and spreads it across user reserve buckets. Does not change user balances.
+          </p>
+        </div>
+        {reserveRecalcResult ? (
+          <div className="grid gap-2 rounded-xl border border-border bg-surface-2 p-3 text-sm sm:grid-cols-2">
+            <div className="flex justify-between gap-2">
+              <span className="text-muted">User liabilities</span>
+              <span className="tabular-nums font-medium">{formatKwacha(reserveRecalcResult.liabilitiesTambala)}</span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted">Target reserve (2%)</span>
+              <span className="tabular-nums font-medium">{formatKwacha(reserveRecalcResult.targetReserveTambala)}</span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted">Current reserve</span>
+              <span className="tabular-nums font-medium">{formatKwacha(reserveRecalcResult.currentReserveTambala)}</span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted">Gap</span>
+              <span className="tabular-nums font-medium">
+                {reserveRecalcResult.gapTambala > 0
+                  ? formatKwacha(reserveRecalcResult.gapTambala)
+                  : reserveRecalcResult.surplusTambala
+                    ? `surplus ${formatKwacha(reserveRecalcResult.surplusTambala)}`
+                    : "0"}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted">Profit bag available</span>
+              <span className="tabular-nums font-medium">{formatKwacha(reserveRecalcResult.availableProfitTambala)}</span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-muted">Funded this run</span>
+              <span className="tabular-nums font-medium text-primary">{formatKwacha(reserveRecalcResult.fundedTambala)}</span>
+            </div>
+          </div>
+        ) : null}
+        {reserveRecalcMsg ? (
+          <p className={`text-sm ${reserveRecalcResult && !reserveRecalcResult.ok ? "text-danger" : "text-primary"}`}>
+            {reserveRecalcMsg}
+          </p>
+        ) : null}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <div className="min-w-0 flex-1 space-y-1">
+            <Label htmlFor="reserve-recalc-pin">Admin PIN</Label>
+            <Input
+              id="reserve-recalc-pin"
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              value={reserveRecalcPin}
+              onChange={(e) => setReserveRecalcPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              placeholder="PIN"
+            />
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={reserveRecalcBusy || reserveRecalcPin.length !== 4}
+            onClick={() => {
+              setReserveRecalcBusy(true);
+              setReserveRecalcMsg(null);
+              void adminRecalculatePayoutReserve({
+                data: { pin: reserveRecalcPin, dryRun: true },
+              })
+                .then((r) => {
+                  setReserveRecalcResult(r);
+                  setReserveRecalcMsg(r.message);
+                })
+                .catch((e) => setReserveRecalcMsg(errMessage(e)))
+                .finally(() => setReserveRecalcBusy(false));
+            }}
+          >
+            {reserveRecalcBusy ? "Checking…" : "Check gap only"}
+          </Button>
+          <Button
+            type="button"
+            disabled={reserveRecalcBusy || reserveRecalcPin.length !== 4}
+            onClick={() => {
+              setReserveRecalcBusy(true);
+              setReserveRecalcMsg(null);
+              void adminRecalculatePayoutReserve({
+                data: { pin: reserveRecalcPin, dryRun: false },
+              })
+                .then(async (r) => {
+                  setReserveRecalcResult(r);
+                  setReserveRecalcMsg(r.message);
+                  setReserveRecalcPin("");
+                  try {
+                    setOverview(await adminOverview());
+                    setFundsAudit(await adminFundsAudit());
+                  } catch {
+                    /* optional refresh */
+                  }
+                })
+                .catch((e) => setReserveRecalcMsg(errMessage(e)))
+                .finally(() => setReserveRecalcBusy(false));
+            }}
+          >
+            {reserveRecalcBusy ? "Working…" : "Recalculate & top up from profit"}
+          </Button>
+        </div>
       </Card>
 
       <Card className="space-y-3 p-4">
