@@ -15,13 +15,13 @@ import {
   adminTreasuryHistory,
   adminTreasuryToMain,
   adminCoverAuditShortage,
-  adminRecalculatePayoutReserve,
   adminRestoreAuditCovers,
   adminListAuditCovers,
   adminTransactions,
   adminUsers,
   adminLookupReference,
   adminForceCreditDeposit,
+  adminReverseFalseWithdrawal,
   adminResolveStuckDeposits,
   adminResolvePendingDeposit,
   adminSecurityChecklist,
@@ -148,12 +148,6 @@ function Console() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [fundsAudit, setFundsAudit] = useState<Awaited<ReturnType<typeof adminFundsAudit>> | null>(null);
   const [auditBusy, setAuditBusy] = useState(false);
-  const [reserveRecalcBusy, setReserveRecalcBusy] = useState(false);
-  const [reserveRecalcPin, setReserveRecalcPin] = useState("");
-  const [reserveRecalcMsg, setReserveRecalcMsg] = useState<string | null>(null);
-  const [reserveRecalcResult, setReserveRecalcResult] = useState<Awaited<
-    ReturnType<typeof adminRecalculatePayoutReserve>
-  > | null>(null);
   const [auditErr, setAuditErr] = useState<string | null>(null);
   const [coverPin, setCoverPin] = useState("");
   const [coverBusy, setCoverBusy] = useState(false);
@@ -225,6 +219,12 @@ function Console() {
   >([]);
   const [lookupRef, setLookupRef] = useState("");
   const [lookupMsg, setLookupMsg] = useState<string | null>(null);
+  const [reverseWthId, setReverseWthId] = useState("");
+  const [reverseWthRef, setReverseWthRef] = useState("");
+  const [reverseWthReason, setReverseWthReason] = useState("Never paid by PayChangu — marked success in error");
+  const [reverseWthPin, setReverseWthPin] = useState("");
+  const [reverseWthBusy, setReverseWthBusy] = useState(false);
+  const [reverseWthMsg, setReverseWthMsg] = useState<string | null>(null);
   const [loanInterest, setLoanInterest] = useState("3");
   const [loanLtv, setLoanLtv] = useState("90");
   const [loanPolicyMsg, setLoanPolicyMsg] = useState<string | null>(null);
@@ -884,111 +884,89 @@ function Console() {
 
       <Card className="space-y-4 p-5">
         <div>
-          <h2 className="font-display text-lg font-semibold">Recalculate payout reserve (2%)</h2>
+          <h2 className="font-display text-lg font-semibold">Reverse false-success withdrawal</h2>
           <p className="text-sm text-muted">
-            Compares total user liabilities to the 2% withdrawal-reserve target. If reserve is short, tops up the gap
-            from the platform profit bag and spreads it across user reserve buckets. Does not change user balances.
+            Use when a withdrawal shows <span className="font-medium">success</span> but PayChangu never paid out.
+            Enter the transaction <span className="font-medium">ID</span> or <span className="font-medium">reference</span>
+            (from the activity list). Refunds the user and marks the tx failed. Does not call PayChangu.
           </p>
         </div>
-        {reserveRecalcResult ? (
-          <div className="grid gap-2 rounded-xl border border-border bg-surface-2 p-3 text-sm sm:grid-cols-2">
-            <div className="flex justify-between gap-2">
-              <span className="text-muted">User liabilities</span>
-              <span className="tabular-nums font-medium">{formatKwacha(reserveRecalcResult.liabilitiesTambala)}</span>
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-muted">Target reserve (2%)</span>
-              <span className="tabular-nums font-medium">{formatKwacha(reserveRecalcResult.targetReserveTambala)}</span>
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-muted">Current reserve</span>
-              <span className="tabular-nums font-medium">{formatKwacha(reserveRecalcResult.currentReserveTambala)}</span>
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-muted">Gap</span>
-              <span className="tabular-nums font-medium">
-                {reserveRecalcResult.gapTambala > 0
-                  ? formatKwacha(reserveRecalcResult.gapTambala)
-                  : reserveRecalcResult.surplusTambala
-                    ? `surplus ${formatKwacha(reserveRecalcResult.surplusTambala)}`
-                    : "0"}
-              </span>
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-muted">Profit bag available</span>
-              <span className="tabular-nums font-medium">{formatKwacha(reserveRecalcResult.availableProfitTambala)}</span>
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="text-muted">Funded this run</span>
-              <span className="tabular-nums font-medium text-primary">{formatKwacha(reserveRecalcResult.fundedTambala)}</span>
-            </div>
-          </div>
-        ) : null}
-        {reserveRecalcMsg ? (
-          <p className={`text-sm ${reserveRecalcResult && !reserveRecalcResult.ok ? "text-danger" : "text-primary"}`}>
-            {reserveRecalcMsg}
-          </p>
-        ) : null}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-          <div className="min-w-0 flex-1 space-y-1">
-            <Label htmlFor="reserve-recalc-pin">Admin PIN</Label>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label htmlFor="rev-wth-id">Transaction ID</Label>
             <Input
-              id="reserve-recalc-pin"
+              id="rev-wth-id"
+              inputMode="numeric"
+              value={reverseWthId}
+              onChange={(e) => setReverseWthId(e.target.value.replace(/\D/g, ""))}
+              placeholder="e.g. 1842"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="rev-wth-ref">Or reference</Label>
+            <Input
+              id="rev-wth-ref"
+              value={reverseWthRef}
+              onChange={(e) => setReverseWthRef(e.target.value.trim())}
+              placeholder="WTH_… or AWS_…"
+            />
+          </div>
+          <div className="space-y-1 sm:col-span-2">
+            <Label htmlFor="rev-wth-reason">Reason (audit)</Label>
+            <Input
+              id="rev-wth-reason"
+              value={reverseWthReason}
+              onChange={(e) => setReverseWthReason(e.target.value)}
+              placeholder="Never paid by PayChangu"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="rev-wth-pin">Admin PIN</Label>
+            <Input
+              id="rev-wth-pin"
               type="password"
               inputMode="numeric"
               maxLength={4}
-              value={reserveRecalcPin}
-              onChange={(e) => setReserveRecalcPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              value={reverseWthPin}
+              onChange={(e) => setReverseWthPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
               placeholder="PIN"
             />
           </div>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={reserveRecalcBusy || reserveRecalcPin.length !== 4}
-            onClick={() => {
-              setReserveRecalcBusy(true);
-              setReserveRecalcMsg(null);
-              void adminRecalculatePayoutReserve({
-                data: { pin: reserveRecalcPin, dryRun: true },
-              })
-                .then((r) => {
-                  setReserveRecalcResult(r);
-                  setReserveRecalcMsg(r.message);
+          <div className="flex items-end">
+            <Button
+              type="button"
+              className="w-full border-red-500/40"
+              variant="secondary"
+              disabled={
+                reverseWthBusy ||
+                reverseWthPin.length !== 4 ||
+                reverseWthReason.trim().length < 8 ||
+                (!reverseWthId && !reverseWthRef)
+              }
+              onClick={() => {
+                setReverseWthBusy(true);
+                setReverseWthMsg(null);
+                void adminReverseFalseWithdrawal({
+                  data: {
+                    pin: reverseWthPin,
+                    transactionId: reverseWthId ? Number(reverseWthId) : undefined,
+                    reference: reverseWthRef || undefined,
+                    reason: reverseWthReason.trim(),
+                  },
                 })
-                .catch((e) => setReserveRecalcMsg(errMessage(e)))
-                .finally(() => setReserveRecalcBusy(false));
-            }}
-          >
-            {reserveRecalcBusy ? "Checking…" : "Check gap only"}
-          </Button>
-          <Button
-            type="button"
-            disabled={reserveRecalcBusy || reserveRecalcPin.length !== 4}
-            onClick={() => {
-              setReserveRecalcBusy(true);
-              setReserveRecalcMsg(null);
-              void adminRecalculatePayoutReserve({
-                data: { pin: reserveRecalcPin, dryRun: false },
-              })
-                .then(async (r) => {
-                  setReserveRecalcResult(r);
-                  setReserveRecalcMsg(r.message);
-                  setReserveRecalcPin("");
-                  try {
-                    setOverview(await adminOverview());
-                    setFundsAudit(await adminFundsAudit());
-                  } catch {
-                    /* optional refresh */
-                  }
-                })
-                .catch((e) => setReserveRecalcMsg(errMessage(e)))
-                .finally(() => setReserveRecalcBusy(false));
-            }}
-          >
-            {reserveRecalcBusy ? "Working…" : "Recalculate & top up from profit"}
-          </Button>
+                  .then((r) => {
+                    setReverseWthMsg(r.message);
+                    setReverseWthPin("");
+                  })
+                  .catch((e) => setReverseWthMsg(errMessage(e)))
+                  .finally(() => setReverseWthBusy(false));
+              }}
+            >
+              {reverseWthBusy ? "Reversing…" : "Reverse & refund user"}
+            </Button>
+          </div>
         </div>
+        {reverseWthMsg ? <p className="text-sm text-primary">{reverseWthMsg}</p> : null}
       </Card>
 
       <Card className="space-y-3 p-4">
