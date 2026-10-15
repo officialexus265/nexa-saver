@@ -1132,14 +1132,12 @@ export const startWithdraw = createServerFn({ method: "POST" })
       throw err;
     }
 
-    // Outside the DB transaction: talk to PayChangu (or explicit demo only).
-    // Never mark success unless PayChangu was called, or demo mode is on.
+    // Outside the DB transaction: talk to PayChangu (or demo).
     let actualRailFeeTambala: number | null = prepared.reserveShare;
     try {
-      const method = data.method ?? "momo";
-      let status = "pending";
-
       if (paychanguConfigured()) {
+        const method = data.method ?? "momo";
+        let status = "pending";
         if (method === "bank") {
           const { BANK_FLAT_FEE_KWACHA } = await import("./constants");
           const grossKwacha = tambalaToKwacha(amount);
@@ -1188,15 +1186,6 @@ export const startWithdraw = createServerFn({ method: "POST" })
         if (status === "failed" || status === "failure" || status === "rejected") {
           throw new Error(`Payout rejected by provider (${status})`);
         }
-      } else if (demoPaymentsEnabled()) {
-        // Local/demo only — no real money moves. Still book success for UX testing.
-        const { MOMO_PAYOUT_RAIL_RATE } = await import("./constants");
-        actualRailFeeTambala = Math.round(amount * MOMO_PAYOUT_RAIL_RATE);
-        status = "success";
-      } else {
-        throw new Error(
-          "Payouts are not configured (PayChangu secret missing). Withdrawal was not sent; balance will be restored.",
-        );
       }
 
       await withTransaction(async (tx) => {
@@ -6699,12 +6688,7 @@ export const adminTreasurySendToPhone = createServerFn({ method: "POST" })
         if (status === "failed" || status === "failure" || status === "rejected") {
           throw new Error(`Payout rejected (${status})`);
         }
-      } else if (!demoPaymentsEnabled()) {
-        throw new Error(
-          "Payouts are not configured (PayChangu secret missing). Treasury send was not executed.",
-        );
       }
-      // Demo: allow success without provider. Live: only after PayChangu accepted above.
       await sql`
         update treasury_payouts
         set status = ${"success"}, completed_at = now()
@@ -6934,12 +6918,7 @@ export const adminSendFromWallet = createServerFn({ method: "POST" })
         if (status === "failed" || status === "failure" || status === "rejected") {
           throw new Error(`PayChangu rejected payout (${status})`);
         }
-      } else if (!demoPaymentsEnabled()) {
-        throw new Error(
-          "Payouts are not configured (PayChangu secret missing). Send was not executed; balance will be restored.",
-        );
       }
-      // Demo: allow success without provider. Live: only after PayChangu accepted above.
       await sql`
         update transactions
         set status = ${"success"}, completed_at = now()
@@ -7228,23 +7207,18 @@ export const adminFundsAudit = createServerFn({ method: "POST" })
 /** Debit admin main balance by the funds-audit shortfall so operating books sit at neutral vs PayChangu math. */
 
 /**
- * Fix a past withdrawal that was marked success without a real PayChangu payout.
- * Looks up by transaction id OR reference.
- * - Refunds the amount to the correct bag (main or received)
- * - Restores the payout_reserve taken at withdraw time
- * - Marks the tx failed with an audit note
- * Does not call PayChangu. Idempotent if already failed/reversed.
+ * Recalculate payout reserve vs 2% of current user liabilities.
+ * If reserved < target, top up the gap from platform profit (treasury bag)
+ * and distribute into user wallet payout_reserve buckets (proportional to vault size).
+ * Does not touch user balances — only reserve and profit accounting.
  */
-export const adminReverseFalseWithdrawal = createServerFn({ method: "POST" })
+export const adminRecalculatePayoutReserve = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator(
     z.object({
       pin: pinSchema,
-      /** Numeric transaction id from the ledger */
-      transactionId: z.number().int().positive().optional(),
-      /** Or the WTH_ / AWS_ reference string */
-      reference: z.string().min(4).max(80).optional(),
-      reason: z.string().min(8).max(400),
+      /** When true, only report the gap/surplus — do not move money. */
+      dryRun: z.boolean().optional(),
     }),
   )
   .handler(async ({ context, data }) => {
@@ -7252,152 +7226,331 @@ export const adminReverseFalseWithdrawal = createServerFn({ method: "POST" })
     const profile = await loadProfile(context.userId);
     if (!profile || profile.role !== "admin") throw new Error("Admin only.");
 
-    if (!data.transactionId && !data.reference?.trim()) {
-      throw new Error("Provide a transaction id or a reference.");
-    }
-
     const { getSql, withTransaction } = await import("@/lib/db");
-    const { verifySecret } = await import("./crypto");
+    const { verifySecret, newReference } = await import("./crypto");
     const { formatKwacha } = await import("./money");
+    const { FIXED_PAYOUT_RESERVE_RATE } = await import("./constants");
     const { writeAudit } = await import("./audit.server");
-    const { assertRateLimit } = await import("./rate-limit.server");
 
     if (!(await verifySecret(profile.pin_hash, data.pin))) {
       throw new Error("Incorrect PIN");
     }
 
     const sql = await getSql();
-    await assertRateLimit(sql, {
-      bucket: `admin-reverse-wth:${context.userId}`,
-      limit: 30,
-      windowSeconds: 60 * 60,
-      message: "Too many reverse attempts this hour.",
-    });
+    const dryRun = Boolean(data.dryRun);
 
-    const rows = data.transactionId
-      ? await sql<{
-          id: number;
-          user_id: string;
-          kind: string;
-          status: string;
-          gross_tambala: number;
-          payout_reserve_tambala: number;
-          reference: string;
-          note: string | null;
-        }>`
-          select id, user_id, kind, status, gross_tambala, coalesce(payout_reserve_tambala, 0) as payout_reserve_tambala,
-                 reference, note
-          from transactions where id = ${data.transactionId} limit 1
-        `
-      : await sql<{
-          id: number;
-          user_id: string;
-          kind: string;
-          status: string;
-          gross_tambala: number;
-          payout_reserve_tambala: number;
-          reference: string;
-          note: string | null;
-        }>`
-          select id, user_id, kind, status, gross_tambala, coalesce(payout_reserve_tambala, 0) as payout_reserve_tambala,
-                 reference, note
-          from transactions where reference = ${data.reference!.trim()} limit 1
-        `;
+    // Liabilities = what users can still claim (main + received bags)
+    const liability = await sql<{
+      main: number;
+      received: number;
+      reserve: number;
+    }>`
+      select
+        coalesce(sum(w.balance_tambala), 0)::bigint as main,
+        coalesce(sum(coalesce(w.received_balance_tambala, 0)), 0)::bigint as received,
+        coalesce(sum(coalesce(w.payout_reserve_tambala, 0)), 0)::bigint as reserve
+      from wallets w
+      inner join profiles p on p.user_id = w.user_id
+      where p.deleted_at is null and p.role = ${"user"}
+    `;
 
-    if (!rows.length) throw new Error("Transaction not found");
-    const row = rows[0]!;
+    const userMain = asInt(liability[0]?.main);
+    const userReceived = asInt(liability[0]?.received);
+    const currentReserve = asInt(liability[0]?.reserve);
+    const liabilitiesTambala = userMain + userReceived;
+    const targetReserve = Math.round(liabilitiesTambala * FIXED_PAYOUT_RESERVE_RATE);
+    const gap = targetReserve - currentReserve; // negative => surplus
 
-    if (row.kind !== "withdrawal") {
-      throw new Error(`Not a withdrawal (kind=${row.kind}). Only false-success withdrawals can be reversed this way.`);
+    // Available platform profit (same pool as treasury withdraw)
+    const profitRows = await sql<{ p: number }>`
+      select coalesce(sum(case when kind = 'deposit' and status = 'success' then platform_profit_tambala else 0 end), 0)::bigint as p
+      from transactions
+    `;
+    const feeIncome = await sql<{ p: number }>`
+      select coalesce(sum(case when kind = 'fee' and status = 'success' then coalesce(platform_profit_tambala, gross_tambala) else 0 end), 0)::bigint as p
+      from transactions
+    `;
+    let treasuryPaid = 0;
+    try {
+      const paid = await sql<{ paid: number }>`
+        select coalesce(sum(gross_tambala), 0)::bigint as paid
+        from treasury_payouts
+        where status in (${"success"}, ${"processing"})
+      `;
+      treasuryPaid = asInt(paid[0]?.paid);
+    } catch {
+      treasuryPaid = 0;
     }
+    const availableProfit = Math.max(0, asInt(profitRows[0]?.p) + asInt(feeIncome[0]?.p) - treasuryPaid);
 
-    const noteLower = String(row.note ?? "").toLowerCase();
-    if (row.status === "failed" || noteLower.includes("reversed: never paid") || noteLower.includes("| reversed")) {
+    // ── Exact match ──────────────────────────────────────────────
+    if (gap === 0) {
       return {
         ok: true as const,
-        already: true as const,
-        transactionId: row.id,
-        reference: row.reference,
-        userId: row.user_id,
-        amountTambala: asInt(row.gross_tambala),
-        message: "Already reversed or failed — no further change.",
+        action: "none" as const,
+        liabilitiesTambala,
+        currentReserveTambala: currentReserve,
+        targetReserveTambala: targetReserve,
+        gapTambala: 0,
+        surplusTambala: 0,
+        availableProfitTambala: availableProfit,
+        fundedTambala: 0,
+        releasedTambala: 0,
+        message: `Reserve already matches 2% of liabilities (${formatKwacha(targetReserve)}).`,
       };
     }
 
-    if (row.status !== "success" && row.status !== "processing") {
-      throw new Error(`Cannot reverse status "${row.status}". Expected success (or stuck processing).`);
+    // ── SURPLUS: reserve above 2% → move excess into profit bag ─
+    if (gap < 0) {
+      const surplus = -gap;
+
+      if (dryRun) {
+        return {
+          ok: true as const,
+          action: "dry_run_release" as const,
+          liabilitiesTambala,
+          currentReserveTambala: currentReserve,
+          targetReserveTambala: targetReserve,
+          gapTambala: gap,
+          surplusTambala: surplus,
+          availableProfitTambala: availableProfit,
+          fundedTambala: 0,
+          releasedTambala: surplus,
+          message: `Would move ${formatKwacha(surplus)} from payout reserve → profit bag (reserve stays at 2% target).`,
+        };
+      }
+
+      const wallets = await sql<{
+        user_id: string;
+        payout_reserve_tambala: number;
+      }>`
+        select w.user_id, coalesce(w.payout_reserve_tambala, 0) as payout_reserve_tambala
+        from wallets w
+        inner join profiles p on p.user_id = w.user_id
+        where p.deleted_at is null and p.role = ${"user"}
+          and coalesce(w.payout_reserve_tambala, 0) > 0
+        order by coalesce(w.payout_reserve_tambala, 0) desc
+      `;
+
+      const totalRes = wallets.reduce((s, w) => s + asInt(w.payout_reserve_tambala), 0);
+      const reference = newReference("RSVX");
+
+      await withTransaction(async (tx) => {
+        // Pull surplus out of user reserve buckets (proportional to each reserve)
+        if (totalRes > 0 && wallets.length > 0) {
+          let taken = 0;
+          for (let i = 0; i < wallets.length; i++) {
+            const w = wallets[i]!;
+            const have = asInt(w.payout_reserve_tambala);
+            const share =
+              i === wallets.length - 1
+                ? Math.min(have, surplus - taken)
+                : Math.min(have, Math.floor((surplus * have) / totalRes));
+            if (share <= 0) continue;
+            taken += share;
+            await tx`
+              update wallets
+              set payout_reserve_tambala = greatest(payout_reserve_tambala - ${share}, 0),
+                  updated_at = now()
+              where user_id = ${w.user_id}
+            `;
+          }
+        }
+
+        // Book as platform profit (fee row) so profit bag increases
+        await tx`
+          insert into transactions (
+            user_id, kind, status, gross_tambala, credited_tambala,
+            platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
+          ) values (
+            ${context.userId}, ${"fee"}, ${"success"}, ${surplus}, ${0},
+            ${surplus}, ${0}, ${reference},
+            ${`Reserve recalculate: released ${formatKwacha(surplus)} surplus reserve → profit (target 2% of ${formatKwacha(liabilitiesTambala)})`},
+            now()
+          )
+        `;
+
+        try {
+          await tx`
+            insert into platform_treasury (id, balance_tambala, lifetime_in_tambala, updated_at)
+            values (1, ${surplus}, ${surplus}, now())
+            on conflict (id) do update set
+              balance_tambala = platform_treasury.balance_tambala + ${surplus},
+              lifetime_in_tambala = platform_treasury.lifetime_in_tambala + ${surplus},
+              updated_at = now()
+          `;
+        } catch {
+          /* optional table */
+        }
+      });
+
+      await writeAudit(sql, {
+        actorUserId: context.userId,
+        action: "reserve_recalculate_release",
+        detail: `ref=${reference} released=${surplus} liabilities=${liabilitiesTambala} target=${targetReserve} was=${currentReserve}`,
+      });
+
+      return {
+        ok: true as const,
+        action: "released_to_profit" as const,
+        liabilitiesTambala,
+        currentReserveTambala: currentReserve - surplus,
+        targetReserveTambala: targetReserve,
+        gapTambala: 0,
+        surplusTambala: 0,
+        availableProfitTambala: availableProfit + surplus,
+        fundedTambala: 0,
+        releasedTambala: surplus,
+        reference,
+        message: `Moved ${formatKwacha(surplus)} from payout reserve → profit bag. Reserve now matches 2% of liabilities.`,
+      };
     }
 
-    const amount = asInt(row.gross_tambala);
-    const reserveShare = asInt(row.payout_reserve_tambala);
-    // Detect received-bag withdraw from note written at startWithdraw
-    const fromReceived =
-      noteLower.includes("from received") || noteLower.includes("received bag");
+    // ── SHORTFALL: reserve below 2% → top up from profit ────────
+    const funded = Math.min(gap, availableProfit);
+    if (funded <= 0) {
+      return {
+        ok: false as const,
+        action: "insufficient_profit" as const,
+        liabilitiesTambala,
+        currentReserveTambala: currentReserve,
+        targetReserveTambala: targetReserve,
+        gapTambala: gap,
+        surplusTambala: 0,
+        availableProfitTambala: availableProfit,
+        fundedTambala: 0,
+        releasedTambala: 0,
+        message: `Need ${formatKwacha(gap)} to reach 2% reserve, but profit bag has ${formatKwacha(availableProfit)}.`,
+      };
+    }
 
-    const reason = data.reason.trim().slice(0, 400);
-    const newNote =
-      (row.note ? row.note + " | " : "") +
-      `REVERSED: never paid by PayChangu — ${reason}`;
+    if (dryRun) {
+      return {
+        ok: true as const,
+        action: "dry_run" as const,
+        liabilitiesTambala,
+        currentReserveTambala: currentReserve,
+        targetReserveTambala: targetReserve,
+        gapTambala: gap,
+        surplusTambala: 0,
+        availableProfitTambala: availableProfit,
+        fundedTambala: funded,
+        releasedTambala: 0,
+        message: `Would move ${formatKwacha(funded)} from profit → payout reserve (still short ${formatKwacha(gap - funded)} if any).`,
+      };
+    }
+
+    const wallets = await sql<{
+      user_id: string;
+      balance_tambala: number;
+      received_balance_tambala: number;
+    }>`
+      select w.user_id, w.balance_tambala, coalesce(w.received_balance_tambala, 0) as received_balance_tambala
+      from wallets w
+      inner join profiles p on p.user_id = w.user_id
+      where p.deleted_at is null and p.role = ${"user"}
+        and (w.balance_tambala + coalesce(w.received_balance_tambala, 0)) > 0
+      order by (w.balance_tambala + coalesce(w.received_balance_tambala, 0)) desc
+    `;
+
+    const reference = newReference("RSV");
+    const weights = wallets.map((w) => ({
+      userId: w.user_id,
+      weight: asInt(w.balance_tambala) + asInt(w.received_balance_tambala),
+    }));
+    const totalWeight = weights.reduce((s, w) => s + w.weight, 0);
 
     await withTransaction(async (tx) => {
-      if (fromReceived) {
+      await tx`
+        insert into treasury_payouts (
+          admin_user_id, gross_tambala, fee_tambala, net_tambala, phone, reference, status, note, completed_at
+        ) values (
+          ${context.userId}, ${funded}, ${0}, ${funded}, ${null}, ${reference},
+          ${"success"},
+          ${`Reserve recalculate: top-up ${formatKwacha(funded)} to reach 2% of liabilities (${formatKwacha(liabilitiesTambala)})`},
+          now()
+        )
+      `;
+
+      try {
         await tx`
-          update wallets
-          set received_balance_tambala = coalesce(received_balance_tambala, 0) + ${amount},
-              lifetime_withdrawn_tambala = greatest(lifetime_withdrawn_tambala - ${amount}, 0),
+          update platform_treasury
+          set balance_tambala = greatest(0, balance_tambala - ${funded}),
+              lifetime_out_tambala = lifetime_out_tambala + ${funded},
               updated_at = now()
-          where user_id = ${row.user_id}
+          where id = 1
         `;
+      } catch {
+        /* optional table */
+      }
+
+      if (totalWeight > 0 && weights.length > 0) {
+        let allocated = 0;
+        for (let i = 0; i < weights.length; i++) {
+          const w = weights[i]!;
+          const share =
+            i === weights.length - 1
+              ? funded - allocated
+              : Math.floor((funded * w.weight) / totalWeight);
+          if (share <= 0) continue;
+          allocated += share;
+          await tx`
+            update wallets
+            set payout_reserve_tambala = payout_reserve_tambala + ${share},
+                updated_at = now()
+            where user_id = ${w.userId}
+          `;
+        }
       } else {
         await tx`
-          update wallets
-          set balance_tambala = balance_tambala + ${amount},
-              lifetime_withdrawn_tambala = greatest(lifetime_withdrawn_tambala - ${amount}, 0),
-              payout_reserve_tambala = payout_reserve_tambala + ${reserveShare},
-              updated_at = now()
-          where user_id = ${row.user_id}
+          insert into transactions (
+            user_id, kind, status, gross_tambala, credited_tambala,
+            platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
+          ) values (
+            ${context.userId}, ${"fee"}, ${"success"}, ${funded}, ${0},
+            ${0}, ${funded}, ${reference},
+            ${`Reserve recalculate top-up (no user vaults to allocate)`},
+            now()
+          )
         `;
       }
 
       await tx`
-        update transactions
-        set status = ${"failed"},
-            note = ${newNote},
-            completed_at = coalesce(completed_at, now())
-        where id = ${row.id}
-          and status in (${"success"}, ${"processing"})
+        insert into transactions (
+          user_id, kind, status, gross_tambala, credited_tambala,
+          platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
+        ) values (
+          ${context.userId}, ${"fee"}, ${"success"}, ${funded}, ${0},
+          ${0}, ${funded}, ${reference + "_RSV"},
+          ${`Reserve recalculate: +${formatKwacha(funded)} to payout reserve from profit (target 2% of ${formatKwacha(liabilitiesTambala)})`},
+          now()
+        )
       `;
-
-      // Offset ledger if success had booked withdrawal rows
-      try {
-        await tx`
-          insert into platform_ledger (transaction_id, entry_type, amount_tambala)
-          values
-            (${row.id}, ${"withdrawal_reversal"}, ${amount}),
-            (${row.id}, ${"payout_fee_restored"}, ${reserveShare})
-        `;
-      } catch {
-        /* ledger table / constraint optional */
-      }
     });
 
     await writeAudit(sql, {
       actorUserId: context.userId,
-      userId: row.user_id,
-      action: "withdraw_reverse_false_success",
-      detail: `id=${row.id} ref=${row.reference} amount=${amount} reserve=${reserveShare} received=${fromReceived} reason=${reason.slice(0, 120)}`,
+      action: "reserve_recalculate",
+      detail: `ref=${reference} funded=${funded} gap=${gap} liabilities=${liabilitiesTambala} target=${targetReserve} was=${currentReserve}`,
     });
 
+    const stillShort = gap - funded;
     return {
       ok: true as const,
-      already: false as const,
-      transactionId: row.id,
-      reference: row.reference,
-      userId: row.user_id,
-      amountTambala: amount,
-      reserveRestoredTambala: fromReceived ? 0 : reserveShare,
-      restoredTo: fromReceived ? ("received" as const) : ("main" as const),
-      message: `Reversed ${formatKwacha(amount)} to user ${fromReceived ? "received bag" : "main vault"}. Tx #${row.id} marked failed.`,
+      action: "topped_up" as const,
+      liabilitiesTambala,
+      currentReserveTambala: currentReserve + funded,
+      targetReserveTambala: targetReserve,
+      gapTambala: gap,
+      surplusTambala: 0,
+      availableProfitTambala: availableProfit - funded,
+      fundedTambala: funded,
+      releasedTambala: 0,
+      reference,
+      message:
+        stillShort > 0
+          ? `Moved ${formatKwacha(funded)} from profit → reserve. Still short ${formatKwacha(stillShort)} (profit bag empty).`
+          : `Moved ${formatKwacha(funded)} from profit → reserve. Reserve now matches 2% of liabilities.`,
     };
   });
 
