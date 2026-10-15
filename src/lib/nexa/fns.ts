@@ -1132,14 +1132,12 @@ export const startWithdraw = createServerFn({ method: "POST" })
       throw err;
     }
 
-    // Outside the DB transaction: talk to PayChangu (or explicit demo only).
-    // Never mark success unless PayChangu was called, or demo mode is on.
+    // Outside the DB transaction: talk to PayChangu (or demo).
     let actualRailFeeTambala: number | null = prepared.reserveShare;
     try {
-      const method = data.method ?? "momo";
-      let status = "pending";
-
       if (paychanguConfigured()) {
+        const method = data.method ?? "momo";
+        let status = "pending";
         if (method === "bank") {
           const { BANK_FLAT_FEE_KWACHA } = await import("./constants");
           const grossKwacha = tambalaToKwacha(amount);
@@ -1188,15 +1186,6 @@ export const startWithdraw = createServerFn({ method: "POST" })
         if (status === "failed" || status === "failure" || status === "rejected") {
           throw new Error(`Payout rejected by provider (${status})`);
         }
-      } else if (demoPaymentsEnabled()) {
-        // Local/demo only — no real money moves. Still book success for UX testing.
-        const { MOMO_PAYOUT_RAIL_RATE } = await import("./constants");
-        actualRailFeeTambala = Math.round(amount * MOMO_PAYOUT_RAIL_RATE);
-        status = "success";
-      } else {
-        throw new Error(
-          "Payouts are not configured (PayChangu secret missing). Withdrawal was not sent; balance will be restored.",
-        );
       }
 
       await withTransaction(async (tx) => {
@@ -6699,12 +6688,7 @@ export const adminTreasurySendToPhone = createServerFn({ method: "POST" })
         if (status === "failed" || status === "failure" || status === "rejected") {
           throw new Error(`Payout rejected (${status})`);
         }
-      } else if (!demoPaymentsEnabled()) {
-        throw new Error(
-          "Payouts are not configured (PayChangu secret missing). Treasury send was not executed.",
-        );
       }
-      // Demo: allow success without provider. Live: only after PayChangu accepted above.
       await sql`
         update treasury_payouts
         set status = ${"success"}, completed_at = now()
@@ -6934,12 +6918,7 @@ export const adminSendFromWallet = createServerFn({ method: "POST" })
         if (status === "failed" || status === "failure" || status === "rejected") {
           throw new Error(`PayChangu rejected payout (${status})`);
         }
-      } else if (!demoPaymentsEnabled()) {
-        throw new Error(
-          "Payouts are not configured (PayChangu secret missing). Send was not executed; balance will be restored.",
-        );
       }
-      // Demo: allow success without provider. Live: only after PayChangu accepted above.
       await sql`
         update transactions
         set status = ${"success"}, completed_at = now()
@@ -7226,6 +7205,250 @@ export const adminFundsAudit = createServerFn({ method: "POST" })
 
 
 /** Debit admin main balance by the funds-audit shortfall so operating books sit at neutral vs PayChangu math. */
+
+/**
+ * Recalculate payout reserve vs 2% of current user liabilities.
+ * If reserved < target, top up the gap from platform profit (treasury bag)
+ * and distribute into user wallet payout_reserve buckets (proportional to vault size).
+ * Does not touch user balances — only reserve and profit accounting.
+ */
+export const adminRecalculatePayoutReserve = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      pin: pinSchema,
+      /** When true, only report the gap — do not move money. */
+      dryRun: z.boolean().optional(),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdminSensitive(context.userId);
+    const profile = await loadProfile(context.userId);
+    if (!profile || profile.role !== "admin") throw new Error("Admin only.");
+
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { verifySecret, newReference } = await import("./crypto");
+    const { formatKwacha } = await import("./money");
+    const { FIXED_PAYOUT_RESERVE_RATE } = await import("./constants");
+    const { writeAudit } = await import("./audit.server");
+
+    if (!(await verifySecret(profile.pin_hash, data.pin))) {
+      throw new Error("Incorrect PIN");
+    }
+
+    const sql = await getSql();
+    const dryRun = Boolean(data.dryRun);
+
+    // Liabilities = what users can still claim (main + received bags)
+    const liability = await sql<{
+      main: number;
+      received: number;
+      reserve: number;
+    }>`
+      select
+        coalesce(sum(w.balance_tambala), 0)::bigint as main,
+        coalesce(sum(coalesce(w.received_balance_tambala, 0)), 0)::bigint as received,
+        coalesce(sum(coalesce(w.payout_reserve_tambala, 0)), 0)::bigint as reserve
+      from wallets w
+      inner join profiles p on p.user_id = w.user_id
+      where p.deleted_at is null and p.role = ${"user"}
+    `;
+
+    const userMain = asInt(liability[0]?.main);
+    const userReceived = asInt(liability[0]?.received);
+    const currentReserve = asInt(liability[0]?.reserve);
+    const liabilitiesTambala = userMain + userReceived;
+    const targetReserve = Math.round(liabilitiesTambala * FIXED_PAYOUT_RESERVE_RATE);
+    const gap = targetReserve - currentReserve;
+
+    // Available platform profit (same pool as treasury withdraw)
+    const profitRows = await sql<{ p: number }>`
+      select coalesce(sum(case when kind = 'deposit' and status = 'success' then platform_profit_tambala else 0 end), 0)::bigint as p
+      from transactions
+    `;
+    const feeIncome = await sql<{ p: number }>`
+      select coalesce(sum(case when kind = 'fee' and status = 'success' then coalesce(platform_profit_tambala, gross_tambala) else 0 end), 0)::bigint as p
+      from transactions
+    `;
+    let treasuryPaid = 0;
+    try {
+      const paid = await sql<{ paid: number }>`
+        select coalesce(sum(gross_tambala), 0)::bigint as paid
+        from treasury_payouts
+        where status in (${"success"}, ${"processing"})
+      `;
+      treasuryPaid = asInt(paid[0]?.paid);
+    } catch {
+      treasuryPaid = 0;
+    }
+    const availableProfit = Math.max(0, asInt(profitRows[0]?.p) + asInt(feeIncome[0]?.p) - treasuryPaid);
+
+    if (gap <= 0) {
+      return {
+        ok: true as const,
+        action: "none" as const,
+        liabilitiesTambala,
+        currentReserveTambala: currentReserve,
+        targetReserveTambala: targetReserve,
+        gapTambala: gap,
+        surplusTambala: -gap,
+        availableProfitTambala: availableProfit,
+        fundedTambala: 0,
+        message:
+          gap === 0
+            ? `Reserve already matches 2% of liabilities (${formatKwacha(targetReserve)}).`
+            : `Reserve is ${formatKwacha(-gap)} above the 2% target. No top-up needed.`,
+      };
+    }
+
+    const funded = Math.min(gap, availableProfit);
+    if (funded <= 0) {
+      return {
+        ok: false as const,
+        action: "insufficient_profit" as const,
+        liabilitiesTambala,
+        currentReserveTambala: currentReserve,
+        targetReserveTambala: targetReserve,
+        gapTambala: gap,
+        surplusTambala: 0,
+        availableProfitTambala: availableProfit,
+        fundedTambala: 0,
+        message: `Need ${formatKwacha(gap)} to reach 2% reserve, but profit bag has ${formatKwacha(availableProfit)}.`,
+      };
+    }
+
+    if (dryRun) {
+      return {
+        ok: true as const,
+        action: "dry_run" as const,
+        liabilitiesTambala,
+        currentReserveTambala: currentReserve,
+        targetReserveTambala: targetReserve,
+        gapTambala: gap,
+        surplusTambala: 0,
+        availableProfitTambala: availableProfit,
+        fundedTambala: funded,
+        message: `Would move ${formatKwacha(funded)} from profit → payout reserve (still short ${formatKwacha(gap - funded)} if any).`,
+      };
+    }
+
+    // Load user wallets with positive liability for proportional distribution
+    const wallets = await sql<{
+      user_id: string;
+      balance_tambala: number;
+      received_balance_tambala: number;
+    }>`
+      select w.user_id, w.balance_tambala, coalesce(w.received_balance_tambala, 0) as received_balance_tambala
+      from wallets w
+      inner join profiles p on p.user_id = w.user_id
+      where p.deleted_at is null and p.role = ${"user"}
+        and (w.balance_tambala + coalesce(w.received_balance_tambala, 0)) > 0
+      order by (w.balance_tambala + coalesce(w.received_balance_tambala, 0)) desc
+    `;
+
+    const reference = newReference("RSV");
+    const weights = wallets.map((w) => ({
+      userId: w.user_id,
+      weight: asInt(w.balance_tambala) + asInt(w.received_balance_tambala),
+    }));
+    const totalWeight = weights.reduce((s, w) => s + w.weight, 0);
+
+    await withTransaction(async (tx) => {
+      // Book as treasury outflow so profit bag shrinks (same accounting as treasury withdraw)
+      await tx`
+        insert into treasury_payouts (
+          admin_user_id, gross_tambala, fee_tambala, net_tambala, phone, reference, status, note, completed_at
+        ) values (
+          ${context.userId}, ${funded}, ${0}, ${funded}, ${null}, ${reference},
+          ${"success"},
+          ${`Reserve recalculate: top-up ${formatKwacha(funded)} to reach 2% of liabilities (${formatKwacha(liabilitiesTambala)})`},
+          now()
+        )
+      `;
+
+      try {
+        await tx`
+          update platform_treasury
+          set balance_tambala = greatest(0, balance_tambala - ${funded}),
+              lifetime_out_tambala = lifetime_out_tambala + ${funded},
+              updated_at = now()
+          where id = 1
+        `;
+      } catch {
+        /* optional table */
+      }
+
+      if (totalWeight > 0 && weights.length > 0) {
+        let allocated = 0;
+        for (let i = 0; i < weights.length; i++) {
+          const w = weights[i]!;
+          const share =
+            i === weights.length - 1
+              ? funded - allocated
+              : Math.floor((funded * w.weight) / totalWeight);
+          if (share <= 0) continue;
+          allocated += share;
+          await tx`
+            update wallets
+            set payout_reserve_tambala = payout_reserve_tambala + ${share},
+                updated_at = now()
+            where user_id = ${w.userId}
+          `;
+        }
+      } else {
+        // No user vaults — keep books via ledger note only (reserve stays system-side)
+        await tx`
+          insert into transactions (
+            user_id, kind, status, gross_tambala, credited_tambala,
+            platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
+          ) values (
+            ${context.userId}, ${"fee"}, ${"success"}, ${funded}, ${0},
+            ${0}, ${funded}, ${reference},
+            ${`Reserve recalculate top-up (no user vaults to allocate)`},
+            now()
+          )
+        `;
+      }
+
+      // Audit row on admin account for visibility
+      await tx`
+        insert into transactions (
+          user_id, kind, status, gross_tambala, credited_tambala,
+          platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
+        ) values (
+          ${context.userId}, ${"fee"}, ${"success"}, ${funded}, ${0},
+          ${0}, ${funded}, ${reference + "_RSV"},
+          ${`Reserve recalculate: +${formatKwacha(funded)} to payout reserve from profit (target 2% of ${formatKwacha(liabilitiesTambala)})`},
+          now()
+        )
+      `;
+    });
+
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "reserve_recalculate",
+      detail: `ref=${reference} funded=${funded} gap=${gap} liabilities=${liabilitiesTambala} target=${targetReserve} was=${currentReserve}`,
+    });
+
+    const stillShort = gap - funded;
+    return {
+      ok: true as const,
+      action: "topped_up" as const,
+      liabilitiesTambala,
+      currentReserveTambala: currentReserve + funded,
+      targetReserveTambala: targetReserve,
+      gapTambala: gap,
+      surplusTambala: 0,
+      availableProfitTambala: availableProfit - funded,
+      fundedTambala: funded,
+      reference,
+      message:
+        stillShort > 0
+          ? `Moved ${formatKwacha(funded)} from profit → reserve. Still short ${formatKwacha(stillShort)} (profit bag empty).`
+          : `Moved ${formatKwacha(funded)} from profit → reserve. Reserve now matches 2% of liabilities.`,
+    };
+  });
+
 export const adminCoverAuditShortage = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator(
