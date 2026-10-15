@@ -20,9 +20,30 @@ export const MIN_WITHDRAW_KWACHA = 50;
 export const BANK_FLAT_FEE_KWACHA = 700;
 export const MIN_BANK_WITHDRAW_KWACHA = MIN_WITHDRAW_KWACHA + BANK_FLAT_FEE_KWACHA;
 
+/**
+ * Deposit fee model
+ * -----------------
+ * Admin sets only the TOTAL deduction rate (DEPOSIT_FEE_RATE / platform_settings).
+ *
+ * Fixed slices taken from every deposit:
+ *   FIXED_DEPOSIT_COST_RATE  (1.5%) — reimburses the platform for advancing funds on deposit.
+ *   FIXED_PAYOUT_RESERVE_RATE (2.0%) — buffer for MoMo (~1.5%) / bank (~1.8%) payout rails.
+ *
+ * Everything left after those two fixed slices is PLATFORM PROFIT.
+ *   e.g. total 6% → 1.5% cost + 2% reserve + 2.5% profit
+ *   e.g. total 5% → 1.5% cost + 2% reserve + 1.5% profit
+ *
+ * Minimum total that still covers the fixed slices is 3.5%.
+ */
 export const DEPOSIT_FEE_RATE = 0.06;
-export const PLATFORM_PROFIT_RATE = 0.03;
-export const PAYOUT_FEE_RATE = 0.03;
+export const FIXED_DEPOSIT_COST_RATE = 0.015;
+export const FIXED_PAYOUT_RESERVE_RATE = 0.02;
+export const MIN_DEPOSIT_FEE_RATE = FIXED_DEPOSIT_COST_RATE + FIXED_PAYOUT_RESERVE_RATE; // 0.035
+/** Default true profit rate when total is the default 6%. */
+export const PLATFORM_PROFIT_RATE =
+  DEPOSIT_FEE_RATE - FIXED_DEPOSIT_COST_RATE - FIXED_PAYOUT_RESERVE_RATE; // 0.025
+/** Alias kept for older imports — same as FIXED_PAYOUT_RESERVE_RATE. */
+export const PAYOUT_FEE_RATE = FIXED_PAYOUT_RESERVE_RATE;
 
 /** PayChangu MoMo payout rail fee (merchant). Shown as estimate on admin sends. */
 export const MOMO_PAYOUT_RAIL_RATE = 0.018;
