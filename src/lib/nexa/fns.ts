@@ -1132,12 +1132,14 @@ export const startWithdraw = createServerFn({ method: "POST" })
       throw err;
     }
 
-    // Outside the DB transaction: talk to PayChangu (or demo).
+    // Outside the DB transaction: talk to PayChangu (or explicit demo only).
+    // Never mark success unless PayChangu was called, or demo mode is on.
     let actualRailFeeTambala: number | null = prepared.reserveShare;
     try {
+      const method = data.method ?? "momo";
+      let status = "pending";
+
       if (paychanguConfigured()) {
-        const method = data.method ?? "momo";
-        let status = "pending";
         if (method === "bank") {
           const { BANK_FLAT_FEE_KWACHA } = await import("./constants");
           const grossKwacha = tambalaToKwacha(amount);
@@ -1186,6 +1188,15 @@ export const startWithdraw = createServerFn({ method: "POST" })
         if (status === "failed" || status === "failure" || status === "rejected") {
           throw new Error(`Payout rejected by provider (${status})`);
         }
+      } else if (demoPaymentsEnabled()) {
+        // Local/demo only — no real money moves. Still book success for UX testing.
+        const { MOMO_PAYOUT_RAIL_RATE } = await import("./constants");
+        actualRailFeeTambala = Math.round(amount * MOMO_PAYOUT_RAIL_RATE);
+        status = "success";
+      } else {
+        throw new Error(
+          "Payouts are not configured (PayChangu secret missing). Withdrawal was not sent; balance will be restored.",
+        );
       }
 
       await withTransaction(async (tx) => {
@@ -6688,7 +6699,12 @@ export const adminTreasurySendToPhone = createServerFn({ method: "POST" })
         if (status === "failed" || status === "failure" || status === "rejected") {
           throw new Error(`Payout rejected (${status})`);
         }
+      } else if (!demoPaymentsEnabled()) {
+        throw new Error(
+          "Payouts are not configured (PayChangu secret missing). Treasury send was not executed.",
+        );
       }
+      // Demo: allow success without provider. Live: only after PayChangu accepted above.
       await sql`
         update treasury_payouts
         set status = ${"success"}, completed_at = now()
@@ -6918,7 +6934,12 @@ export const adminSendFromWallet = createServerFn({ method: "POST" })
         if (status === "failed" || status === "failure" || status === "rejected") {
           throw new Error(`PayChangu rejected payout (${status})`);
         }
+      } else if (!demoPaymentsEnabled()) {
+        throw new Error(
+          "Payouts are not configured (PayChangu secret missing). Send was not executed; balance will be restored.",
+        );
       }
+      // Demo: allow success without provider. Live: only after PayChangu accepted above.
       await sql`
         update transactions
         set status = ${"success"}, completed_at = now()
