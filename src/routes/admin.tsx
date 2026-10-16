@@ -22,6 +22,7 @@ import {
   adminUsers,
   adminLookupReference,
   adminForceCreditDeposit,
+  adminReverseFalseWithdrawal,
   adminResolveStuckDeposits,
   adminResolvePendingDeposit,
   adminSecurityChecklist,
@@ -225,6 +226,12 @@ function Console() {
   >([]);
   const [lookupRef, setLookupRef] = useState("");
   const [lookupMsg, setLookupMsg] = useState<string | null>(null);
+  const [reverseWthId, setReverseWthId] = useState("");
+  const [reverseWthRef, setReverseWthRef] = useState("");
+  const [reverseWthReason, setReverseWthReason] = useState("Never paid by PayChangu — marked success in error");
+  const [reverseWthPin, setReverseWthPin] = useState("");
+  const [reverseWthBusy, setReverseWthBusy] = useState(false);
+  const [reverseWthMsg, setReverseWthMsg] = useState<string | null>(null);
   const [loanInterest, setLoanInterest] = useState("3");
   const [loanLtv, setLoanLtv] = useState("90");
   const [loanPolicyMsg, setLoanPolicyMsg] = useState<string | null>(null);
@@ -881,6 +888,94 @@ function Console() {
 
       </Card>
 
+
+
+      <Card className="space-y-4 p-5">
+        <div>
+          <h2 className="font-display text-lg font-semibold">Reverse false-success withdrawal</h2>
+          <p className="text-sm text-muted">
+            Use when a withdrawal shows <span className="font-medium">success</span> but PayChangu never paid out.
+            Enter transaction <span className="font-medium">ID</span> or <span className="font-medium">reference</span>.
+            Refunds the user and marks the tx failed. Does not call PayChangu.
+          </p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label htmlFor="rev-wth-id">Transaction ID</Label>
+            <Input
+              id="rev-wth-id"
+              inputMode="numeric"
+              value={reverseWthId}
+              onChange={(e) => setReverseWthId(e.target.value.replace(/\D/g, ""))}
+              placeholder="e.g. 1842"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="rev-wth-ref">Or reference</Label>
+            <Input
+              id="rev-wth-ref"
+              value={reverseWthRef}
+              onChange={(e) => setReverseWthRef(e.target.value.trim())}
+              placeholder="WTH_… or AWS_…"
+            />
+          </div>
+          <div className="space-y-1 sm:col-span-2">
+            <Label htmlFor="rev-wth-reason">Reason (audit)</Label>
+            <Input
+              id="rev-wth-reason"
+              value={reverseWthReason}
+              onChange={(e) => setReverseWthReason(e.target.value)}
+              placeholder="Never paid by PayChangu"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="rev-wth-pin">Admin PIN</Label>
+            <Input
+              id="rev-wth-pin"
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              value={reverseWthPin}
+              onChange={(e) => setReverseWthPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              placeholder="PIN"
+            />
+          </div>
+          <div className="flex items-end">
+            <Button
+              type="button"
+              className="w-full border-red-500/40"
+              variant="secondary"
+              disabled={
+                reverseWthBusy ||
+                reverseWthPin.length !== 4 ||
+                reverseWthReason.trim().length < 8 ||
+                (!reverseWthId && !reverseWthRef)
+              }
+              onClick={() => {
+                setReverseWthBusy(true);
+                setReverseWthMsg(null);
+                void adminReverseFalseWithdrawal({
+                  data: {
+                    pin: reverseWthPin,
+                    transactionId: reverseWthId ? Number(reverseWthId) : undefined,
+                    reference: reverseWthRef || undefined,
+                    reason: reverseWthReason.trim(),
+                  },
+                })
+                  .then((r) => {
+                    setReverseWthMsg(r.message);
+                    setReverseWthPin("");
+                  })
+                  .catch((e) => setReverseWthMsg(errMessage(e)))
+                  .finally(() => setReverseWthBusy(false));
+              }}
+            >
+              {reverseWthBusy ? "Reversing…" : "Reverse & refund user"}
+            </Button>
+          </div>
+        </div>
+        {reverseWthMsg ? <p className="text-sm text-primary">{reverseWthMsg}</p> : null}
+      </Card>
 
       <Card className="space-y-4 p-5">
         <div>

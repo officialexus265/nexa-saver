@@ -1186,6 +1186,14 @@ export const startWithdraw = createServerFn({ method: "POST" })
         if (status === "failed" || status === "failure" || status === "rejected") {
           throw new Error(`Payout rejected by provider (${status})`);
         }
+      } else if (demoPaymentsEnabled()) {
+        // Local/demo only — no real money moves.
+        const { MOMO_PAYOUT_RAIL_RATE } = await import("./constants");
+        actualRailFeeTambala = Math.round(amount * MOMO_PAYOUT_RAIL_RATE);
+      } else {
+        throw new Error(
+          "Payouts are not configured (PayChangu secret missing). Withdrawal was not sent; balance will be restored.",
+        );
       }
 
       await withTransaction(async (tx) => {
@@ -6719,6 +6727,10 @@ export const adminTreasurySendToPhone = createServerFn({ method: "POST" })
         if (status === "failed" || status === "failure" || status === "rejected") {
           throw new Error(`Payout rejected (${status})`);
         }
+      } else if (!demoPaymentsEnabled()) {
+        throw new Error(
+          "Payouts are not configured (PayChangu secret missing). Treasury send was not executed.",
+        );
       }
       await sql`
         update treasury_payouts
@@ -6949,6 +6961,10 @@ export const adminSendFromWallet = createServerFn({ method: "POST" })
         if (status === "failed" || status === "failure" || status === "rejected") {
           throw new Error(`PayChangu rejected payout (${status})`);
         }
+      } else if (!demoPaymentsEnabled()) {
+        throw new Error(
+          "Payouts are not configured (PayChangu secret missing). Send was not executed; balance will be restored.",
+        );
       }
       await sql`
         update transactions
@@ -7582,6 +7598,173 @@ export const adminRecalculatePayoutReserve = createServerFn({ method: "POST" })
         stillShort > 0
           ? `Moved ${formatKwacha(funded)} from profit → reserve. Still short ${formatKwacha(stillShort)} (profit bag empty).`
           : `Moved ${formatKwacha(funded)} from profit → reserve. Reserve now matches 2% of liabilities.`,
+    };
+  });
+
+
+/**
+ * Fix a past withdrawal that was marked success without a real PayChangu payout.
+ * Lookup by transaction id OR reference. Refunds user, restores reserve, marks failed.
+ */
+export const adminReverseFalseWithdrawal = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      pin: pinSchema,
+      transactionId: z.number().int().positive().optional(),
+      reference: z.string().min(4).max(80).optional(),
+      reason: z.string().min(8).max(400),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdminSensitive(context.userId);
+    const profile = await loadProfile(context.userId);
+    if (!profile || profile.role !== "admin") throw new Error("Admin only.");
+
+    if (!data.transactionId && !data.reference?.trim()) {
+      throw new Error("Provide a transaction id or a reference.");
+    }
+
+    const { getSql, withTransaction } = await import("@/lib/db");
+    const { verifySecret } = await import("./crypto");
+    const { formatKwacha } = await import("./money");
+    const { writeAudit } = await import("./audit.server");
+    const { assertRateLimit } = await import("./rate-limit.server");
+
+    if (!(await verifySecret(profile.pin_hash, data.pin))) {
+      throw new Error("Incorrect PIN");
+    }
+
+    const sql = await getSql();
+    await assertRateLimit(sql, {
+      bucket: `admin-reverse-wth:${context.userId}`,
+      limit: 30,
+      windowSeconds: 60 * 60,
+      message: "Too many reverse attempts this hour.",
+    });
+
+    const rows = data.transactionId
+      ? await sql<{
+          id: number;
+          user_id: string;
+          kind: string;
+          status: string;
+          gross_tambala: number;
+          payout_reserve_tambala: number;
+          reference: string;
+          note: string | null;
+        }>`
+          select id, user_id, kind, status, gross_tambala, coalesce(payout_reserve_tambala, 0) as payout_reserve_tambala,
+                 reference, note
+          from transactions where id = ${data.transactionId} limit 1
+        `
+      : await sql<{
+          id: number;
+          user_id: string;
+          kind: string;
+          status: string;
+          gross_tambala: number;
+          payout_reserve_tambala: number;
+          reference: string;
+          note: string | null;
+        }>`
+          select id, user_id, kind, status, gross_tambala, coalesce(payout_reserve_tambala, 0) as payout_reserve_tambala,
+                 reference, note
+          from transactions where reference = ${data.reference!.trim()} limit 1
+        `;
+
+    if (!rows.length) throw new Error("Transaction not found");
+    const row = rows[0]!;
+
+    if (row.kind !== "withdrawal") {
+      throw new Error(`Not a withdrawal (kind=${row.kind}). Only false-success withdrawals can be reversed this way.`);
+    }
+
+    const noteLower = String(row.note ?? "").toLowerCase();
+    if (row.status === "failed" || noteLower.includes("reversed: never paid") || noteLower.includes("| reversed")) {
+      return {
+        ok: true as const,
+        already: true as const,
+        transactionId: row.id,
+        reference: row.reference,
+        userId: row.user_id,
+        amountTambala: asInt(row.gross_tambala),
+        message: "Already reversed or failed — no further change.",
+      };
+    }
+
+    if (row.status !== "success" && row.status !== "processing") {
+      throw new Error(`Cannot reverse status "${row.status}". Expected success (or stuck processing).`);
+    }
+
+    const amount = asInt(row.gross_tambala);
+    const reserveShare = asInt(row.payout_reserve_tambala);
+    const fromReceived =
+      noteLower.includes("from received") || noteLower.includes("received bag");
+
+    const reason = data.reason.trim().slice(0, 400);
+    const newNote =
+      (row.note ? row.note + " | " : "") +
+      `REVERSED: never paid by PayChangu — ${reason}`;
+
+    await withTransaction(async (tx) => {
+      if (fromReceived) {
+        await tx`
+          update wallets
+          set received_balance_tambala = coalesce(received_balance_tambala, 0) + ${amount},
+              lifetime_withdrawn_tambala = greatest(lifetime_withdrawn_tambala - ${amount}, 0),
+              updated_at = now()
+          where user_id = ${row.user_id}
+        `;
+      } else {
+        await tx`
+          update wallets
+          set balance_tambala = balance_tambala + ${amount},
+              lifetime_withdrawn_tambala = greatest(lifetime_withdrawn_tambala - ${amount}, 0),
+              payout_reserve_tambala = payout_reserve_tambala + ${reserveShare},
+              updated_at = now()
+          where user_id = ${row.user_id}
+        `;
+      }
+
+      await tx`
+        update transactions
+        set status = ${"failed"},
+            note = ${newNote},
+            completed_at = coalesce(completed_at, now())
+        where id = ${row.id}
+          and status in (${"success"}, ${"processing"})
+      `;
+
+      try {
+        await tx`
+          insert into platform_ledger (transaction_id, entry_type, amount_tambala)
+          values
+            (${row.id}, ${"withdrawal_reversal"}, ${amount}),
+            (${row.id}, ${"payout_fee_restored"}, ${reserveShare})
+        `;
+      } catch {
+        /* optional */
+      }
+    });
+
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      userId: row.user_id,
+      action: "withdraw_reverse_false_success",
+      detail: `id=${row.id} ref=${row.reference} amount=${amount} reserve=${reserveShare} received=${fromReceived} reason=${reason.slice(0, 120)}`,
+    });
+
+    return {
+      ok: true as const,
+      already: false as const,
+      transactionId: row.id,
+      reference: row.reference,
+      userId: row.user_id,
+      amountTambala: amount,
+      reserveRestoredTambala: fromReceived ? 0 : reserveShare,
+      restoredTo: fromReceived ? ("received" as const) : ("main" as const),
+      message: `Reversed ${formatKwacha(amount)} to user ${fromReceived ? "received bag" : "main vault"}. Tx #${row.id} marked failed.`,
     };
   });
 
