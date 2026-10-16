@@ -759,7 +759,6 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
 }
 
 function AdminContactForm({
-  const { t } = useT();
   currentEmail,
   currentPhone,
   onDone,
@@ -770,6 +769,7 @@ function AdminContactForm({
   onDone: (m: string) => void;
   onError: (m: string) => void;
 }) {
+  const { t } = useT();
   const [email, setEmail] = useState(currentEmail);
   const [phone, setPhone] = useState(currentPhone);
   const [password, setPassword] = useState("");
@@ -818,13 +818,13 @@ function AdminContactForm({
 }
 
 function SecurityQuestionForm({
-  const { t } = useT();
   onDone,
   onError,
 }: {
   onDone: (m: string) => void;
   onError: (m: string) => void;
 }) {
+  const { t } = useT();
   const [question, setQuestion] = useState("What was the name of your first pet?");
   const [answer, setAnswer] = useState("");
   const [password, setPassword] = useState("");
