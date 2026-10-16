@@ -274,7 +274,7 @@ function Vault({
           onClick={() => setDepositOpen(true)}
         >
           <ArrowDownToLine className="size-6 shrink-0 sm:size-5" aria-hidden />
-          <span>Deposit</span>
+          <span>Receive</span>
         </Button>
         <Button
           variant="secondary"
@@ -735,7 +735,12 @@ function DepositModal({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const kwacha = parseKwachaInput(amount);
-  const split = kwacha ? splitDeposit(kwachaToTambala(kwacha), { depositFeeRate, platformProfitRate: depositFeeRate / 2, payoutReserveRate: depositFeeRate / 2 }) : null;
+  const split = kwacha
+    ? splitDeposit(kwachaToTambala(kwacha), {
+        depositFeeRate,
+        // rates inside splitDeposit use FIXED 1.5% cost + 2% reserve; profit = remainder
+      })
+    : null;
 
   // Prefill registered number whenever the modal opens
   useEffect(() => {
@@ -793,7 +798,7 @@ function DepositModal({
     try {
       await confirmDemoDeposit({ data: { reference: ref } });
       onSuccess(
-        "Deposit received",
+        "Payment received",
         `You deposited ${formatKwacha(split.gross)} but the system has taken ${formatKwacha(split.fee)} to reserve it as a future withdrawal fee. ${formatKwacha(split.credited)} is now yours.`,
       );
       setStage("form");
@@ -806,7 +811,7 @@ function DepositModal({
   }
 
   return (
-    <Modal open={open} title="Deposit" onClose={reset}>
+    <Modal open={open} title="Receive payment" onClose={reset}>
       {stage === "form" ? (
         <div className="space-y-4">
           <div className="space-y-1.5">
@@ -852,7 +857,7 @@ function DepositModal({
               Back
             </Button>
             <Button className="flex-1" loading={busy} disabled={busy} onClick={() => void start()}>
-              {busy ? "Starting deposit…" : "I understand"}
+              {busy ? "Opening PayChangu…" : "Continue to PayChangu"}
             </Button>
           </div>
         </div>

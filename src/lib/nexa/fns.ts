@@ -3941,12 +3941,11 @@ export const listPublicLanguages = createServerFn({ method: "GET" }).handler(asy
     const { getSql } = await import("@/lib/db");
     const { listLanguages } = await import("@/lib/i18n/i18n.server");
     const sql = await getSql();
-    return listLanguages(sql);
+    const all = await listLanguages(sql);
+    // Only expose languages users can pick (English + enabled)
+    return all.filter((l) => l.code === "en" || l.enabled);
   } catch {
-    return [
-      { code: "en", name: "English", enabled: true, isDefault: true },
-      { code: "ny", name: "Chichewa", enabled: false, isDefault: false },
-    ];
+    return [{ code: "en", name: "English", enabled: true, isDefault: true }];
   }
 });
 

@@ -198,6 +198,9 @@ function Console() {
   const [surveyBusy, setSurveyBusy] = useState(false);
   const [surveyMsg, setSurveyMsg] = useState<string | null>(null);
   const [userQuery, setUserQuery] = useState("");
+  const [accountsPage, setAccountsPage] = useState(0);
+  const [accountsShowAll, setAccountsShowAll] = useState(false);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<Awaited<ReturnType<typeof adminAnalytics>> | null>(null);
   const [userActionMsg, setUserActionMsg] = useState<string | null>(null);
   const [payoutMethods, setPayoutMethods] = useState<{ momo: boolean; bank: boolean } | null>(null);
@@ -2233,217 +2236,292 @@ function Console() {
 
       {adminTab === "accounts" ? (
       <div className="space-y-5">
-      <section>
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="font-display text-lg font-semibold">Accounts</h2>
-          <div className="w-full space-y-1.5 sm:max-w-sm">
-            <Label htmlFor="user-search">Search accounts</Label>
-            <Input
-              id="user-search"
-              value={userQuery}
-              onChange={(e) => setUserQuery(e.target.value)}
-              placeholder="Username, email, phone…"
-              className="w-full"
-            />
-          </div>
-        </div>
-        {userActionMsg ? (
-          <p className="mb-3 rounded-xl border border-border bg-surface-2 px-3 py-2 text-sm text-muted">
-            {userActionMsg}
-          </p>
-        ) : null}
-
-        <div className="space-y-3">
-          {(users.filter((u) => {
-            const q = userQuery.trim().toLowerCase();
-            if (!q) return true;
-            return (
-              u.username.toLowerCase().includes(q) ||
-              u.email.toLowerCase().includes(q) ||
-              u.phone.includes(q) ||
-              u.firstName.toLowerCase().includes(q)
-            );
-          })).map((u) => (
-            <article
-              key={u.userId}
-              className="rounded-2xl border border-border bg-surface p-4 shadow-sm sm:p-5"
-            >
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                {/* Identity */}
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="truncate font-display text-base font-semibold text-fg">{u.username}</h3>
-                    {u.role === "admin" ? (
-                      <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-primary">
-                        admin
-                      </span>
-                    ) : u.adminLocked ? (
-                      <span className="rounded-full bg-danger/15 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-danger">
-                        locked
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-primary">
-                        active
-                      </span>
-                    )}
-                    {(u as { adminWithdrawLocked?: boolean }).adminWithdrawLocked ? (
-                      <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
-                        withdraw locked
-                      </span>
-                    ) : null}
-                  </div>
-                  <p className="text-sm tabular-nums text-muted">{u.phone}</p>
-                  <p className="truncate text-xs text-muted">{u.email}</p>
-                </div>
-
-                {/* Money stats */}
-                <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:w-[22rem] lg:shrink-0">
-                  <div className="rounded-xl border border-border bg-surface-2 px-3 py-2.5 text-center">
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Balance</p>
-                    <p className="mt-1 text-sm font-semibold tabular-nums text-fg">
-                      {formatKwacha(u.balanceTambala, { compact: true })}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-border bg-surface-2 px-3 py-2.5 text-center">
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-muted">In</p>
-                    <p className="mt-1 text-sm font-semibold tabular-nums text-fg">
-                      {formatKwacha(u.lifetimeDepositedTambala, { compact: true })}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-border bg-surface-2 px-3 py-2.5 text-center">
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Out</p>
-                    <p className="mt-1 text-sm font-semibold tabular-nums text-fg">
-                      {formatKwacha(u.lifetimeWithdrawnTambala, { compact: true })}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Actions */}
-              {u.role === "admin" ? (
-                <p className="mt-3 text-xs text-muted">Platform admin — no account actions.</p>
+        <section>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="font-display text-lg font-semibold">
+                {selectedAccountId ? "Account detail" : accountsShowAll ? "All accounts" : "Accounts"}
+              </h2>
+              <p className="text-sm text-muted">
+                {selectedAccountId
+                  ? "Manage locks and view balances for this account."
+                  : "Tap a name to open details. Showing " + (accountsShowAll ? "all" : "10 per page") + "."}
+              </p>
+            </div>
+            <div className="flex w-full flex-col gap-2 sm:max-w-sm">
+              {!selectedAccountId ? (
+                <>
+                  <Label htmlFor="user-search">Search</Label>
+                  <Input
+                    id="user-search"
+                    value={userQuery}
+                    onChange={(e) => {
+                      setUserQuery(e.target.value);
+                      setAccountsPage(0);
+                    }}
+                    placeholder="Name, username, phone…"
+                    className="w-full"
+                  />
+                </>
               ) : (
-                <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-4">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="h-9 px-3 text-xs"
-                    onClick={() => {
-                      const reason =
-                        window.prompt(
-                          u.adminLocked
-                            ? "Reason for unlocking (audit log):"
-                            : "Reason for locking this account (reported / compromised):",
-                        ) || "";
-                      if (reason.trim().length < 3) return;
-                      void adminLockUser({
-                        data: { userId: u.userId, reason: reason.trim(), locked: !u.adminLocked },
-                      })
-                        .then(() => {
-                          setUserActionMsg(
-                            u.adminLocked ? `Unlocked ${u.username}` : `Locked ${u.username}`,
-                          );
-                          return adminUsers();
-                        })
-                        .then(setUsers)
-                        .catch((err) => setUserActionMsg(errMessage(err)));
-                    }}
-                  >
-                    {u.adminLocked ? "Unlock account" : "Lock account"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="h-9 px-3 text-xs"
-                    onClick={() => {
-                      const locked = Boolean((u as { adminWithdrawLocked?: boolean }).adminWithdrawLocked);
-                      const reason =
-                        window.prompt(
-                          locked
-                            ? "Reason for unlocking withdrawals (audit):"
-                            : "Reason for withdraw-only lock (legal / report):",
-                        ) || "";
-                      if (reason.trim().length < 3) return;
-                      void adminSetWithdrawLock({
-                        data: { userId: u.userId, reason: reason.trim(), locked: !locked },
-                      })
-                        .then(() => {
-                          setUserActionMsg(
-                            locked
-                              ? `Withdrawals unlocked for ${u.username}`
-                              : `Withdrawals locked for ${u.username}`,
-                          );
-                          return adminUsers();
-                        })
-                        .then(setUsers)
-                        .catch((err) => setUserActionMsg(errMessage(err)));
-                    }}
-                  >
-                    {(u as { adminWithdrawLocked?: boolean }).adminWithdrawLocked
-                      ? "Unlock withdraw"
-                      : "Lock withdraw"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="h-9 px-3 text-xs text-danger"
-                    onClick={() => {
-                      const reason =
-                        window.prompt(
-                          `Delete ${u.username}? This soft-deletes the account. Type a reason:`,
-                        ) || "";
-                      if (reason.trim().length < 3) return;
-                      if (!window.confirm(`Permanently soft-delete ${u.username}?`)) return;
-                      void adminDeleteUser({
-                        data: { userId: u.userId, reason: reason.trim() },
-                      })
-                        .then(() => {
-                          setUserActionMsg(`Deleted ${u.username}`);
-                          return adminUsers();
-                        })
-                        .then(setUsers)
-                        .catch((err) => setUserActionMsg(errMessage(err)));
-                    }}
-                  >
-                    Delete
-                  </Button>
-                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setSelectedAccountId(null)}
+                >
+                  ← Back to list
+                </Button>
               )}
-            </article>
-          ))}
-          {!users.length ? (
-            <p className="rounded-2xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted">
-              No accounts yet.
+            </div>
+          </div>
+          {userActionMsg ? (
+            <p className="mb-3 rounded-xl border border-border bg-surface-2 px-3 py-2 text-sm text-muted">
+              {userActionMsg}
             </p>
           ) : null}
-        </div>
-      </section>
 
-      <section>
-        <h2 className="mb-3 font-display text-lg font-semibold">Ledger</h2>
-        <ul className="space-y-2">
-          {txs.map((tx) => (
-            <li
-              key={tx.id}
-              className="flex items-center justify-between rounded-xl border border-border bg-surface px-4 py-3 text-sm"
-            >
-              <div>
-                <p className="font-medium">
-                  {tx.username} · {tx.kind}
-                </p>
-                <p className="text-xs text-muted">
-                  {tx.status} · {tx.reference}
-                </p>
-              </div>
-              <p className="tabular-nums">{formatKwacha(tx.grossTambala, { compact: true })}</p>
-            </li>
-          ))}
-        </ul>
-      </section>
+          {(() => {
+            const filtered = users.filter((u) => {
+              const q = userQuery.trim().toLowerCase();
+              if (!q) return true;
+              return (
+                u.username.toLowerCase().includes(q) ||
+                u.email.toLowerCase().includes(q) ||
+                u.phone.includes(q) ||
+                u.firstName.toLowerCase().includes(q) ||
+                `${u.firstName} ${u.lastName || ""}`.toLowerCase().includes(q)
+              );
+            });
+            const pageSize = 10;
+            const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+            const page = Math.min(accountsPage, totalPages - 1);
+            const slice = accountsShowAll
+              ? filtered
+              : filtered.slice(page * pageSize, page * pageSize + pageSize);
+            const selected = selectedAccountId
+              ? users.find((u) => u.userId === selectedAccountId) ?? null
+              : null;
+
+            if (selected) {
+              const fullName = [selected.firstName, selected.lastName].filter(Boolean).join(" ") || selected.username;
+              return (
+                <article className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-display text-xl font-semibold">{fullName}</h3>
+                    {selected.role === "admin" ? (
+                      <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium uppercase text-primary">admin</span>
+                    ) : selected.adminLocked ? (
+                      <span className="rounded-full bg-danger/15 px-2 py-0.5 text-[11px] font-medium uppercase text-danger">locked</span>
+                    ) : (
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium uppercase text-primary">active</span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-sm text-muted">@{selected.username} · {selected.phone}</p>
+                  <p className="truncate text-xs text-muted">{selected.email}</p>
+                  <div className="mt-4 grid grid-cols-3 gap-2">
+                    <div className="rounded-xl border border-border bg-surface-2 px-3 py-2.5 text-center">
+                      <p className="text-[10px] uppercase text-muted">Balance</p>
+                      <p className="mt-1 text-sm font-semibold tabular-nums">{formatKwacha(selected.balanceTambala, { compact: true })}</p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-surface-2 px-3 py-2.5 text-center">
+                      <p className="text-[10px] uppercase text-muted">In</p>
+                      <p className="mt-1 text-sm font-semibold tabular-nums">{formatKwacha(selected.lifetimeDepositedTambala, { compact: true })}</p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-surface-2 px-3 py-2.5 text-center">
+                      <p className="text-[10px] uppercase text-muted">Out</p>
+                      <p className="mt-1 text-sm font-semibold tabular-nums">{formatKwacha(selected.lifetimeWithdrawnTambala, { compact: true })}</p>
+                    </div>
+                  </div>
+                  {selected.role === "admin" ? (
+                    <p className="mt-4 text-xs text-muted">Platform admin — no account actions.</p>
+                  ) : (
+                    <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-4">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="h-9 px-3 text-xs"
+                        onClick={() => {
+                          const reason =
+                            window.prompt(
+                              selected.adminLocked
+                                ? "Reason for unlocking (audit log):"
+                                : "Reason for locking this account (reported / compromised):",
+                            ) || "";
+                          if (reason.trim().length < 3) return;
+                          void adminLockUser({
+                            data: { userId: selected.userId, reason: reason.trim(), locked: !selected.adminLocked },
+                          })
+                            .then(() => {
+                              setUserActionMsg(
+                                selected.adminLocked ? `Unlocked ${selected.username}` : `Locked ${selected.username}`,
+                              );
+                              return adminUsers();
+                            })
+                            .then(setUsers)
+                            .catch((err) => setUserActionMsg(errMessage(err)));
+                        }}
+                      >
+                        {selected.adminLocked ? "Unlock account" : "Lock account"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="h-9 px-3 text-xs"
+                        onClick={() => {
+                          const locked = Boolean((selected as { adminWithdrawLocked?: boolean }).adminWithdrawLocked);
+                          const reason =
+                            window.prompt(
+                              locked
+                                ? "Reason for unlocking withdrawals (audit):"
+                                : "Reason for withdraw-only lock (legal / report):",
+                            ) || "";
+                          if (reason.trim().length < 3) return;
+                          void adminSetWithdrawLock({
+                            data: { userId: selected.userId, reason: reason.trim(), locked: !locked },
+                          })
+                            .then(() => {
+                              setUserActionMsg(
+                                locked
+                                  ? `Withdrawals unlocked for ${selected.username}`
+                                  : `Withdrawals locked for ${selected.username}`,
+                              );
+                              return adminUsers();
+                            })
+                            .then(setUsers)
+                            .catch((err) => setUserActionMsg(errMessage(err)));
+                        }}
+                      >
+                        {(selected as { adminWithdrawLocked?: boolean }).adminWithdrawLocked
+                          ? "Unlock withdraw"
+                          : "Lock withdraw"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="h-9 px-3 text-xs text-danger"
+                        onClick={() => {
+                          const reason =
+                            window.prompt(
+                              `Delete ${selected.username}? This soft-deletes the account. Type a reason:`,
+                            ) || "";
+                          if (reason.trim().length < 3) return;
+                          if (!window.confirm(`Permanently soft-delete ${selected.username}?`)) return;
+                          void adminDeleteUser({
+                            data: { userId: selected.userId, reason: reason.trim() },
+                          })
+                            .then(() => {
+                              setUserActionMsg(`Deleted ${selected.username}`);
+                              setSelectedAccountId(null);
+                              return adminUsers();
+                            })
+                            .then(setUsers)
+                            .catch((err) => setUserActionMsg(errMessage(err)));
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  )}
+                </article>
+              );
+            }
+
+            return (
+              <>
+                <ul className="divide-y divide-border rounded-2xl border border-border bg-surface">
+                  {slice.map((u) => {
+                    const fullName = [u.firstName, u.lastName].filter(Boolean).join(" ") || u.username;
+                    return (
+                      <li key={u.userId}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedAccountId(u.userId)}
+                          className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left transition hover:bg-surface-2"
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium text-fg">{fullName}</span>
+                            <span className="block truncate text-xs text-muted">@{u.username}</span>
+                          </span>
+                          <span className="shrink-0 text-xs text-muted">View →</span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                  {!slice.length ? (
+                    <li className="px-4 py-8 text-center text-sm text-muted">No accounts match.</li>
+                  ) : null}
+                </ul>
+                {!accountsShowAll && filtered.length > pageSize ? (
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs text-muted">
+                      Page {page + 1} of {totalPages} · {filtered.length} accounts
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="h-8 px-3 text-xs"
+                        disabled={page <= 0}
+                        onClick={() => setAccountsPage((p) => Math.max(0, p - 1))}
+                      >
+                        Previous
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="h-8 px-3 text-xs"
+                        disabled={page >= totalPages - 1}
+                        onClick={() => setAccountsPage((p) => Math.min(totalPages - 1, p + 1))}
+                      >
+                        Next
+                      </Button>
+                      <Button
+                        type="button"
+                        className="h-8 px-3 text-xs"
+                        onClick={() => setAccountsShowAll(true)}
+                      >
+                        View all
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+                {accountsShowAll ? (
+                  <div className="mt-3">
+                    <Button type="button" variant="secondary" className="h-8 px-3 text-xs" onClick={() => { setAccountsShowAll(false); setAccountsPage(0); }}>
+                      Show 10 per page
+                    </Button>
+                  </div>
+                ) : null}
+              </>
+            );
+          })()}
+        </section>
+
+        <section>
+          <h2 className="mb-3 font-display text-lg font-semibold">Ledger</h2>
+          <p className="mb-2 text-xs text-muted">Latest 10 movements</p>
+          <ul className="space-y-2">
+            {txs.slice(0, 10).map((tx) => (
+              <li
+                key={tx.id}
+                className="flex items-center justify-between rounded-xl border border-border bg-surface px-4 py-3 text-sm"
+              >
+                <div>
+                  <p className="font-medium">
+                    {tx.username} · {tx.kind}
+                  </p>
+                  <p className="text-xs text-muted">
+                    {tx.status} · {tx.reference}
+                  </p>
+                </div>
+                <p className="tabular-nums">{formatKwacha(tx.grossTambala, { compact: true })}</p>
+              </li>
+            ))}
+            {!txs.length ? <li className="text-sm text-muted">No ledger rows yet.</li> : null}
+          </ul>
+        </section>
       </div>
       ) : null}
-
-
 
       {adminTab === "loans" ? (
       <div className="space-y-5">
