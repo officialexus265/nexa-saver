@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useT } from "@/lib/i18n/client";
 import { Link, Navigate, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AuthFrame } from "@/components/auth-frame";
 import { PasswordField } from "@/components/password-field";
@@ -15,6 +16,7 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/")({ component: LoginPage });
 
 function LoginPage() {
+  const { t } = useT();
   const { user, isPending } = useCurrentUserState();
   const navigate = useNavigate();
   const [pref, setPref] = useState<LoginPref>("username");
@@ -57,24 +59,24 @@ function LoginPage() {
     try {
       const { email } = await resolveSignInEmail({ data: { identifier } });
       const result = await authClient.signIn.email({ email, password });
-      if (result.error) throw new Error(result.error.message ?? "Could not sign in");
+      if (result.error) throw new Error(result.error.message ?? t("auth.couldNotSignIn"));
       const me = await getMe();
       if (me.needsProfile) navigate({ to: "/signup" });
       else if (me.profile.role === "admin") navigate({ to: "/admin" });
       else navigate({ to: "/dashboard" });
     } catch (err) {
-      setError(errMessage(err, "Invalid credentials"));
+      setError(errMessage(err, t("auth.invalidCredentials")));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <AuthFrame aside="A Malawi kwacha vault with a PIN-locked balance and a 30-day quiet session.">
+    <AuthFrame aside={t("auth.asideLogin")}>
       <form onSubmit={onSubmit} className="space-y-4 rounded-2xl border border-border bg-surface p-5">
         <div>
-          <h1 className="font-display text-2xl font-semibold">Sign in</h1>
-          <p className="mt-1 text-sm text-muted">Use the identifier you prefer. You can change this later in profile.</p>
+          <h1 className="font-display text-2xl font-semibold">{t("auth.signInTitle")}</h1>
+          <p className="mt-1 text-sm text-muted">{t("auth.signInHint")}</p>
         </div>
         <div className="grid grid-cols-3 rounded-md bg-surface-2 p-1">
           {(Object.keys(LOGIN_PREF_LABEL) as LoginPref[]).map((key) => (
@@ -106,17 +108,17 @@ function LoginPage() {
         <PasswordField id="password" label="Password" value={password} onChange={setPassword} />
         <p className="text-right text-sm">
           <Link to="/forgot-password" className="text-muted hover:text-primary">
-            Forgot password?
+            {t("auth.forgotPassword")}
           </Link>
         </p>
         {error ? <p className="text-sm text-danger">{error}</p> : null}
         <Button type="submit" className="w-full" loading={busy}>
-          {busy ? "Signing in…" : "Enter vault"}
+          {busy ? t("auth.signingIn") : t("auth.enterVault")}
         </Button>
         <p className="text-center text-sm text-muted">
-          New here?{" "}
+          {t("auth.noAccount")}{" "}
           <Link to="/signup" className="text-primary">
-            Create an account
+            {t("auth.createAccountLink")}
           </Link>
         </p>
       </form>

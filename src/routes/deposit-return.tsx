@@ -1,3 +1,4 @@
+import { useT } from "@/lib/i18n/client";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { buttonVariants } from "@/components/ui/button";
@@ -38,6 +39,7 @@ export const Route = createFileRoute("/deposit-return")({
 });
 
 function DepositReturnPage() {
+  const { t } = useT();
   const search = Route.useSearch() as { ref?: string } & Record<string, unknown>;
   const ref = useMemo(() => {
     const fromSearch = typeof search.ref === "string" ? search.ref.trim() : "";
@@ -104,7 +106,7 @@ function DepositReturnPage() {
     <div className="nexa-shell grid min-h-dvh place-items-center px-4 py-8">
       <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 text-center shadow-lg">
         <h1 className="font-display text-2xl font-semibold">
-          {state === "ok" ? "Payment received" : state === "err" ? "Almost there" : "Checking payment"}
+          {state === "ok" ? "{t("dash.paymentReceived")}" : state === "err" ? "Almost there" : "Checking payment"}
         </h1>
 
         {state === "pending" ? <LoadingStatus label={body} /> : null}
@@ -112,7 +114,7 @@ function DepositReturnPage() {
         {state === "ok" && details ? (
           <div className="mt-4 space-y-4 text-left">
             <p className="rounded-xl border border-primary/30 bg-primary/10 px-3 py-2 text-center text-sm font-medium text-fg">
-              Take a screenshot of this screen as proof of payment.
+              {t("dash.screenshotProof")}
             </p>
             <dl className="space-y-2 rounded-xl border border-border bg-surface-2 p-4 text-sm">
               <div className="flex justify-between gap-3">
@@ -120,15 +122,15 @@ function DepositReturnPage() {
                 <dd className="font-medium text-primary">Success</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-muted">Amount paid</dt>
+                <dt className="text-muted">{t("dash.amountPaid")}</dt>
                 <dd className="tabular-nums font-semibold">{formatKwacha(details.grossTambala)}</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-muted">Platform fee</dt>
+                <dt className="text-muted">{t("dash.platformFee")}</dt>
                 <dd className="tabular-nums">{formatKwacha(details.feeTambala)}</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-muted">Credited to vault</dt>
+                <dt className="text-muted">{t("dash.creditedVault")}</dt>
                 <dd className="tabular-nums font-semibold text-primary">{formatKwacha(details.creditedTambala)}</dd>
               </div>
               <div className="space-y-1 border-t border-border pt-2">
@@ -141,7 +143,7 @@ function DepositReturnPage() {
               </div>
             </dl>
             <p className="text-center text-xs text-muted">
-              Keep the screenshot. Share the reference with support if anything looks wrong.
+              {t("help.keepScreenshot")}
             </p>
           </div>
         ) : null}
@@ -150,7 +152,7 @@ function DepositReturnPage() {
         {ref && state !== "ok" ? <p className="mt-2 text-xs text-faint">Ref: {ref}</p> : null}
 
         <Link to="/dashboard" className={cn(buttonVariants(), "mt-6 w-full")}>
-          Back to vault
+          {t("dash.backToVault")}
         </Link>
       </div>
     </div>

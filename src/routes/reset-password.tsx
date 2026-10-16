@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useT } from "@/lib/i18n/client";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { AuthFrame } from "@/components/auth-frame";
 import { PasswordField } from "@/components/password-field";
@@ -14,6 +15,7 @@ export const Route = createFileRoute("/reset-password")({
 });
 
 function ResetPasswordPage() {
+  const { t } = useT();
   const { token } = Route.useSearch();
   const [state, setState] = useState<"loading" | "invalid" | "ready" | "done">("loading");
   const [password, setPassword] = useState("");
@@ -69,7 +71,7 @@ function ResetPasswordPage() {
           This password reset link is invalid or has already been used. Request a new one from the sign-in page.
         </p>
         <Link to="/" className="mt-6 inline-block text-sm text-primary">
-          Back to sign in
+          {t("auth.backToSignIn")}
         </Link>
       </AuthFrame>
     );

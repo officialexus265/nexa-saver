@@ -954,8 +954,8 @@ function DepositModal({
         <div className="space-y-4">
           <p className="text-sm text-muted">
             {demo
-              ? "Demo mode: no real money moves. Approve to credit the vault."
-              : "Approve the PayChangu prompt on your phone."}
+              ? "{t("fee.demoMode")}"
+              : "{t("fee.approvePhone")}"}
           </p>
           {error ? <p className="text-sm text-danger">{error}</p> : null}
           <Button className="w-full" loading={busy} disabled={busy} onClick={() => void approve()}>
@@ -1323,7 +1323,7 @@ function LoanPanel() {
   return (
     <Card className="mt-4 space-y-3 p-4">
       <div>
-        <h2 className="font-display text-lg font-semibold">{t("dash.loanTitle")}</h2>
+        <h2 className="font-display text-lg font-semibold">{t("loan.title")}</h2>
         <p className="text-sm text-muted">
           Only while a voluntary withdrawal time-lock is active. Admin locks do not qualify. Max{" "}
           {elig ? `${Math.round((elig.ltv || 0.9) * 100)}%` : "90%"} of locked balance. Interest{" "}
@@ -1353,7 +1353,7 @@ function LoanPanel() {
             </div>
           ) : (
             <Button type="button" variant="secondary" size="sm" onClick={() => { setRepayRef(l.reference); setPin(""); }}>
-              Repay now
+              {t("loan.repay")}
             </Button>
           )}
         </div>
@@ -1382,16 +1382,16 @@ function LoanPanel() {
             <div className="space-y-2 text-sm">
               <label className="flex items-start gap-2">
                 <input type="radio" checked={mode === "manual"} onChange={() => setMode("manual")} />
-                <span>Manual repay — if a period ends unpaid, another month of interest is added</span>
+                <span>{t("loan.manualMode")}</span>
               </label>
               <label className="flex items-start gap-2">
                 <input type="radio" checked={mode === "auto"} onChange={() => setMode("auto")} />
-                <span>Auto-deduct from vault when each period ends (if balance allows)</span>
+                <span>{t("loan.autoMode")}</span>
               </label>
             </div>
             <PinPad value={pin} onChange={setPin} disabled={busy} />
             <Button type="button" className="w-full" disabled={busy || pin.length !== 4 || !Number(amount)} onClick={() => void apply()}>
-              {busy ? "Applying…" : "Take loan"}
+              {busy ? t("loan.taking") : t("loan.apply")}
             </Button>
             <Button type="button" variant="secondary" className="w-full" onClick={() => setOpen(false)}>
               Cancel
@@ -1399,7 +1399,7 @@ function LoanPanel() {
           </div>
         ) : (
           <Button type="button" variant="secondary" className="w-full" onClick={() => setOpen(true)}>
-            Apply for loan
+            {t("loan.apply")}
           </Button>
         )
       ) : null}

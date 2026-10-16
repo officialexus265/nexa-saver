@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useT } from "@/lib/i18n/client";
 import { Link, Navigate, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AuthFrame } from "@/components/auth-frame";
 import { PasswordField } from "@/components/password-field";
@@ -52,6 +53,7 @@ const empty: FormState = {
 };
 
 function SignupPage() {
+  const { t } = useT();
   const { user, isPending } = useCurrentUserState();
   const navigate = useNavigate();
   const [form, setForm] = useState<FormState>(() => {
@@ -152,7 +154,7 @@ function SignupPage() {
         return;
       }
       if (check.emailTaken && !authed) {
-        setError("That email already has an account. Sign in instead.");
+        setError("{t("auth.emailTaken")}");
         return;
       }
     }
@@ -234,7 +236,7 @@ function SignupPage() {
         <div key={step} className="step-enter space-y-4">
           {step === 0 ? (
             <>
-              <h1 className="font-display text-2xl font-semibold">Create your vault</h1>
+              <h1 className="font-display text-2xl font-semibold">{t("auth.createVaultTitle")}</h1>
               <Field label="First name" id="fn">
                 <Input id="fn" value={form.firstName} onChange={(e) => patch("firstName", e.target.value)} required />
               </Field>
@@ -302,7 +304,7 @@ function SignupPage() {
               {(!authed || !form.password) && (
                 <PasswordField
                   id="pw"
-                  label="Password"
+                  label={t("auth.password")}
                   value={form.password}
                   onChange={(v) => patch("password", v)}
                   autoComplete="new-password"
@@ -390,7 +392,7 @@ function SignupPage() {
             </Button>
           ) : (
             <Button type="submit" className="flex-1" loading={busy} disabled={busy}>
-              {busy ? "Creating vault…" : "Create account"}
+              {busy ? t("auth.creatingVault") : t("auth.createAccount")}
             </Button>
           )}
         </div>

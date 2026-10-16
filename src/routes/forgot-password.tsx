@@ -4,6 +4,7 @@ import { AuthFrame } from "@/components/auth-frame";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useT } from "@/lib/i18n/client";
 import { errMessage } from "@/lib/nexa/errors";
 import { requestPasswordReset, type PasswordResetAccountChoice } from "@/lib/nexa/fns";
 
@@ -12,6 +13,7 @@ export const Route = createFileRoute("/forgot-password")({
 });
 
 function ForgotPasswordPage() {
+  const { t } = useT();
   const [identifier, setIdentifier] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +58,7 @@ function ForgotPasswordPage() {
 
   return (
     <AuthFrame>
-      <h1 className="font-display text-2xl font-semibold">Forgot password</h1>
+      <h1 className="font-display text-2xl font-semibold">{t("auth.forgotTitle")}</h1>
       <p className="mt-2 text-sm text-muted">
         Enter the <strong className="font-medium text-fg">email</strong> or{" "}
         <strong className="font-medium text-fg">Malawi mobile number</strong> on your account. We match it
@@ -82,7 +84,7 @@ function ForgotPasswordPage() {
         {error ? <p className="text-sm text-danger">{error}</p> : null}
         {message && !accounts?.length ? <p className="text-sm text-primary">{message}</p> : null}
         <Button type="submit" className="w-full" loading={busy} disabled={busy || identifier.trim().length < 3}>
-          {busy ? "Checking…" : "Continue"}
+          {busy ? t("common.loading") : t("common.continue")}
         </Button>
       </form>
 
@@ -105,7 +107,7 @@ function ForgotPasswordPage() {
                     {a.maskedEmail} · {a.maskedPhone}
                   </span>
                   <span className="mt-2 text-xs font-medium text-primary">
-                    {picking === a.userId ? "Sending link…" : "Send reset link to this account"}
+                    {picking === a.userId ? t("auth.sending") : t("auth.sendReset")}
                   </span>
                 </button>
               </li>
@@ -119,7 +121,7 @@ function ForgotPasswordPage() {
       </p>
       <p className="mt-6 text-center text-sm text-muted">
         <Link to="/" className="text-primary">
-          Back to sign in
+          {t("auth.backToSignIn")}
         </Link>
       </p>
     </AuthFrame>
