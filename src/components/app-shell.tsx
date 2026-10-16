@@ -1,14 +1,47 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
+import { useCallback, useState } from "react";
 import { LayoutDashboard, Shield, UserRound, LogOut } from "lucide-react";
 import { BrandLockup } from "@/components/brand";
 import { ShareAppButton } from "@/components/share-app-button";
 import { SiteFooter } from "@/components/site-footer";
+import { PinGate } from "@/components/pin-gate";
 import { signOut } from "@/lib/auth/client";
 import type { PublicProfile } from "@/lib/nexa/types";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { useT } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
+
+const ADMIN_PIN_KEY = "nexa-admin-pin-ok";
+const ADMIN_PIN_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+export function isAdminPinFresh(): boolean {
+  try {
+    const raw = sessionStorage.getItem(ADMIN_PIN_KEY);
+    if (!raw) return false;
+    const ts = Number(raw);
+    if (!Number.isFinite(ts)) return false;
+    return Date.now() - ts < ADMIN_PIN_TTL_MS;
+  } catch {
+    return false;
+  }
+}
+
+export function markAdminPinOk(): void {
+  try {
+    sessionStorage.setItem(ADMIN_PIN_KEY, String(Date.now()));
+  } catch {
+    /* private mode */
+  }
+}
+
+export function clearAdminPin(): void {
+  try {
+    sessionStorage.removeItem(ADMIN_PIN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 export function AppShell({
   profile,
@@ -18,8 +51,18 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
   const isAdmin = profile.role === "admin";
   const { t } = useT();
+  const [adminPinOpen, setAdminPinOpen] = useState(false);
+
+  const goAdmin = useCallback(() => {
+    if (isAdminPinFresh()) {
+      void navigate({ to: "/admin" });
+      return;
+    }
+    setAdminPinOpen(true);
+  }, [navigate]);
 
   return (
     <div className="nexa-shell min-h-dvh pb-24 md:pb-8">
@@ -28,7 +71,6 @@ export function AppShell({
         <div className="flex items-center gap-1.5 sm:gap-2">
           <LanguageSwitcher />
           <ThemeToggle className="h-9 px-2.5" />
-          {/* Desktop: share in top bar */}
           <div className="hidden md:block">
             <ShareAppButton variant="nav" label={t("nav.share")} />
           </div>
@@ -40,13 +82,25 @@ export function AppShell({
               {t("nav.profile")}
             </NavLink>
             {isAdmin ? (
-              <NavLink to="/admin" current={pathname}>
+              <button
+                type="button"
+                onClick={goAdmin}
+                className={cn(
+                  "rounded-md px-3 py-2 text-sm",
+                  pathname === "/admin" || pathname.startsWith("/admin/")
+                    ? "bg-surface-2 text-fg"
+                    : "text-muted hover:text-fg",
+                )}
+              >
                 {t("nav.admin")}
-              </NavLink>
+              </button>
             ) : null}
             <button
               type="button"
-              onClick={() => signOut("/")}
+              onClick={() => {
+                clearAdminPin();
+                void signOut("/");
+              }}
               className="ml-2 inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm text-muted hover:text-fg"
             >
               <LogOut className="size-4" />
@@ -70,17 +124,51 @@ export function AppShell({
         <TabLink to="/profile" current={pathname} icon={<UserRound className="size-5" />} label={t("nav.profile")} />
         <ShareAppButton variant="tab" label={t("nav.share")} />
         {isAdmin ? (
-          <TabLink to="/admin" current={pathname} icon={<Shield className="size-5" />} label={t("nav.admin")} />
+          <button
+            type="button"
+            onClick={goAdmin}
+            className={cn(
+              "grid place-items-center gap-1 py-2 text-[11px]",
+              pathname === "/admin" || pathname.startsWith("/admin/") ? "text-primary" : "text-muted",
+            )}
+          >
+            <Shield className="size-5" />
+            {t("nav.admin")}
+          </button>
         ) : null}
         <button
           type="button"
-          onClick={() => signOut("/")}
+          onClick={() => {
+            clearAdminPin();
+            void signOut("/");
+          }}
           className="grid place-items-center gap-1 py-2 text-[11px] text-muted"
         >
           <LogOut className="size-5" />
           {t("nav.signOut")}
         </button>
       </nav>
+
+      {adminPinOpen ? (
+        <div className="fixed inset-0 z-50">
+          <PinGate
+            title={t("admin.pinTitle") || "Admin access"}
+            subtitle={t("admin.pinSubtitle") || "Enter your PIN to open the admin console."}
+            onUnlocked={() => {
+              markAdminPinOk();
+              setAdminPinOpen(false);
+              void navigate({ to: "/admin" });
+            }}
+          />
+          <button
+            type="button"
+            className="absolute right-4 top-4 z-[60] rounded-md bg-surface px-3 py-1.5 text-sm text-muted shadow"
+            onClick={() => setAdminPinOpen(false)}
+          >
+            {t("common.cancel") || "Cancel"}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

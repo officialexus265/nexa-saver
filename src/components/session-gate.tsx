@@ -25,6 +25,7 @@ import {
   recordPageVisit,
 } from "@/lib/nexa/fns";
 import { I18nProvider } from "@/lib/i18n/client";
+import { isAdminPinFresh, markAdminPinOk } from "@/components/app-shell";
 import type { MeResponse, PublicProfile } from "@/lib/nexa/types";
 
 export function SessionGate({
@@ -173,6 +174,21 @@ export function SessionGate({
   if (!me) return <Navigate to="/" />;
   if (me.needsProfile) return <Navigate to="/signup" />;
   if (admin && me.profile.role !== "admin") return <Navigate to="/dashboard" />;
+  // Admin console requires a fresh PIN unlock (Home stays open without this).
+  if (admin && me.profile.role === "admin" && !isAdminPinFresh()) {
+    return (
+      <I18nProvider>
+        <PinGate
+          title={t("admin.pinTitle") || "Admin access"}
+          subtitle={t("admin.pinSubtitle") || "Enter your PIN to open the admin console."}
+          onUnlocked={() => {
+            markAdminPinOk();
+            // stay on current admin URL
+          }}
+        />
+      </I18nProvider>
+    );
+  }
   if (me.profile.adminLocked) {
     return (
       <I18nProvider><AppShell profile={me.profile}>
