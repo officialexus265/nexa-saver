@@ -298,6 +298,9 @@ export const EN_CATALOG = {
   "signup.referral": "Referral code (optional)",
   "signup.referralPlaceholder": "If someone invited you",
   "signup.withdrawPin": "Withdraw PIN (4 digits)",
+  "signup.referralOptional": "Referral code (optional)",
+  "signup.securityQuestion": "Security question",
+  "signup.securityAnswer": "Answer",
 } as const;
 
 export type MessageKey = keyof typeof EN_CATALOG;

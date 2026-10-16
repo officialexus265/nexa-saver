@@ -24,7 +24,7 @@ function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [dest, setDest] = useState<"dashboard" | "signup" | "admin" | null>(null);
+  const [dest, setDest] = useState<"dashboard" | "signup" | null>(null);
 
   useEffect(() => {
     void bootstrapAdmin().catch(() => undefined);
@@ -37,7 +37,6 @@ function LoginPage() {
       .then((me) => {
         if (cancelled) return;
         if (me.needsProfile) setDest("signup");
-        else if (me.profile.role === "admin") setDest("admin");
         else setDest("dashboard");
       })
       .catch(() => {
@@ -49,7 +48,6 @@ function LoginPage() {
   }, [isPending, user]);
 
   if (!isPending && dest === "dashboard") return <Navigate to="/dashboard" />;
-  if (!isPending && dest === "admin") return <Navigate to="/admin" />;
   if (!isPending && dest === "signup") return <Navigate to="/signup" />;
 
   async function onSubmit(e: React.FormEvent) {
@@ -62,7 +60,6 @@ function LoginPage() {
       if (result.error) throw new Error(result.error.message ?? t("auth.couldNotSignIn"));
       const me = await getMe();
       if (me.needsProfile) navigate({ to: "/signup" });
-      else if (me.profile.role === "admin") navigate({ to: "/admin" });
       else navigate({ to: "/dashboard" });
     } catch (err) {
       setError(errMessage(err, t("auth.invalidCredentials")));
@@ -105,7 +102,7 @@ function LoginPage() {
             required
           />
         </div>
-        <PasswordField id="password" label="Password" value={password} onChange={setPassword} />
+        <PasswordField id="password" label={t("auth.password")} value={password} onChange={setPassword} />
         <p className="text-right text-sm">
           <Link to="/forgot-password" className="text-muted hover:text-primary">
             {t("auth.forgotPassword")}
@@ -124,15 +121,15 @@ function LoginPage() {
       </form>
       <p className="mt-6 text-center text-xs text-faint">
         <Link to="/terms" className="hover:text-muted">
-          Terms of use
+          {t("legal.terms")}
         </Link>
         {" · "}
         <Link to="/conditions" className="hover:text-muted">
-          Terms and conditions
+          {t("legal.conditions")}
         </Link>
         {" · "}
         <Link to="/privacy" className="hover:text-muted">
-          Privacy
+          {t("legal.privacy")}
         </Link>
       </p>
     </AuthFrame>

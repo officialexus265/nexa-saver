@@ -154,7 +154,7 @@ function SignupPage() {
         return;
       }
       if (check.emailTaken && !authed) {
-        setError("{t("auth.emailTaken")}");
+        setError(t("auth.emailTaken"));
         return;
       }
     }
@@ -287,7 +287,7 @@ function SignupPage() {
                 <Input id="un" value={form.username} onChange={(e) => patch("username", e.target.value)} required />
                 <p className="text-xs text-muted">Letters, numbers, underscores, and emojis are allowed (no spaces).</p>
               </Field>
-              <Field label="Referral code (optional)" id="refcode">
+              <Field label={t("signup.referralOptional")} id="refcode">
                 <Input
                   id="refcode"
                   value={form.referralCode}
@@ -316,7 +316,7 @@ function SignupPage() {
                   <PinPad value={form.pin} onChange={(v) => patch("pin", v)} />
                 </div>
               </div>
-              <Field label="Security question" id="sq">
+              <Field label={t("signup.securityQuestion")} id="sq">
                 <select
                   id="sq"
                   className="h-11 w-full rounded-md border border-border bg-surface px-3 text-sm"
@@ -330,7 +330,7 @@ function SignupPage() {
                   ))}
                 </select>
               </Field>
-              <Field label="Answer" id="sa">
+              <Field label={t("signup.securityAnswer")} id="sa">
                 <Input id="sa" value={form.securityAnswer} onChange={(e) => patch("securityAnswer", e.target.value)} required />
               </Field>
             </>
@@ -399,7 +399,7 @@ function SignupPage() {
         <p className="text-center text-sm text-muted">
           Already have an account?{" "}
           <Link to="/" className="text-primary">
-            Sign in
+            {t("auth.signIn")}
           </Link>
         </p>
       </form>

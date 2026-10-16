@@ -459,7 +459,6 @@ function WithdrawHoldCountdown({ until }: { until: string | null }) {
 }
 
 function ActivityDetailModal({
-  const { t } = useT();
   tx,
   onClose,
   onReversalRequested,
@@ -468,6 +467,7 @@ function ActivityDetailModal({
   onClose: () => void;
   onReversalRequested?: () => void;
 }) {
+  const { t } = useT();
   // All hooks must run every render (React rules). Never put hooks after an early return.
   const [copied, setCopied] = useState(false);
   const [revBusy, setRevBusy] = useState(false);
@@ -954,8 +954,8 @@ function DepositModal({
         <div className="space-y-4">
           <p className="text-sm text-muted">
             {demo
-              ? "{t("fee.demoMode")}"
-              : "{t("fee.approvePhone")}"}
+              ? t("fee.demoMode")
+              : t("fee.approvePhone")}
           </p>
           {error ? <p className="text-sm text-danger">{error}</p> : null}
           <Button className="w-full" loading={busy} disabled={busy} onClick={() => void approve()}>
@@ -970,8 +970,7 @@ function DepositModal({
 
 
 function SendModal({
-  const { t } = useT();
-  open,
+    open,
   isAdmin = false,
   onClose,
   onSuccess,
@@ -981,6 +980,7 @@ function SendModal({
   onClose: () => void;
   onSuccess: (title: string, body: string) => void;
 }) {
+  const { t } = useT();
   const [amount, setAmount] = useState("500");
   const [phone, setPhone] = useState("");
   const [recipient, setRecipient] = useState<{
@@ -1891,8 +1891,7 @@ function WithdrawLockPanel() {
 
 
 function WithdrawModal({
-  const { t } = useT();
-  open,
+    open,
   phone,
   phoneVerified,
   hasBank,
@@ -1922,6 +1921,7 @@ function WithdrawModal({
   onNeedPin: () => void;
   onSuccess: (title: string, body: string) => void;
 }) {
+  const { t } = useT();
   const [method, setMethod] = useState<"momo" | "bank">("momo");
   const [source, setSource] = useState<"main" | "received">("main");
   const [amount, setAmount] = useState("");

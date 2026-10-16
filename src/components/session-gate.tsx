@@ -201,7 +201,7 @@ export function SessionGate({
           </p>
           <Button
             className="w-full"
-            onClick={() => void clientSignOut().then(() => (window.location.href = "/"))}
+            onClick={() => { try { sessionStorage.removeItem("nexa-admin-pin-ok"); } catch {} setLocked(false); void clientSignOut().then(() => { window.location.href = "/"; }); }}
           >
             Sign out
           </Button>
@@ -327,7 +327,7 @@ export function SessionGate({
               type="button"
               variant="secondary"
               className="w-full"
-              onClick={() => void clientSignOut().then(() => (window.location.href = "/"))}
+              onClick={() => { try { sessionStorage.removeItem("nexa-admin-pin-ok"); } catch {} setLocked(false); void clientSignOut().then(() => { window.location.href = "/"; }); }}
             >
               Sign out
             </Button>
@@ -426,7 +426,7 @@ export function SessionGate({
               type="button"
               variant="secondary"
               className="w-full"
-              onClick={() => void clientSignOut().then(() => (window.location.href = "/"))}
+              onClick={() => { try { sessionStorage.removeItem("nexa-admin-pin-ok"); } catch {} setLocked(false); void clientSignOut().then(() => { window.location.href = "/"; }); }}
             >
               Sign out
             </Button>
@@ -462,7 +462,7 @@ export function SessionGate({
           </form>
         </FocusTrap>
       ) : null}
-      {locked === true && !profile.mustChangePassword ? (
+      {user && locked === true && !profile.mustChangePassword ? (
         <PinGate
           subtitle={
             profile.lockMode === "instant"

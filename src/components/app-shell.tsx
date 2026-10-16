@@ -99,7 +99,7 @@ export function AppShell({
               type="button"
               onClick={() => {
                 clearAdminPin();
-                void signOut("/");
+                void signOut("/").then(() => { window.location.href = "/"; });
               }}
               className="ml-2 inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm text-muted hover:text-fg"
             >
@@ -140,7 +140,7 @@ export function AppShell({
           type="button"
           onClick={() => {
             clearAdminPin();
-            void signOut("/");
+            void signOut("/").then(() => { window.location.href = "/"; });
           }}
           className="grid place-items-center gap-1 py-2 text-[11px] text-muted"
         >

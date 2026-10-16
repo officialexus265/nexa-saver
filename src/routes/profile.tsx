@@ -108,7 +108,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
     try {
       await changePasswordFn({ data: { currentPassword: pw.current, newPassword: pw.next } });
       setPw({ current: "", next: "" });
-      setMessage("{t("profile.passwordUpdated")}");
+      setMessage(t("profile.passwordUpdated"));
       await signOut("/");
       return;
     } catch (err) {
@@ -600,7 +600,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
         title={t("profile.vaultLock")}
         summary={
           profile.lockMode === "instant"
-            ? "{t("profile.lockWhenLeave")}"
+            ? t("profile.lockWhenLeave")
             : profile.lockMode === "off"
               ? "Do not lock"
               : `Idle · ${profile.lockIdleMinutes ?? 5} min`

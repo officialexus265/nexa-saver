@@ -106,7 +106,7 @@ function DepositReturnPage() {
     <div className="nexa-shell grid min-h-dvh place-items-center px-4 py-8">
       <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 text-center shadow-lg">
         <h1 className="font-display text-2xl font-semibold">
-          {state === "ok" ? "{t("dash.paymentReceived")}" : state === "err" ? "Almost there" : "Checking payment"}
+          {state === "ok" ? t("dash.paymentReceived") : state === "err" ? "Almost there" : "Checking payment"}
         </h1>
 
         {state === "pending" ? <LoadingStatus label={body} /> : null}
