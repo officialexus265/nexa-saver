@@ -44,7 +44,8 @@ function ProfilePage() {
   return <SessionGate>{(ctx) => <Settings {...ctx} />}</SessionGate>;
 }
 
-function Settings({ profile, emailVerified }: { profile: { firstName: string; lastName: string; email: string; phone: string; username: string; loginIdentifierPref: LoginPref; role: string; phoneVerified?: boolean; lockMode?: LockMode; lockIdleMinutes?: number; hasBankDetails?: boolean; bankName?: string | null; bankAccountNumberMasked?: string | null; bankAccountName?: string | null; bankHoldUntil?: string | null }; emailVerified?: boolean }) {
+function Settings({
+  const { t } = useT(); profile, emailVerified }: { profile: { firstName: string; lastName: string; email: string; phone: string; username: string; loginIdentifierPref: LoginPref; role: string; phoneVerified?: boolean; lockMode?: LockMode; lockIdleMinutes?: number; hasBankDetails?: boolean; bankName?: string | null; bankAccountNumberMasked?: string | null; bankAccountName?: string | null; bankHoldUntil?: string | null }; emailVerified?: boolean }) {
   const [pref, setPref] = useState<LoginPref>(profile.loginIdentifierPref);
   const [pw, setPw] = useState({ current: "", next: "" });
   const [pins, setPins] = useState({ current: "", next: "", password: "" });
@@ -758,6 +759,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
 }
 
 function AdminContactForm({
+  const { t } = useT();
   currentEmail,
   currentPhone,
   onDone,
@@ -816,6 +818,7 @@ function AdminContactForm({
 }
 
 function SecurityQuestionForm({
+  const { t } = useT();
   onDone,
   onError,
 }: {
@@ -927,6 +930,7 @@ function ProfileSection({
 }
 
 function DeleteAccount() {
+  const { t } = useT();
 
   const navigate = useNavigate();
   const [layer, setLayer] = useState(0);

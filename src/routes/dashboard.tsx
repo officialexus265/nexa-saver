@@ -417,7 +417,8 @@ function Vault({
 
 
 
-function WithdrawHoldCountdown({ until }: { until: string | null }) {
+function WithdrawHoldCountdown({
+  const { t } = useT(); until }: { until: string | null }) {
   const [label, setLabel] = useState<string | null>(null);
 
   useEffect(() => {
@@ -626,6 +627,7 @@ function ActivityDetailModal({
 }
 
 function EmailVerifyBanner() {
+  const { t } = useT();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -670,7 +672,8 @@ function EmailVerifyBanner() {
   );
 }
 
-function CheckBalanceModal({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
+function CheckBalanceModal({
+  const { t } = useT(); open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
