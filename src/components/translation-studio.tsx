@@ -173,28 +173,37 @@ export function TranslationStudio() {
         </div>
         {err ? <p className="text-sm text-danger">{err}</p> : null}
         {msg ? <p className="text-sm text-primary">{msg}</p> : null}
-        <ul className="divide-y divide-border rounded-xl border border-border">
+        <ul className="overflow-hidden rounded-xl border border-border">
           {langs
             .filter((l) => l.code !== "en")
-            .map((l) => (
-              <li key={l.code}>
+            .map((l, i, arr) => (
+              <li key={l.code} className={i > 0 ? "border-t border-border" : undefined}>
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => void startLanguage(l.code)}
-                  className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-surface-2"
+                  className="group flex w-full items-center justify-between px-4 py-3 text-left transition-colors duration-150 hover:bg-primary/10 active:bg-primary/15 disabled:opacity-60"
                 >
                   <span>
-                    <span className="font-medium">{l.name}</span>
+                    <span className="font-medium text-fg transition-colors group-hover:text-primary">
+                      {l.name}
+                    </span>
                     <span className="ml-2 text-xs text-muted">{l.code}</span>
                   </span>
-                  <span className="text-xs text-muted">{l.enabled ? "Live" : "Draft"} →</span>
+                  <span className="text-xs text-muted transition-colors group-hover:text-primary">
+                    {l.enabled ? "Live" : "Draft"} →
+                  </span>
                 </button>
               </li>
             ))}
         </ul>
         {!showCreate ? (
-          <Button type="button" variant="secondary" className="w-full" onClick={() => setShowCreate(true)}>
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full transition-colors duration-150 hover:border-primary/40 hover:bg-primary/10 hover:text-fg"
+            onClick={() => setShowCreate(true)}
+          >
             Create a new language
           </Button>
         ) : (
