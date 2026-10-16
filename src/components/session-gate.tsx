@@ -467,11 +467,13 @@ export function SessionGate({
 
 function ShellSkeleton() {
   return (
-    <div className="nexa-shell min-h-dvh p-6">
-      <div className="mx-auto max-w-3xl space-y-4">
-        <div className="h-12 w-40 rounded-md bg-surface-2 shimmer" />
-        <div className="h-48 rounded-2xl bg-surface-2 shimmer" />
-        <div className="h-32 rounded-2xl bg-surface-2 shimmer" />
+    <div className="nexa-shell grid min-h-dvh place-items-center px-6">
+      <div className="w-full max-w-sm space-y-4 text-center">
+        <p className="font-display text-lg font-semibold text-fg">Vault loading…</p>
+        <p className="text-sm text-muted">Checking your session</p>
+        <div className="h-2 overflow-hidden rounded-full bg-surface-2">
+          <div className="vault-load-bar h-full rounded-full bg-primary" />
+        </div>
       </div>
     </div>
   );

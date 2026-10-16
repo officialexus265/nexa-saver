@@ -32,6 +32,7 @@ function ChannelIcon({ channel }: { channel: HelpLine["channel"] }) {
 
 export function HelpFab() {
   const [open, setOpen] = useState(false);
+  const [hasOpened, setHasOpened] = useState(false);
   const [lines, setLines] = useState<HelpLine[]>([]);
 
   useEffect(() => {
@@ -61,7 +62,7 @@ export function HelpFab() {
             tabIndex={open ? 0 : -1}
             className={cn(
               "help-fab-chip flex items-center gap-3 rounded-full border border-border bg-surface/95 py-2 pl-4 pr-2.5 shadow-md backdrop-blur-sm",
-              open ? "help-fab-chip-in" : "help-fab-chip-out",
+              open ? "help-fab-chip-in" : hasOpened ? "help-fab-chip-out" : "help-fab-chip-idle",
             )}
             style={{ "--chip-i": open ? i : lines.length - 1 - i } as React.CSSProperties}
             onClick={(e) => {
@@ -85,7 +86,7 @@ export function HelpFab() {
         type="button"
         aria-expanded={open}
         aria-label={open ? "Close help" : "Open help"}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen((v) => { const next = !v; if (next) setHasOpened(true); return next; })}
         className={cn(
           "help-fab-main pointer-events-auto relative size-14 shrink-0 overflow-hidden rounded-full",
           "bg-white shadow-md ring-1 ring-black/5",

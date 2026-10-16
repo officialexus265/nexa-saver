@@ -313,6 +313,11 @@
   animation: help-fab-chip-in 0.28s ease-out both;
   animation-delay: calc(var(--chip-i, 0) * 40ms);
 }
+.help-fab-chip-idle {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+}
 .help-fab-chip-out {
   animation: help-fab-chip-out 0.2s ease-in both;
   animation-delay: calc(var(--chip-i, 0) * 25ms);
@@ -337,4 +342,14 @@
     opacity: 0;
     transform: translateY(6px);
   }
+}
+
+/* Vault session loading bar */
+@keyframes vault-load-bar {
+  0% { transform: translateX(-100%); width: 40%; }
+  50% { width: 60%; }
+  100% { transform: translateX(250%); width: 40%; }
+}
+.vault-load-bar {
+  animation: vault-load-bar 1.2s ease-in-out infinite;
 }
