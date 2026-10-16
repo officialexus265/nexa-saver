@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signOut } from "@/lib/auth/client";
 import { DELETE_LAYER_WAIT_MS, LOGIN_PREF_LABEL, type LoginPref } from "@/lib/nexa/constants";
+import { useT } from "@/lib/i18n/client";
 import { errMessage } from "@/lib/nexa/errors";
 import {
   changeLoginPref,
@@ -39,6 +40,7 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/profile")({ component: ProfilePage });
 
 function ProfilePage() {
+  const { t } = useT();
   return <SessionGate>{(ctx) => <Settings {...ctx} />}</SessionGate>;
 }
 
@@ -106,7 +108,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
     try {
       await changePasswordFn({ data: { currentPassword: pw.current, newPassword: pw.next } });
       setPw({ current: "", next: "" });
-      setMessage("Password updated. All devices were signed out — sign in again with the new password.");
+      setMessage("{t("profile.passwordUpdated")}");
       await signOut("/");
       return;
     } catch (err) {
@@ -143,7 +145,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
   return (
     <div className="space-y-5">
       <div>
-        <p className="text-sm text-muted">Profile</p>
+        <p className="text-sm text-muted">{t("profile.title")}</p>
         <h1 className="font-display text-3xl font-semibold">
           {profile.firstName} {profile.lastName}
         </h1>
@@ -157,7 +159,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
       {profile.role === "admin" ? (
         <ProfileSection
           id="admin-contact"
-          title="Admin email & phone"
+          title={t("profile.adminContact")}
           summary="Use a real inbox for alerts"
           openId={openSection}
           onToggle={setOpenSection}
@@ -169,7 +171,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
 
       <ProfileSection
         id="kyc"
-        title="Identity (KYC)"
+        title={t("profile.identity")}
         summary={
           kycInfo?.kyc?.status === "verified"
             ? "Verified"
@@ -188,7 +190,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
           We store your ID type and number for review — no photo upload in this step.
         </p>
         {kycInfo?.kyc?.status === "verified" ? (
-          <p className="text-sm text-primary">Your identity is verified. High withdrawals are allowed within your limits.</p>
+          <p className="text-sm text-primary">{t("profile.identityVerified")}</p>
         ) : null}
         {kycInfo?.kyc?.status === "pending" ? (
           <p className="text-sm text-muted">
@@ -254,7 +256,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
               />
             </div>
             <div className="space-y-1">
-              <Label>Full name on ID</Label>
+              <Label>{t("profile.fullNameOnId")}</Label>
               <Input
                 value={kycForm.idName}
                 onChange={(e) => setKycForm((f) => ({ ...f, idName: e.target.value }))}
@@ -272,7 +274,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
 
       <ProfileSection
         id="security-q"
-        title="Security question"
+        title={t("profile.securityQuestion")}
         summary="Used for account recovery"
         openId={openSection}
         onToggle={setOpenSection}
@@ -282,7 +284,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
 
       <ProfileSection
         id="passkeys"
-        title="Security key / passkey"
+        title={t("profile.passkey")}
         summary={passkeys.length ? `${passkeys.length} registered` : "Not enabled"}
         openId={openSection}
         onToggle={setOpenSection}
@@ -292,7 +294,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
           (confirm with your withdraw PIN). You can also use email recovery on the passkey screen if you lost the device.
         </p>
         {passkeys.length === 0 ? (
-          <p className="text-sm text-muted">No security keys on this account. Add one from the home dashboard banner if you want extra protection.</p>
+          <p className="text-sm text-muted">{t("profile.noPasskeys")}</p>
         ) : (
           <ul className="space-y-2">
             {passkeys.map((k) => (
@@ -331,7 +333,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
         )}
         {passkeys.length > 0 ? (
           <div className="mt-3 space-y-1">
-            <Label htmlFor="pk-pin">Withdraw PIN to remove a key</Label>
+            <Label htmlFor="pk-pin">{t("profile.pinToRemoveKey")}</Label>
             <Input
               id="pk-pin"
               type="password"
@@ -347,12 +349,12 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
 
       <ProfileSection
         id="signin"
-        title="Sign-in identifier"
+        title={t("profile.signInId")}
         summary={LOGIN_PREF_LABEL[pref]}
         openId={openSection}
         onToggle={setOpenSection}
       >
-        <p className="text-sm text-muted">Choose what you type on the login screen next time.</p>
+        <p className="text-sm text-muted">{t("profile.signInIdHint")}</p>
         <div className="grid grid-cols-3 gap-1 rounded-md bg-surface-2 p-1">
           {(Object.keys(LOGIN_PREF_LABEL) as LoginPref[]).map((key) => (
             <button
@@ -369,7 +371,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
 
       <ProfileSection
         id="password"
-        title="Change password"
+        title={t("profile.changePassword")}
         summary="Update your sign-in password"
         openId={openSection}
         onToggle={setOpenSection}
@@ -385,20 +387,20 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
 
       <ProfileSection
         id="pin"
-        title="Change withdraw PIN"
+        title={t("profile.changePin")}
         summary="4-digit vault PIN"
         openId={openSection}
         onToggle={setOpenSection}
       >
         <form onSubmit={savePin} className="space-y-4">
           <div>
-            <Label>Current PIN</Label>
+            <Label>{t("profile.currentPin")}</Label>
             <div className="mt-3">
               <PinPad value={pins.current} onChange={(v) => setPins((p) => ({ ...p, current: v }))} />
             </div>
           </div>
           <div>
-            <Label>New PIN</Label>
+            <Label>{t("profile.newPin")}</Label>
             <div className="mt-3">
               <PinPad value={pins.next} onChange={(v) => setPins((p) => ({ ...p, next: v }))} />
             </div>
@@ -420,7 +422,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
 
       <ProfileSection
         id="phone"
-        title="Registered withdrawal number"
+        title={t("profile.registeredPhone")}
         summary={formatPhoneDisplay(profile.phone)}
         openId={openSection}
         onToggle={setOpenSection}
@@ -455,7 +457,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
 
       <ProfileSection
         id="bank"
-        title="Bank payout details"
+        title={t("profile.bankDetails")}
         summary={profile.hasBankDetails ? `${profile.bankName ?? "Bank"} ${profile.bankAccountNumberMasked ?? ""}` : "Optional · withdrawals only"}
         openId={openSection}
         onToggle={setOpenSection}
@@ -473,7 +475,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
               : ""}
           </p>
         ) : (
-          <p className="text-sm text-muted">No bank details yet.</p>
+          <p className="text-sm text-muted">{t("profile.noBank")}</p>
         )}
         <form
           className="space-y-3"
@@ -492,7 +494,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
           }}
         >
           <div className="space-y-1.5">
-            <Label htmlFor="bank-select">Bank</Label>
+            <Label htmlFor="bank-select">{t("profile.bank")}</Label>
             <select
               id="bank-select"
               className="flex h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm"
@@ -504,7 +506,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
               }}
               required
             >
-              <option value="">Select bank…</option>
+              <option value="">{t("profile.selectBank")}</option>
               {banks.map((b) => (
                 <option key={b.uuid} value={b.uuid}>
                   {b.name}
@@ -513,7 +515,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
             </select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="bank-acc-name">Account name</Label>
+            <Label htmlFor="bank-acc-name">{t("profile.accountName")}</Label>
             <Input
               id="bank-acc-name"
               value={bankForm.accountName}
@@ -522,7 +524,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="bank-acc-num">Account number</Label>
+            <Label htmlFor="bank-acc-num">{t("profile.accountNumber")}</Label>
             <Input
               id="bank-acc-num"
               value={bankForm.accountNumber}
@@ -531,7 +533,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="bank-pin">Confirm with PIN</Label>
+            <Label htmlFor="bank-pin">{t("profile.confirmPin")}</Label>
             <Input
               id="bank-pin"
               inputMode="numeric"
@@ -543,14 +545,14 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
           </div>
           {bankMsg ? <p className="text-sm text-muted">{bankMsg}</p> : null}
           <Button type="submit" disabled={bankBusy || bankForm.pin.length !== 4 || !bankForm.bankUuid}>
-            {bankBusy ? "Saving…" : "Save bank details"}
+            {bankBusy ? t("profile.saving") : t("profile.saveBank")}
           </Button>
         </form>
       </ProfileSection>
 
       <ProfileSection
         id="email"
-        title="Email"
+        title={t("profile.email")}
         summary={emailVerified ? `${profile.email} · Verified` : `${profile.email} · Not verified`}
         openId={openSection}
         onToggle={setOpenSection}
@@ -595,10 +597,10 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
 
       <ProfileSection
         id="lock"
-        title="Vault lock"
+        title={t("profile.vaultLock")}
         summary={
           profile.lockMode === "instant"
-            ? "Locks when you leave the app"
+            ? "{t("profile.lockWhenLeave")}"
             : profile.lockMode === "off"
               ? "Do not lock"
               : `Idle · ${profile.lockIdleMinutes ?? 5} min`
@@ -624,7 +626,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
         </div>
         {lockMode === "idle" ? (
           <div className="space-y-1.5">
-            <Label htmlFor="lock-mins">Lock after (minutes)</Label>
+            <Label htmlFor="lock-mins">{t("profile.lockAfterMins")}</Label>
             <Input
               id="lock-mins"
               inputMode="numeric"
@@ -632,7 +634,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
               onChange={(e) => setLockMinutes(e.target.value.replace(/\D/g, "").slice(0, 2))}
               placeholder="5"
             />
-            <p className="text-xs text-muted">Between 1 and 60 minutes. Default is 5.</p>
+            <p className="text-xs text-muted">{t("profile.lockMinsHint")}</p>
           </div>
         ) : null}
         <Button
@@ -822,7 +824,7 @@ function AdminContactForm({
       </div>
       <PasswordField id="adm-pw" label="Confirm with password" value={password} onChange={setPassword} />
       <Button type="submit" disabled={busy || password.length < 1}>
-        {busy ? "Saving…" : "Save contact"}
+        {busy ? t("profile.saving") : t("profile.saveContact")}
       </Button>
     </form>
   );
