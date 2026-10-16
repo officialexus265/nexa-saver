@@ -252,7 +252,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
                 onChange={(e) => setKycForm((f) => ({ ...f, idNumber: e.target.value }))}
                 required
                 minLength={4}
-                placeholder=t("profile.asPrinted")
+                placeholder={t("profile.asPrinted")}
               />
             </div>
             <div className="space-y-1">
@@ -391,7 +391,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
           </div>
           <PasswordField
             id="pin-pw"
-            label=t("profile.confirmPassword")
+            label={t("profile.confirmPassword")}
             value={pins.password}
             onChange={(v) => setPins((p) => ({ ...p, password: v }))}
           />
@@ -426,7 +426,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
           </div>
           <PasswordField
             id="phone-pw"
-            label=t("profile.confirmPassword")
+            label={t("profile.confirmPassword")}
             value={phoneForm.password}
             onChange={(v) => setPhoneForm((p) => ({ ...p, password: v }))}
           />
@@ -798,7 +798,7 @@ function AdminContactForm({
         <Label htmlFor="adm-phone">{t("profile.phone")}</Label>
         <Input id="adm-phone" value={phone} onChange={(e) => setPhone(e.target.value)} required />
       </div>
-      <PasswordField id="adm-pw" label=t("profile.confirmPassword") value={password} onChange={setPassword} />
+      <PasswordField id="adm-pw" label={t("profile.confirmPassword")} value={password} onChange={setPassword} />
       <Button type="submit" disabled={busy || password.length < 1}>
         {busy ? t("profile.saving") : t("profile.saveContact")}
       </Button>

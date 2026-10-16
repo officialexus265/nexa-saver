@@ -94,14 +94,14 @@ function ResetPasswordPage() {
       <form onSubmit={(e) => void submit(e)} className="mt-6 space-y-4">
         <PasswordField
           id="new-pw"
-          label=t("auth.newPassword")
+          label={t("auth.newPassword")}
           value={password}
           onChange={setPassword}
           autoComplete="new-password"
         />
         <PasswordField
           id="confirm-pw"
-          label=t("auth.confirmNewPassword")
+          label={t("auth.confirmNewPassword")}
           value={confirm}
           onChange={setConfirm}
           autoComplete="new-password"

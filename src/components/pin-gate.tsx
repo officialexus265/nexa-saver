@@ -112,7 +112,7 @@ export function PinGate({
               <PinPad value={pin} onChange={setPin} disabled={busy} error={Boolean(error)} />
             </div>
             {error ? <p className="mt-3 text-center text-sm text-danger">{error}</p> : null}
-            {busy ? <LoadingStatus label=t("pin.unlocking") /> : null}
+            {busy ? <LoadingStatus label={t("pin.unlocking")} /> : null}
             {!busy ? (
               <button type="button" onClick={loadQuestion} className="mt-4 w-full text-center text-sm text-muted">
                 {t("pin.forgotUseQuestion")}

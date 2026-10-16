@@ -1,4 +1,3 @@
-import { useT } from "@/lib/i18n/client";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { buttonVariants } from "@/components/ui/button";
@@ -6,6 +5,7 @@ import { LoadingStatus } from "@/components/ui/spinner";
 import { errMessage } from "@/lib/nexa/errors";
 import { verifyDeposit, verifyDepositPublic } from "@/lib/nexa/fns";
 import { formatKwacha } from "@/lib/nexa/money";
+import { useT } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 function pickRef(search: Record<string, unknown>): string | undefined {
@@ -47,7 +47,9 @@ function DepositReturnPage() {
     return pickRefFromWindow();
   }, [search]);
 
-  const [state, setState] = useState<"pending" | "ok" | "err">{t("dash.confirmingPayment")}<{
+  const [state, setState] = useState<"pending" | "ok" | "err">("pending");
+  const [body, setBody] = useState("");
+  const [details, setDetails] = useState<{
     grossTambala: number;
     feeTambala: number;
     creditedTambala: number;
@@ -55,19 +57,19 @@ function DepositReturnPage() {
   } | null>(null);
 
   useEffect(() => {
+    setBody(t("dash.confirmingPayment"));
+  }, [t]);
+
+  useEffect(() => {
     if (!ref) {
       setState("err");
-      setBody(
-        t("dash.missingRef"),
-      );
+      setBody(t("dash.missingRef"));
       return;
     }
     let cancelled = false;
     setState("pending");
     setBody(t("dash.confirmingPayment"));
 
-    // Public verify first (works for external receive-link payers who are not the vault owner).
-    // Fall back to authenticated verify if the user is logged in as the owner.
     void verifyDepositPublic({ data: { reference: ref } })
       .catch(() => verifyDeposit({ data: { reference: ref } }))
       .then((res) => {
@@ -98,16 +100,20 @@ function DepositReturnPage() {
     return () => {
       cancelled = true;
     };
-  }, [ref]);
+  }, [ref, t]);
 
   return (
     <div className="nexa-shell grid min-h-dvh place-items-center px-4 py-8">
       <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 text-center shadow-lg">
         <h1 className="font-display text-2xl font-semibold">
-          {state === "ok" ? t("dash.paymentReceived") : state === "err" ? t("dash.almostThere") : t("dash.checkingPayment")}
+          {state === "ok"
+            ? t("dash.paymentReceived")
+            : state === "err"
+              ? t("dash.almostThere")
+              : t("dash.checkingPayment")}
         </h1>
 
-        {state === "pending" ? <LoadingStatus label={body} /> : null}
+        {state === "pending" ? <LoadingStatus label={body || t("dash.confirmingPayment")} /> : null}
 
         {state === "ok" && details ? (
           <div className="mt-4 space-y-4 text-left">
@@ -129,7 +135,9 @@ function DepositReturnPage() {
               </div>
               <div className="flex justify-between gap-3">
                 <dt className="text-muted">{t("dash.creditedVault")}</dt>
-                <dd className="tabular-nums font-semibold text-primary">{formatKwacha(details.creditedTambala)}</dd>
+                <dd className="tabular-nums font-semibold text-primary">
+                  {formatKwacha(details.creditedTambala)}
+                </dd>
               </div>
               <div className="space-y-1 border-t border-border pt-2">
                 <dt className="text-muted">{t("dash.reference")}</dt>
@@ -140,9 +148,7 @@ function DepositReturnPage() {
                 <dd className="text-xs">{new Date().toLocaleString()}</dd>
               </div>
             </dl>
-            <p className="text-center text-xs text-muted">
-              {t("help.keepScreenshot")}
-            </p>
+            <p className="text-center text-xs text-muted">{t("help.keepScreenshot")}</p>
           </div>
         ) : null}
 

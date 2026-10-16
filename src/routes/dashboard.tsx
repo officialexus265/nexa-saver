@@ -706,7 +706,7 @@ function CheckBalanceModal({ open, onClose, onDone }: { open: boolean; onClose: 
         />
       </div>
       {error ? <p className="mt-3 text-center text-sm text-danger">{error}</p> : null}
-{busy ? <LoadingStatus label=t("dash.checkingBalance") /> : null}
+{busy ? <LoadingStatus label={t("dash.checkingBalance")} /> : null}
     </Modal>
   );
 }
