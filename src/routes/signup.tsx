@@ -237,16 +237,16 @@ function SignupPage() {
           {step === 0 ? (
             <>
               <h1 className="font-display text-2xl font-semibold">{t("auth.createVaultTitle")}</h1>
-              <Field label="First name" id="fn">
+              <Field label={t("signup.firstName")} id="fn">
                 <Input id="fn" value={form.firstName} onChange={(e) => patch("firstName", e.target.value)} required />
               </Field>
-              <Field label="Last name" id="ln">
+              <Field label={t("signup.lastName")} id="ln">
                 <Input id="ln" value={form.lastName} onChange={(e) => patch("lastName", e.target.value)} required />
               </Field>
-              <Field label="Date of birth" id="dob">
+              <Field label={t("signup.dob")} id="dob">
                 <Input id="dob" type="date" value={form.dateOfBirth} onChange={(e) => patch("dateOfBirth", e.target.value)} required />
               </Field>
-              <Field label="Gender" id="gender">
+              <Field label={t("signup.gender")} id="gender">
                 <select
                   id="gender"
                   className="flex h-11 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -269,7 +269,7 @@ function SignupPage() {
           {step === 1 ? (
             <>
               <h1 className="font-display text-2xl font-semibold">How we reach you</h1>
-              <Field label="Email address" id="em">
+              <Field label={t("signup.email")} id="em">
                 <Input
                   id="em"
                   type="email"
@@ -279,11 +279,11 @@ function SignupPage() {
                   disabled={authed && Boolean(form.email)}
                 />
               </Field>
-              <Field label="Phone number" id="ph">
+              <Field label={t("signup.phone")} id="ph">
                 <Input id="ph" inputMode="tel" value={form.phone} onChange={(e) => patch("phone", e.target.value)} placeholder="0881 234 567" required />
               </Field>
               <p className="text-xs text-muted">Withdrawals only go to this number. Deposits can use any Malawi mobile number.</p>
-              <Field label="Username" id="un">
+              <Field label={t("signup.username")} id="un">
                 <Input id="un" value={form.username} onChange={(e) => patch("username", e.target.value)} required />
                 <p className="text-xs text-muted">Letters, numbers, underscores, and emojis are allowed (no spaces).</p>
               </Field>
@@ -292,7 +292,7 @@ function SignupPage() {
                   id="refcode"
                   value={form.referralCode}
                   onChange={(e) => patch("referralCode", e.target.value.toUpperCase())}
-                  placeholder="If someone invited you"
+                  placeholder={t("signup.referralPlaceholder")}
                 />
                 <p className="text-xs text-muted">Filled automatically when you open an invite link.</p>
               </Field>
@@ -311,7 +311,7 @@ function SignupPage() {
                 />
               )}
               <div>
-                <Label>Withdraw PIN (4 digits)</Label>
+                <Label>{t("signup.withdrawPin")}</Label>
                 <div className="mt-3">
                   <PinPad value={form.pin} onChange={(v) => patch("pin", v)} />
                 </div>

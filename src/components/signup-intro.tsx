@@ -1,3 +1,4 @@
+import { useT } from "@/lib/i18n/client";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ type Phase = "ask" | "video" | "ready";
  * Video id comes from admin settings. If none is set, "No" still proceeds to signup.
  */
 export function SignupIntroGate({
+  const { t } = useT();
   onProceed,
   forceDone,
 }: {
@@ -91,10 +93,10 @@ export function SignupIntroGate({
         {phase === "ask" ? (
           <div className="space-y-4 p-5 sm:p-6">
             <h2 id="signup-intro-title" className="font-display text-xl font-semibold text-fg">
-              Before you open a vault
+              {t("signup.introTitle")}
             </h2>
             <p className="text-sm text-muted">
-              Are you already familiar with how NEXA-SAVER works (deposits, fees, withdrawals, and locks)?
+              {t("signup.introBody")}
             </p>
             <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
               <Button
@@ -111,15 +113,15 @@ export function SignupIntroGate({
                   setVideoEnded(false);
                 }}
               >
-                No — show me how it works
+                {t("signup.introNo")}
               </Button>
               <Button type="button" className="w-full sm:w-auto" onClick={() => markDoneAndProceed()}>
-                Yes — go to sign up
+                {t("signup.introYes")}
               </Button>
             </div>
             <p className="text-center text-xs text-faint">
               <Link to="/" className="text-primary underline-offset-2 hover:underline">
-                Cancel and go home
+                {t("signup.introCancel")}
               </Link>
             </p>
           </div>
@@ -128,9 +130,9 @@ export function SignupIntroGate({
         {phase === "video" ? (
           <div className="space-y-3 p-4 sm:p-5">
             <h2 id="signup-intro-title" className="font-display text-lg font-semibold text-fg">
-              How NEXA-SAVER works
+              {t("signup.videoTitle")}
             </h2>
-            <p className="text-sm text-muted">Watch the short guide. You can skip anytime.</p>
+            <p className="text-sm text-muted">{t("signup.videoHint")}</p>
             <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black">
               {videoId ? (
                 <iframe
@@ -150,10 +152,10 @@ export function SignupIntroGate({
             <div className={cn("flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-between")}>
               {!videoEnded ? (
                 <Button type="button" variant="secondary" className="w-full sm:w-auto" onClick={() => setVideoEnded(true)}>
-                  Skip video
+                  {t("signup.skipVideo")}
                 </Button>
               ) : (
-                <span className="self-center text-xs text-muted">Ready when you are.</span>
+                <span className="self-center text-xs text-muted">{t("signup.ready")}</span>
               )}
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Link
@@ -164,7 +166,7 @@ export function SignupIntroGate({
                 </Link>
                 {(videoEnded || !videoId) && (
                   <Button type="button" className="w-full sm:w-auto" onClick={() => markDoneAndProceed()}>
-                    Proceed to sign up
+                    {t("signup.proceed")}
                   </Button>
                 )}
               </div>
