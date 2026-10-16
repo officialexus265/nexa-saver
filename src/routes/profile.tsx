@@ -309,8 +309,17 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
                     setPasskeyBusy(true);
                     setError(null);
                     void userDeletePasskey({ data: { id: k.id, pin: passkeyPin } })
-                      .then((r) => {
-                        setPasskeys((prev) => prev.filter((x) =>{t("profile.keyRemoved")}</Button>
+                      .then(() => {
+                        setPasskeys((prev) => prev.filter((x) => x.id !== k.id));
+                        setMessage(t("profile.keyRemoved"));
+                        setPasskeyPin("");
+                      })
+                      .catch((err) => setError(errMessage(err)))
+                      .finally(() => setPasskeyBusy(false));
+                  }}
+                >
+                  {t("common.remove")}
+                </Button>
               </li>
             ))}
           </ul>
