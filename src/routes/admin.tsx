@@ -2152,148 +2152,175 @@ function Console() {
             />
           </div>
         </div>
-        {userActionMsg ? <p className="mb-2 text-sm text-muted">{userActionMsg}</p> : null}
-        <div className="overflow-x-auto rounded-2xl border border-border">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead className="bg-surface-2 text-muted">
-              <tr>
-                <th className="px-4 py-3 font-medium">User</th>
-                <th className="px-4 py-3 font-medium">Phone</th>
-                <th className="px-4 py-3 font-medium text-right">Balance</th>
-                <th className="px-4 py-3 font-medium text-right">In</th>
-                <th className="px-4 py-3 font-medium text-right">Out</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(users.filter((u) => {
-                const q = userQuery.trim().toLowerCase();
-                if (!q) return true;
-                return (
-                  u.username.toLowerCase().includes(q) ||
-                  u.email.toLowerCase().includes(q) ||
-                  u.phone.includes(q) ||
-                  u.firstName.toLowerCase().includes(q)
-                );
-              })).map((u) => (
-                <tr key={u.userId} className="border-t border-border">
-                  <td className="px-4 py-3 align-middle">
-                    <span className="font-medium">{u.username}</span>
-                    {u.role === "admin" ? <span className="ml-2 text-xs text-primary">admin</span> : null}
-                  </td>
-                  <td className="px-4 py-3 align-middle tabular-nums text-muted whitespace-nowrap">{u.phone}</td>
-                  <td className="px-4 py-3 align-middle text-right tabular-nums whitespace-nowrap">{formatKwacha(u.balanceTambala, { compact: true })}</td>
-                  <td className="px-4 py-3 align-middle text-right tabular-nums whitespace-nowrap">
-                    {formatKwacha(u.lifetimeDepositedTambala, { compact: true })}
-                  </td>
-                  <td className="px-4 py-3 align-middle text-right tabular-nums whitespace-nowrap">
-                    {formatKwacha(u.lifetimeWithdrawnTambala, { compact: true })}
-                  </td>
-                  <td className="px-4 py-3 align-middle text-xs whitespace-nowrap">
-                    {u.adminLocked ? (
-                      <span className="text-danger">Locked</span>
-                    ) : u.role === "admin" ? (
-                      <span className="text-muted">Admin</span>
-                    ) : (
-                      <span className="text-primary">Active</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 align-middle">
+        {userActionMsg ? (
+          <p className="mb-3 rounded-xl border border-border bg-surface-2 px-3 py-2 text-sm text-muted">
+            {userActionMsg}
+          </p>
+        ) : null}
+
+        <div className="space-y-3">
+          {(users.filter((u) => {
+            const q = userQuery.trim().toLowerCase();
+            if (!q) return true;
+            return (
+              u.username.toLowerCase().includes(q) ||
+              u.email.toLowerCase().includes(q) ||
+              u.phone.includes(q) ||
+              u.firstName.toLowerCase().includes(q)
+            );
+          })).map((u) => (
+            <article
+              key={u.userId}
+              className="rounded-2xl border border-border bg-surface p-4 shadow-sm sm:p-5"
+            >
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                {/* Identity */}
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="truncate font-display text-base font-semibold text-fg">{u.username}</h3>
                     {u.role === "admin" ? (
-                      <span className="text-xs text-muted">—</span>
+                      <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-primary">
+                        admin
+                      </span>
+                    ) : u.adminLocked ? (
+                      <span className="rounded-full bg-danger/15 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-danger">
+                        locked
+                      </span>
                     ) : (
-                      <div className="flex flex-row flex-wrap items-center justify-end gap-2">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          className="h-8 whitespace-nowrap px-2.5 text-xs"
-                          onClick={() => {
-                            const reason =
-                              window.prompt(
-                                u.adminLocked
-                                  ? "Reason for unlocking (audit log):"
-                                  : "Reason for locking this account (reported / compromised):",
-                              ) || "";
-                            if (reason.trim().length < 3) return;
-                            void adminLockUser({
-                              data: { userId: u.userId, reason: reason.trim(), locked: !u.adminLocked },
-                            })
-                              .then(() => {
-                                setUserActionMsg(
-                                  u.adminLocked ? `Unlocked ${u.username}` : `Locked ${u.username}`,
-                                );
-                                return adminUsers();
-                              })
-                              .then(setUsers)
-                              .catch((err) => setUserActionMsg(errMessage(err)));
-                          }}
-                        >
-                          {u.adminLocked ? "Unlock account" : "Lock account"}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          className="h-8 whitespace-nowrap px-2.5 text-xs"
-                          onClick={() => {
-                            const locked = Boolean((u as { adminWithdrawLocked?: boolean }).adminWithdrawLocked);
-                            const reason =
-                              window.prompt(
-                                locked
-                                  ? "Reason for unlocking withdrawals (audit):"
-                                  : "Reason for withdraw-only lock (legal / report):",
-                              ) || "";
-                            if (reason.trim().length < 3) return;
-                            void adminSetWithdrawLock({
-                              data: { userId: u.userId, reason: reason.trim(), locked: !locked },
-                            })
-                              .then(() => {
-                                setUserActionMsg(
-                                  locked
-                                    ? `Withdrawals unlocked for ${u.username}`
-                                    : `Withdrawals locked for ${u.username}`,
-                                );
-                                return adminUsers();
-                              })
-                              .then(setUsers)
-                              .catch((err) => setUserActionMsg(errMessage(err)));
-                          }}
-                        >
-                          {(u as { adminWithdrawLocked?: boolean }).adminWithdrawLocked
-                            ? "Unlock withdraw"
-                            : "Lock withdraw"}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          className="h-8 whitespace-nowrap px-2.5 text-xs text-danger"
-                          onClick={() => {
-                            const reason =
-                              window.prompt(
-                                `Delete ${u.username}? This soft-deletes the account. Type a reason:`,
-                              ) || "";
-                            if (reason.trim().length < 3) return;
-                            if (!window.confirm(`Permanently soft-delete ${u.username}?`)) return;
-                            void adminDeleteUser({
-                              data: { userId: u.userId, reason: reason.trim() },
-                            })
-                              .then(() => {
-                                setUserActionMsg(`Deleted ${u.username}`);
-                                return adminUsers();
-                              })
-                              .then(setUsers)
-                              .catch((err) => setUserActionMsg(errMessage(err)));
-                          }}
-                        >
-                          Delete
-                        </Button>
-                      </div>
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-primary">
+                        active
+                      </span>
                     )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    {(u as { adminWithdrawLocked?: boolean }).adminWithdrawLocked ? (
+                      <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                        withdraw locked
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="text-sm tabular-nums text-muted">{u.phone}</p>
+                  <p className="truncate text-xs text-muted">{u.email}</p>
+                </div>
+
+                {/* Money stats */}
+                <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:w-[22rem] lg:shrink-0">
+                  <div className="rounded-xl border border-border bg-surface-2 px-3 py-2.5 text-center">
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Balance</p>
+                    <p className="mt-1 text-sm font-semibold tabular-nums text-fg">
+                      {formatKwacha(u.balanceTambala, { compact: true })}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-border bg-surface-2 px-3 py-2.5 text-center">
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-muted">In</p>
+                    <p className="mt-1 text-sm font-semibold tabular-nums text-fg">
+                      {formatKwacha(u.lifetimeDepositedTambala, { compact: true })}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-border bg-surface-2 px-3 py-2.5 text-center">
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-muted">Out</p>
+                    <p className="mt-1 text-sm font-semibold tabular-nums text-fg">
+                      {formatKwacha(u.lifetimeWithdrawnTambala, { compact: true })}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              {u.role === "admin" ? (
+                <p className="mt-3 text-xs text-muted">Platform admin — no account actions.</p>
+              ) : (
+                <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-4">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="h-9 px-3 text-xs"
+                    onClick={() => {
+                      const reason =
+                        window.prompt(
+                          u.adminLocked
+                            ? "Reason for unlocking (audit log):"
+                            : "Reason for locking this account (reported / compromised):",
+                        ) || "";
+                      if (reason.trim().length < 3) return;
+                      void adminLockUser({
+                        data: { userId: u.userId, reason: reason.trim(), locked: !u.adminLocked },
+                      })
+                        .then(() => {
+                          setUserActionMsg(
+                            u.adminLocked ? `Unlocked ${u.username}` : `Locked ${u.username}`,
+                          );
+                          return adminUsers();
+                        })
+                        .then(setUsers)
+                        .catch((err) => setUserActionMsg(errMessage(err)));
+                    }}
+                  >
+                    {u.adminLocked ? "Unlock account" : "Lock account"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="h-9 px-3 text-xs"
+                    onClick={() => {
+                      const locked = Boolean((u as { adminWithdrawLocked?: boolean }).adminWithdrawLocked);
+                      const reason =
+                        window.prompt(
+                          locked
+                            ? "Reason for unlocking withdrawals (audit):"
+                            : "Reason for withdraw-only lock (legal / report):",
+                        ) || "";
+                      if (reason.trim().length < 3) return;
+                      void adminSetWithdrawLock({
+                        data: { userId: u.userId, reason: reason.trim(), locked: !locked },
+                      })
+                        .then(() => {
+                          setUserActionMsg(
+                            locked
+                              ? `Withdrawals unlocked for ${u.username}`
+                              : `Withdrawals locked for ${u.username}`,
+                          );
+                          return adminUsers();
+                        })
+                        .then(setUsers)
+                        .catch((err) => setUserActionMsg(errMessage(err)));
+                    }}
+                  >
+                    {(u as { adminWithdrawLocked?: boolean }).adminWithdrawLocked
+                      ? "Unlock withdraw"
+                      : "Lock withdraw"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="h-9 px-3 text-xs text-danger"
+                    onClick={() => {
+                      const reason =
+                        window.prompt(
+                          `Delete ${u.username}? This soft-deletes the account. Type a reason:`,
+                        ) || "";
+                      if (reason.trim().length < 3) return;
+                      if (!window.confirm(`Permanently soft-delete ${u.username}?`)) return;
+                      void adminDeleteUser({
+                        data: { userId: u.userId, reason: reason.trim() },
+                      })
+                        .then(() => {
+                          setUserActionMsg(`Deleted ${u.username}`);
+                          return adminUsers();
+                        })
+                        .then(setUsers)
+                        .catch((err) => setUserActionMsg(errMessage(err)));
+                    }}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              )}
+            </article>
+          ))}
+          {!users.length ? (
+            <p className="rounded-2xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted">
+              No accounts yet.
+            </p>
+          ) : null}
         </div>
       </section>
 
