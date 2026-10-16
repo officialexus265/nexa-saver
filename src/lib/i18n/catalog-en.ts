@@ -164,10 +164,6 @@ export const EN_CATALOG = {
 
   "dash.receive": "Receive",
   "dash.receivePayment": "Receive payment",
-  "dash.withdraw": "Withdraw",
-  "dash.send": "Send",
-  "dash.activity": "Activity",
-  "dash.noActivity": "No movements yet. Make a deposit to open the vault.",
   "dash.loadingActivity": "Loading activity…",
   "dash.continuePaychangu": "Continue to PayChangu",
   "dash.openingPaychangu": "Opening PayChangu…",
@@ -196,7 +192,16 @@ export const EN_CATALOG = {
   "i18n.progress": "Phrase {current} of {total}",
   "i18n.translatePrompt": "Translate this phrase",
   "i18n.englishSource": "English",
-} as const;
+  "dash.createLink": "Create link",
+  "dash.shareAction": "Share",
+  "dash.depositToVerify": "Deposit to verify",
+  "dash.sent": "Sent",
+  "dash.received": "Received",
+  "dash.feeDetails": "Fee details",
+  "dash.withdrawDetails": "Withdrawal details",
+  "dash.depositDetails": "Deposit details",
+  "dash.sendDetails": "Send details",
+  "dash.receivedDetails": "Received details",} as const;
 
 export type MessageKey = keyof typeof EN_CATALOG;
 

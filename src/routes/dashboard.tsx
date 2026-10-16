@@ -181,7 +181,7 @@ function Vault({
             <span className="text-fg">{formatPhoneDisplay(profile.phone)}</span>. That proves the line is active and yours.
           </p>
           <Button className="mt-3" onClick={() => setDepositOpen(true)}>
-            Deposit to verify
+            {t("dash.depositToVerify")}
           </Button>
         </div>
       ) : null}
@@ -276,7 +276,7 @@ function Vault({
           onClick={() => setDepositOpen(true)}
         >
           <ArrowDownToLine className="size-6 shrink-0 sm:size-5" aria-hidden />
-          <span>Receive</span>
+          <span>{t("dash.receive")}</span>
         </Button>
         <Button
           variant="secondary"
@@ -284,7 +284,7 @@ function Vault({
           onClick={() => setWithdrawOpen(true)}
         >
           <ArrowUpFromLine className="size-6 shrink-0 sm:size-5" aria-hidden />
-          <span>Withdraw</span>
+          <span>{t("dash.withdraw")}</span>
         </Button>
         <Button
           variant="secondary"
@@ -292,7 +292,7 @@ function Vault({
           onClick={() => setSendOpen(true)}
         >
           <Send className="size-6 shrink-0 sm:size-5" aria-hidden />
-          <span>Send</span>
+          <span>{t("dash.send")}</span>
         </Button>
       </div>
 
@@ -304,11 +304,11 @@ function Vault({
         <LoanPanel />
         <AffiliatePanel />
 
-        <h2 className="mb-3 font-display text-lg font-semibold">Activity</h2>
+        <h2 className="mb-3 font-display text-lg font-semibold">{t("dash.activity")}</h2>
         {txs === null ? (
-          <p className="text-sm text-muted">Loading activity…</p>
+          <p className="text-sm text-muted">{t("dash.loadingActivity")}</p>
         ) : !txs.length ? (
-          <p className="text-sm text-muted">No movements yet. Make a deposit to open the vault.</p>
+          <p className="text-sm text-muted">{t("dash.noActivity")}</p>
         ) : (
           <ul className="space-y-2">
             {txs.map((tx) => (
@@ -459,6 +459,7 @@ function WithdrawHoldCountdown({ until }: { until: string | null }) {
 }
 
 function ActivityDetailModal({
+  const { t } = useT();
   tx,
   onClose,
   onReversalRequested,
@@ -484,14 +485,14 @@ function ActivityDetailModal({
   const feeTambala = tx.kind === "deposit" ? Math.max(0, tx.grossTambala - tx.creditedTambala) : 0;
   const title =
     tx.kind === "deposit"
-      ? "Deposit details"
+      ? t("dash.depositDetails")
       : tx.kind === "transfer_out"
-        ? "Send details"
+        ? t("dash.sendDetails")
         : tx.kind === "transfer_in"
-          ? "Received details"
+          ? t("dash.receivedDetails")
           : tx.kind === "fee"
-            ? "Fee details"
-            : "Withdrawal details";
+            ? t("dash.feeDetails")
+            : t("dash.withdrawDetails");
 
   async function copyRef() {
     try {
@@ -720,6 +721,7 @@ function CheckBalanceModal({ open, onClose, onDone }: { open: boolean; onClose: 
 
 
 function ReceiveLinkPanel() {
+  const { t } = useT();
   const [link, setLink] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -760,13 +762,11 @@ function ReceiveLinkPanel() {
     <Card className="mt-3 space-y-3 p-4">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h2 className="font-display text-base font-semibold">Receive payment link</h2>
-          <p className="text-xs text-muted">
-            Share a link so external people can pay into your vault via PayChangu. Reusable; every payment is a new ID.
-          </p>
+          <h2 className="font-display text-base font-semibold">{t("dash.shareReceiveLink")}</h2>
+          <p className="text-xs text-muted">{t("dash.receiveLinkHint")}</p>
         </div>
         <Button type="button" size="sm" variant="secondary" loading={busy} disabled={busy} onClick={() => void create()}>
-          {busy ? "Creating…" : "Create link"}
+          {busy ? t("common.loading") : t("dash.createLink")}
         </Button>
       </div>
       {err ? <p className="text-sm text-danger">{err}</p> : null}
@@ -776,7 +776,7 @@ function ReceiveLinkPanel() {
           <p className="break-all font-mono text-xs text-fg">{link}</p>
           <div className="flex gap-2">
             <Button type="button" className="flex-1" size="sm" onClick={() => void copy()}>
-              Copy link
+              {t("dash.copyReceiveLink")}
             </Button>
             <Button
               type="button"
@@ -791,7 +791,7 @@ function ReceiveLinkPanel() {
                 }
               }}
             >
-              Share
+              {t("dash.shareAction")}
             </Button>
           </div>
         </div>
@@ -815,6 +815,7 @@ function DepositModal({
   onClose: () => void;
   onSuccess: (title: string, body: string) => void;
 }) {
+  const { t } = useT();
   const [amount, setAmount] = useState("100");
   const [phone, setPhone] = useState(registeredPhone || "");
   const [stage, setStage] = useState<"form" | "confirm" | "pay">("form");
@@ -898,7 +899,7 @@ function DepositModal({
   }
 
   return (
-    <Modal open={open} title="Receive payment" onClose={reset}>
+    <Modal open={open} title={t("dash.receivePayment")} onClose={reset}>
       {stage === "form" ? (
         <div className="space-y-4">
           <div className="space-y-1.5">
@@ -944,7 +945,7 @@ function DepositModal({
               Back
             </Button>
             <Button className="flex-1" loading={busy} disabled={busy} onClick={() => void start()}>
-              {busy ? "Opening PayChangu…" : "Continue to PayChangu"}
+              {busy ? t("dash.openingPaychangu") : t("dash.continuePaychangu")}
             </Button>
           </div>
         </div>
@@ -969,6 +970,7 @@ function DepositModal({
 
 
 function SendModal({
+  const { t } = useT();
   open,
   isAdmin = false,
   onClose,
@@ -1092,7 +1094,7 @@ function SendModal({
   }
 
   return (
-    <Modal open={open} title="Send money" onClose={onClose}>
+    <Modal open={open} title={t("dash.send")} onClose={onClose}>
       <div className="space-y-4">
         {stage === "form" ? (
           <>
@@ -1543,7 +1545,7 @@ function AffiliatePanel() {
                 }
               }}
             >
-              Copy link
+              {t("dash.copyReceiveLink")}
             </Button>
           </div>
           <p>
@@ -1888,6 +1890,7 @@ function WithdrawLockPanel() {
 
 
 function WithdrawModal({
+  const { t } = useT();
   open,
   phone,
   phoneVerified,
@@ -2001,7 +2004,7 @@ function WithdrawModal({
     (method === "momo" && phoneVerified) || (method === "bank" && hasBank && !bankOnHold);
 
   return (
-    <Modal open={open} title="Withdraw" onClose={onClose}>
+    <Modal open={open} title={t("dash.withdraw")} onClose={onClose}>
       {onHold ? (
         <div className="space-y-4">
           <p className="text-sm text-muted">{holdMessage}</p>
