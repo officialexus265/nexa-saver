@@ -552,14 +552,14 @@ function ActivityDetailModal({
               <dd className="tabular-nums">{formatKwacha(feeTambala)}</dd>
             </div>
             <div className="flex justify-between gap-3">
-              <dt className="text-muted">Credited to vault</dt>
+              <dt className="text-muted">{t("tx.creditedToVault")}</dt>
               <dd className="tabular-nums font-medium text-primary">{formatKwacha(tx.creditedTambala)}</dd>
             </div>
           </>
         ) : tx.kind === "transfer_out" ? (
           <>
             <div className="flex justify-between gap-3">
-              <dt className="text-muted">Amount sent (recipient got)</dt>
+              <dt className="text-muted">{t("tx.amountSent")}</dt>
               <dd className="tabular-nums font-medium">{formatKwacha(tx.grossTambala)}</dd>
             </div>
             {(tx.sendFeeTambala ?? 0) > 0 ? (
@@ -569,7 +569,7 @@ function ActivityDetailModal({
               </div>
             ) : null}
             <div className="flex justify-between gap-3">
-              <dt className="text-muted">Total from your balance</dt>
+              <dt className="text-muted">{t("tx.totalFromBalance")}</dt>
               <dd className="tabular-nums font-medium">
                 {formatKwacha(tx.grossTambala + (tx.sendFeeTambala ?? 0))}
               </dd>
@@ -659,7 +659,7 @@ function EmailVerifyBanner() {
   return (
     <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
       <Link to="/profile" className="block rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <p className="font-medium text-fg">Email not verified</p>
+        <p className="font-medium text-fg">{t("common.emailNotVerified")}</p>
         <p className="mt-1 text-muted">
           Confirm your email before depositing or withdrawing. Tap here to open Profile, or resend the link below.
         </p>
@@ -903,7 +903,7 @@ function DepositModal({
       {stage === "form" ? (
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="dep-amt">Amount (kwacha)</Label>
+            <Label htmlFor="dep-amt">{t("common.amountKwacha")}</Label>
             <Input id="dep-amt" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
             <p className="text-xs text-muted">Minimum {MIN_DEPOSIT_KWACHA} kwacha</p>
           </div>
@@ -1104,7 +1104,7 @@ function SendModal({
                 : "Send the full amount to another NEXA-SAVER account. A small fixed fee is charged from your balance; the recipient gets every kwacha you type."}
             </p>
             <div className="space-y-1.5">
-              <Label>Amount (kwacha)</Label>
+              <Label>{t("common.amountKwacha")}</Label>
               <Input value={amount} inputMode="numeric" onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))} />
             </div>
             <div className="space-y-1.5">
@@ -1121,7 +1121,7 @@ function SendModal({
                     onChange={(e) => setCoverBankFlat(e.target.checked)}
                   />
                   <span>
-                    <span className="font-medium text-fg">Cover bank flat (700 MWK)</span>
+                    <span className="font-medium text-fg">{t("tx.coverBankFlat")}</span>
                     <span className="mt-1 block text-xs text-muted">
                       You also pay 700 so their received bag is {kwacha} + 700. When they withdraw the whole bag to
                       bank, 700 covers the bank flat and they can get your full {kwacha}. MoMo never needs the 700.
@@ -1191,11 +1191,11 @@ function SendModal({
             {isAdmin ? (
               <div className="rounded-xl border border-border bg-surface-2/60 p-3 text-sm space-y-1.5">
                 <div className="flex justify-between gap-2">
-                  <span className="text-muted">From main balance</span>
+                  <span className="text-muted">{t("tx.fromMainBalance")}</span>
                   <span className="tabular-nums font-semibold">{kwacha} kwacha</span>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <span className="text-muted">Recipient gets (MoMo)</span>
+                  <span className="text-muted">{t("tx.recipientGetsMomo")}</span>
                   <span className="tabular-nums font-medium text-primary">{kwacha} kwacha</span>
                 </div>
                 <p className="text-xs text-muted">
@@ -1372,7 +1372,7 @@ function LoanPanel() {
               disbursed to your MoMo.
             </p>
             <div className="space-y-1.5">
-              <Label>Amount (kwacha)</Label>
+              <Label>{t("common.amountKwacha")}</Label>
               <Input
                 inputMode="numeric"
                 value={amount}
@@ -1600,6 +1600,7 @@ function AffiliatePanel() {
 }
 
 function WithdrawLockPanel() {
+  const { t } = useT();
   const [status, setStatus] = useState<Awaited<ReturnType<typeof getWithdrawLockStatus>> | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -1707,7 +1708,7 @@ function WithdrawLockPanel() {
     <Card className="space-y-3 p-4">
       <div className="space-y-3">
         <div>
-          <h2 className="font-display text-lg font-semibold">Withdrawal lock</h2>
+          <h2 className="font-display text-lg font-semibold">{t("lock.panelTitle")}</h2>
           <p className="text-sm text-muted">
             Optional commitment: deposit anytime, no withdrawals until the date you set.
           </p>
@@ -1745,7 +1746,7 @@ function WithdrawLockPanel() {
 
       {status?.adminWithdrawLocked ? (
         <div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm">
-          <p className="font-medium text-danger">Withdrawals locked by the platform</p>
+          <p className="font-medium text-danger">{t("lock.platformLocked")}</p>
           <p className="mt-1 text-muted">
             {status.adminWithdrawLockReason || "Contact support for details. Deposits still work."}
           </p>
@@ -1861,7 +1862,7 @@ function WithdrawLockPanel() {
             </label>
           ) : null}
           <div className="space-y-1.5">
-            <Label>Confirm with PIN</Label>
+            <Label>{t("lock.confirmPin")}</Label>
             <PinPad value={pin} onChange={setPin} disabled={busy} />
           </div>
           <Button
@@ -1879,7 +1880,7 @@ function WithdrawLockPanel() {
       ) : null}
 
       {!locked && !open ? (
-        <p className="text-xs text-muted">Use the button above to choose how long withdrawals stay locked. This never opens the phone dialer.</p>
+        <p className="text-xs text-muted">{t("lock.chooseDuration")}</p>
       ) : null}
 
       {err ? <p className="text-sm text-danger">{err}</p> : null}
@@ -2081,13 +2082,13 @@ function WithdrawModal({
             </button>
           </div>
           {!allowed.momo && !allowed.bank ? (
-            <p className="text-sm text-danger">Withdrawals are paused by the platform.</p>
+            <p className="text-sm text-danger">{t("lock.paused")}</p>
           ) : null}
           {!allowed.momo ? (
-            <p className="text-xs text-muted">Mobile money withdrawals are off right now.</p>
+            <p className="text-xs text-muted">{t("lock.momoOff")}</p>
           ) : null}
           {!allowed.bank ? (
-            <p className="text-xs text-muted">Bank withdrawals are off right now.</p>
+            <p className="text-xs text-muted">{t("lock.bankOff")}</p>
           ) : null}
 
           {method === "momo" && !phoneVerified ? (
@@ -2123,7 +2124,7 @@ function WithdrawModal({
 
               {method === "bank" ? (
                 <div className="space-y-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-                  <p className="font-medium text-fg">Bank channel flat fee: 700 MWK</p>
+                  <p className="font-medium text-fg">{t("tx.bankFlatFee")}</p>
                   <p className="text-muted">
                     Charged by the <span className="text-fg">bank / PayChangu rail</span>, not NEXA-SAVER. The 700 MWK
                     is taken from the balance you withdraw. Example: request <span className="text-fg">10,000</span> →
@@ -2147,7 +2148,7 @@ function WithdrawModal({
               {method === "momo" || bankFeeAccepted ? (
                 <>
                   <div className="space-y-1.5">
-                    <Label htmlFor="w-amt">Amount (kwacha)</Label>
+                    <Label htmlFor="w-amt">{t("common.amountKwacha")}</Label>
                     <Input
                       id="w-amt"
                       inputMode="decimal"
@@ -2186,7 +2187,7 @@ function WithdrawModal({
                   {(method === "momo" || bankFinalAck) && (
                     <>
                       <div>
-                        <Label>Confirm with PIN</Label>
+                        <Label>{t("lock.confirmPin")}</Label>
                         <div className="mt-3">
                           <PinPad value={pin} onChange={setPin} disabled={busy} error={Boolean(error)} />
                         </div>
