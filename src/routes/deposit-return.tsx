@@ -47,9 +47,7 @@ function DepositReturnPage() {
     return pickRefFromWindow();
   }, [search]);
 
-  const [state, setState] = useState<"pending" | "ok" | "err">("pending");
-  const [body, setBody] = useState("Confirming your PayChangu payment…");
-  const [details, setDetails] = useState<{
+  const [state, setState] = useState<"pending" | "ok" | "err">{t("dash.confirmingPayment")}<{
     grossTambala: number;
     feeTambala: number;
     creditedTambala: number;
@@ -60,13 +58,13 @@ function DepositReturnPage() {
     if (!ref) {
       setState("err");
       setBody(
-        "Missing payment reference in the link. Open the vault and check Activity. If the deposit is still pending, contact support with the time and amount.",
+        t("dash.missingRef"),
       );
       return;
     }
     let cancelled = false;
     setState("pending");
-    setBody("Confirming your PayChangu payment…");
+    setBody(t("dash.confirmingPayment"));
 
     // Public verify first (works for external receive-link payers who are not the vault owner).
     // Fall back to authenticated verify if the user is logged in as the owner.
@@ -106,7 +104,7 @@ function DepositReturnPage() {
     <div className="nexa-shell grid min-h-dvh place-items-center px-4 py-8">
       <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 text-center shadow-lg">
         <h1 className="font-display text-2xl font-semibold">
-          {state === "ok" ? t("dash.paymentReceived") : state === "err" ? "Almost there" : "Checking payment"}
+          {state === "ok" ? t("dash.paymentReceived") : state === "err" ? t("dash.almostThere") : t("dash.checkingPayment")}
         </h1>
 
         {state === "pending" ? <LoadingStatus label={body} /> : null}
@@ -118,8 +116,8 @@ function DepositReturnPage() {
             </p>
             <dl className="space-y-2 rounded-xl border border-border bg-surface-2 p-4 text-sm">
               <div className="flex justify-between gap-3">
-                <dt className="text-muted">Status</dt>
-                <dd className="font-medium text-primary">Success</dd>
+                <dt className="text-muted">{t("dash.status")}</dt>
+                <dd className="font-medium text-primary">{t("dash.success")}</dd>
               </div>
               <div className="flex justify-between gap-3">
                 <dt className="text-muted">{t("dash.amountPaid")}</dt>
@@ -134,11 +132,11 @@ function DepositReturnPage() {
                 <dd className="tabular-nums font-semibold text-primary">{formatKwacha(details.creditedTambala)}</dd>
               </div>
               <div className="space-y-1 border-t border-border pt-2">
-                <dt className="text-muted">Reference</dt>
+                <dt className="text-muted">{t("dash.reference")}</dt>
                 <dd className="break-all font-mono text-xs">{details.reference}</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-muted">Date</dt>
+                <dt className="text-muted">{t("dash.date")}</dt>
                 <dd className="text-xs">{new Date().toLocaleString()}</dd>
               </div>
             </dl>

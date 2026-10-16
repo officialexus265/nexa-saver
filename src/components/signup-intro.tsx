@@ -1,8 +1,8 @@
-import { useT } from "@/lib/i18n/client";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { getSignupIntroVideo } from "@/lib/nexa/fns";
+import { useT } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 type Phase = "ask" | "video" | "ready";
@@ -12,13 +12,13 @@ type Phase = "ask" | "video" | "ready";
  * Video id comes from admin settings. If none is set, "No" still proceeds to signup.
  */
 export function SignupIntroGate({
-  const { t } = useT();
   onProceed,
   forceDone,
 }: {
   onProceed: () => void;
   forceDone?: boolean;
 }) {
+  const { t } = useT();
   const [phase, setPhase] = useState<Phase>(() => {
     if (forceDone) return "ready";
     if (typeof window === "undefined") return "ask";
@@ -50,26 +50,6 @@ export function SignupIntroGate({
       });
   }, []);
 
-  useEffect(() => {
-    if (phase !== "video" || !videoId) return;
-
-    function onMessage(event: MessageEvent) {
-      try {
-        const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-        if (data?.event === "onStateChange" && (data.info === 0 || data?.info?.data === 0)) {
-          setVideoEnded(true);
-        }
-        if (data?.event === "infoDelivery" && data?.info?.playerState === 0) {
-          setVideoEnded(true);
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [phase, videoId]);
-
   function markDoneAndProceed() {
     try {
       sessionStorage.setItem("nexa-signup-intro-done", "1");
@@ -80,99 +60,86 @@ export function SignupIntroGate({
     onProceed();
   }
 
+  function onYes() {
+    markDoneAndProceed();
+  }
+
+  function onNo() {
+    setPhase("video");
+  }
+
+  function onSkipVideo() {
+    markDoneAndProceed();
+  }
+
+  function onProceedFromVideo() {
+    markDoneAndProceed();
+  }
+
   if (phase === "ready") return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="signup-intro-title"
-        className="w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-surface shadow-xl"
-      >
-        {phase === "ask" ? (
-          <div className="space-y-4 p-5 sm:p-6">
-            <h2 id="signup-intro-title" className="font-display text-xl font-semibold text-fg">
-              {t("signup.introTitle")}
-            </h2>
-            <p className="text-sm text-muted">
-              {t("signup.introBody")}
-            </p>
-            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-              <Button
-                type="button"
-                variant="secondary"
-                className="w-full sm:w-auto"
-                disabled={!videoLoaded}
-                onClick={() => {
-                  if (!videoId) {
-                    markDoneAndProceed();
-                    return;
-                  }
-                  setPhase("video");
-                  setVideoEnded(false);
-                }}
-              >
-                {t("signup.introNo")}
-              </Button>
-              <Button type="button" className="w-full sm:w-auto" onClick={() => markDoneAndProceed()}>
-                {t("signup.introYes")}
-              </Button>
-            </div>
-            <p className="text-center text-xs text-faint">
-              <Link to="/" className="text-primary underline-offset-2 hover:underline">
-                {t("signup.introCancel")}
-              </Link>
-            </p>
+  if (phase === "ask") {
+    return (
+      <div className="fixed inset-0 z-50 grid place-items-center bg-bg/95 p-4 backdrop-blur-sm">
+        <div className="w-full max-w-md space-y-4 rounded-2xl border border-border bg-surface p-6 shadow-lg">
+          <div>
+            <h1 className="font-display text-xl font-semibold">{t("signup.introTitle")}</h1>
+            <p className="mt-2 text-sm text-muted">{t("signup.introBody")}</p>
           </div>
-        ) : null}
+          <div className="flex flex-col gap-2">
+            <Button type="button" className="w-full" onClick={onYes}>
+              {t("signup.introYes")}
+            </Button>
+            <Button type="button" variant="secondary" className="w-full" onClick={onNo}>
+              {t("signup.introNo")}
+            </Button>
+            <Link
+              to="/"
+              className="mt-1 text-center text-sm text-muted hover:text-fg"
+            >
+              {t("signup.introCancel")}
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-        {phase === "video" ? (
-          <div className="space-y-3 p-4 sm:p-5">
-            <h2 id="signup-intro-title" className="font-display text-lg font-semibold text-fg">
-              {t("signup.videoTitle")}
-            </h2>
-            <p className="text-sm text-muted">{t("signup.videoHint")}</p>
-            <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black">
-              {videoId ? (
-                <iframe
-                  ref={iframeRef}
-                  title="NEXA-SAVER system guide"
-                  className="absolute inset-0 h-full w-full"
-                  src={`https://www.youtube.com/embed/${encodeURIComponent(videoId)}?rel=0&modestbranding=1&playsinline=1&enablejsapi=1`}
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                />
-              ) : (
-                <div className="flex h-full items-center justify-center p-4 text-center text-sm text-muted">
-                  Explainer video is not available. You can proceed to sign up.
-                </div>
-              )}
-            </div>
-            <div className={cn("flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-between")}>
-              {!videoEnded ? (
-                <Button type="button" variant="secondary" className="w-full sm:w-auto" onClick={() => setVideoEnded(true)}>
-                  {t("signup.skipVideo")}
-                </Button>
-              ) : (
-                <span className="self-center text-xs text-muted">{t("signup.ready")}</span>
-              )}
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Link
-                  to="/"
-                  className="inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-border bg-surface-2 px-4 text-sm font-medium text-fg hover:bg-surface sm:w-auto"
-                >
-                  Cancel
-                </Link>
-                {(videoEnded || !videoId) && (
-                  <Button type="button" className="w-full sm:w-auto" onClick={() => markDoneAndProceed()}>
-                    {t("signup.proceed")}
-                  </Button>
-                )}
-              </div>
-            </div>
+  // phase === "video"
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-bg/95 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg space-y-4 rounded-2xl border border-border bg-surface p-6 shadow-lg">
+        <div>
+          <h1 className="font-display text-xl font-semibold">{t("signup.videoTitle")}</h1>
+          <p className="mt-2 text-sm text-muted">{t("signup.videoHint")}</p>
+        </div>
+        {videoLoaded && videoId ? (
+          <div className="aspect-video overflow-hidden rounded-xl border border-border bg-black">
+            <iframe
+              ref={iframeRef}
+              title="NEXA-SAVER system guide"
+              className="size-full"
+              src={`https://www.youtube.com/embed/${encodeURIComponent(videoId)}?rel=0`}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
           </div>
-        ) : null}
+        ) : videoLoaded ? (
+          <p className="text-sm text-muted">
+            {t("signup.videoMissing")}
+          </p>
+        ) : (
+          <p className="text-sm text-muted">{t("common.loading")}</p>
+        )}
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button type="button" variant="secondary" className="flex-1" onClick={onSkipVideo}>
+            {t("signup.skipVideo")}
+          </Button>
+          <Button type="button" className="flex-1" onClick={onProceedFromVideo}>
+            {t("signup.proceed")}
+          </Button>
+        </div>
+        <p className="text-center text-xs text-muted">{t("signup.ready")}</p>
       </div>
     </div>
   );

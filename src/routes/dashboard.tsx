@@ -196,7 +196,7 @@ function Vault({
           ) : (
             <p className="font-display text-4xl font-semibold tracking-widest text-faint">••••••</p>
           )}
-          <Button variant="secondary" size="icon" onClick={() => (revealed ? setBalanceVisible(false) : setCheckOpen(true))} aria-label="Toggle balance">
+          <Button variant="secondary" size="icon" onClick={() => (revealed ? setBalanceVisible(false) : setCheckOpen(true))} aria-label={t("dash.toggleBalance")}>
             <span className="relative block size-5">
               <Eye className={`absolute inset-0 size-5 transition-[opacity,transform,filter] duration-300 ${revealed ? "scale-[0.25] opacity-0 blur-[4px]" : "scale-100 opacity-100"}`} />
               <EyeOff className={`absolute inset-0 size-5 transition-[opacity,transform,filter] duration-300 ${revealed ? "scale-100 opacity-100" : "scale-[0.25] opacity-0 blur-[4px]"}`} />
@@ -209,10 +209,7 @@ function Vault({
             <p className="mt-1 font-display text-xl font-semibold tabular-nums text-fg">
               {formatKwacha((balance as { receivedBalanceTambala?: number }).receivedBalanceTambala ?? 0)}
             </p>
-            <p className="mt-1 text-xs text-muted">
-              Money sent to you stays here until you withdraw it or move it to your main vault. Bank withdrawals take a
-              700 MWK flat from this bag (not a NEXA fee). MoMo can take the full amount.
-            </p>
+            <p className="mt-1 text-xs text-muted">{t("dash.receivedBagHint")}</p>
             <Button
               type="button"
               variant="secondary"
@@ -237,7 +234,7 @@ function Vault({
 
         {!revealed ? (
           <Button className="mt-5 w-full" onClick={() => setCheckOpen(true)}>
-            Check balance
+            {t("dash.checkBalance")}
           </Button>
         ) : balance && !balance.locked ? (
           <p className="mt-3 text-sm text-muted">
@@ -323,7 +320,7 @@ function Vault({
                       {tx.kind === "transfer_out"
                         ? "Sent"
                         : tx.kind === "transfer_in"
-                          ? "Received"
+                          ? t("dash.received")
                           : tx.kind.replace("_", " ")}
                     </p>
                     <p className="text-xs text-muted">
@@ -452,7 +449,7 @@ function WithdrawHoldCountdown({ until }: { until: string | null }) {
   if (!label) return null;
   return (
     <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-fg">
-      Withdrawable in <span className="font-semibold tabular-nums">{label}</span>
+      {t("dash.withdrawableIn")} <span className="font-semibold tabular-nums">{label}</span>
       <span className="text-muted"> · new accounts and security changes stay on a short hold</span>
     </p>
   );
@@ -523,11 +520,11 @@ function ActivityDetailModal({
     <Modal open={Boolean(tx)} title={title} onClose={onClose}>
       <dl className="space-y-3 text-sm">
         <div className="flex justify-between gap-3">
-          <dt className="text-muted">Status</dt>
+          <dt className="text-muted">{t("dash.status")}</dt>
           <dd className="font-medium capitalize">{tx.status}</dd>
         </div>
         <div className="flex justify-between gap-3">
-          <dt className="text-muted">Date</dt>
+          <dt className="text-muted">{t("dash.date")}</dt>
           <dd>
             {when.toLocaleDateString(undefined, {
               weekday: "short",
@@ -538,17 +535,17 @@ function ActivityDetailModal({
           </dd>
         </div>
         <div className="flex justify-between gap-3">
-          <dt className="text-muted">Time</dt>
+          <dt className="text-muted">{t("dash.time")}</dt>
           <dd>{when.toLocaleTimeString()}</dd>
         </div>
         {tx.kind === "deposit" ? (
           <>
             <div className="flex justify-between gap-3">
-              <dt className="text-muted">Paid (gross)</dt>
+              <dt className="text-muted">{t("dash.paidGross")}</dt>
               <dd className="tabular-nums">{formatKwacha(tx.grossTambala)}</dd>
             </div>
             <div className="flex justify-between gap-3">
-              <dt className="text-muted">Platform fee</dt>
+              <dt className="text-muted">{t("dash.platformFee")}</dt>
               <dd className="tabular-nums">{formatKwacha(feeTambala)}</dd>
             </div>
             <div className="flex justify-between gap-3">
@@ -564,7 +561,7 @@ function ActivityDetailModal({
             </div>
             {(tx.sendFeeTambala ?? 0) > 0 ? (
               <div className="flex justify-between gap-3">
-                <dt className="text-muted">Send fee</dt>
+                <dt className="text-muted">{t("dash.sendFee")}</dt>
                 <dd className="tabular-nums">{formatKwacha(tx.sendFeeTambala!)}</dd>
               </div>
             ) : null}
@@ -577,54 +574,49 @@ function ActivityDetailModal({
           </>
         ) : (
           <div className="flex justify-between gap-3">
-            <dt className="text-muted">Amount</dt>
+            <dt className="text-muted">{t("dash.amount")}</dt>
             <dd className="tabular-nums font-medium">{formatKwacha(tx.grossTambala)}</dd>
           </div>
         )}
         {tx.phone ? (
           <div className="flex justify-between gap-3">
-            <dt className="text-muted">Mobile number</dt>
+            <dt className="text-muted">{t("dash.mobileNumber")}</dt>
             <dd>{formatPhoneDisplay(tx.phone)}</dd>
           </div>
         ) : null}
         <div className="space-y-1.5 border-t border-border pt-3">
-          <dt className="text-muted">Reference</dt>
+          <dt className="text-muted">{t("dash.reference")}</dt>
           <dd className="flex items-center gap-2">
             <code className="min-w-0 flex-1 break-all rounded-lg bg-surface-2 px-3 py-2 text-xs">{tx.reference}</code>
             <Button type="button" variant="secondary" className="shrink-0" onClick={() => void copyRef()}>
-              {copied ? "Copied" : "Copy"}
+              {copied ? t("common.copied") : t("common.copy")}
             </Button>
           </dd>
         </div>
         {tx.note ? (
           <div className="space-y-1 border-t border-border pt-3">
-            <dt className="text-muted">Note</dt>
+            <dt className="text-muted">{t("dash.note")}</dt>
             <dd className="text-xs text-muted">{tx.note}</dd>
           </div>
         ) : null}
       </dl>
       {tx.status === "pending" && tx.kind === "deposit" ? (
-        <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-muted">
-          Still pending. If money left your mobile wallet, contact support with this reference.
-        </p>
+        <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-muted">{t("dash.stillPending")}</p>
       ) : null}
       <Button type="button" className="mt-5 w-full" variant="secondary" onClick={onClose}>
-        Close
+        {t("common.close")}
       </Button>
     
       {tx.kind === "transfer_out" ? (
         <div className="mt-4 space-y-2 border-t border-border pt-3">
-          <p className="text-xs text-muted">
-            One send: the recipient received the full amount above. Any send fee was taken from your balance and is
-            included in this activity (not a separate line).
-          </p>
+          <p className="text-xs text-muted">{t("dash.sendFeeIncluded")}</p>
           {tx.phone ? (
             <p className="text-sm">
-              To number: <span className="font-medium tabular-nums">{tx.phone}</span>
+              {t("dash.toNumber")} <span className="font-medium tabular-nums">{tx.phone}</span>
             </p>
           ) : null}
           <Button type="button" variant="secondary" className="w-full" disabled={revBusy} onClick={() => void requestReversal()}>
-            {revBusy ? "Sending…" : "Request reversal"}
+            {revBusy ? t("dash.sending") : "Request reversal"}
           </Button>
           {revMsg ? <p className="text-sm text-muted">{revMsg}</p> : null}
         </div>
@@ -646,7 +638,7 @@ function EmailVerifyBanner() {
       const res = await resendVerificationEmailFn();
       setMsg(
         res.alreadyVerified
-          ? "Your email is already verified. Refresh the page."
+          ? t("dash.emailVerifiedRefresh")
           : "Verification email sent. Check your inbox and spam folder.",
       );
     } catch (e) {
@@ -661,15 +653,15 @@ function EmailVerifyBanner() {
       <Link to="/profile" className="block rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <p className="font-medium text-fg">{t("common.emailNotVerified")}</p>
         <p className="mt-1 text-muted">
-          Confirm your email before depositing or withdrawing. Tap here to open Profile, or resend the link below.
+          {t("dash.emailVerifyBanner")}
         </p>
       </Link>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Button type="button" size="sm" loading={busy} onClick={() => void resend()}>
-          {busy ? "Sending…" : "Resend verification email"}
+          {busy ? t("dash.sending") : "Resend verification email"}
         </Button>
         <Link to="/profile" className="text-sm text-primary underline-offset-2 hover:underline">
-          Open Profile
+          {t("dash.openProfile")}
         </Link>
       </div>
       {msg ? <p className="mt-2 text-xs text-primary">{msg}</p> : null}
@@ -700,9 +692,9 @@ function CheckBalanceModal({ open, onClose, onDone }: { open: boolean; onClose: 
   }
 
   return (
-    <Modal open={open} title="Check balance" onClose={onClose}>
+    <Modal open={open} title={t("dash.checkBalance")} onClose={onClose}>
       <p className="mb-4 text-sm text-muted">
-        Enter the 4-digit withdraw PIN to reveal your available kwacha. You can use the pad or your keyboard.
+        {t("dash.balancePinHint")}
       </p>
       <div className={busy ? "pointer-events-none opacity-50" : undefined}>
         <PinPad
@@ -714,7 +706,7 @@ function CheckBalanceModal({ open, onClose, onDone }: { open: boolean; onClose: 
         />
       </div>
       {error ? <p className="mt-3 text-center text-sm text-danger">{error}</p> : null}
-{busy ? <LoadingStatus label="Checking balance…" /> : null}
+{busy ? <LoadingStatus label=t("dash.checkingBalance") /> : null}
     </Modal>
   );
 }
@@ -739,7 +731,7 @@ function ReceiveLinkPanel() {
           ? `${window.location.origin}${res.path}`
           : res.path;
       setLink(full);
-      setMsg("Link ready — share it with anyone who should pay you. Each payment gets its own reference.");
+      setMsg(t("dash.linkReady"));
       setOpen(true);
     } catch (e) {
       setErr(errMessage(e));
@@ -752,7 +744,7 @@ function ReceiveLinkPanel() {
     if (!link) return;
     try {
       await navigator.clipboard.writeText(link);
-      setMsg("Link copied.");
+      setMsg(t("dash.linkCopied"));
     } catch {
       setMsg(link);
     }
@@ -851,7 +843,7 @@ function DepositModal({
     if (!kwacha) return;
     const phoneDigits = phone.replace(/\D/g, "");
     if (phoneDigits.length < 9) {
-      setError("Enter a valid Malawi mobile number (e.g. 09… or 08…, at least 9 digits).");
+      setError(t("dash.validMwPhone"));
       setStage("form");
       return;
     }
@@ -908,7 +900,7 @@ function DepositModal({
             <p className="text-xs text-muted">Minimum {MIN_DEPOSIT_KWACHA} kwacha</p>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="dep-phone">Paying number</Label>
+            <Label htmlFor="dep-phone">{t("dash.payingNumber")}</Label>
             <Input
               id="dep-phone"
               inputMode="tel"
@@ -917,14 +909,11 @@ function DepositModal({
               placeholder="09… or 08…"
               autoComplete="tel"
             />
-            <p className="text-xs text-muted">
-              Pre-filled with your registered number. Change it only if you are paying from another Airtel/TNM line.
-              To verify your profile number, deposit once from that same number.
-            </p>
+            <p className="text-xs text-muted">{t("dash.payingNumberHint")}</p>
           </div>
           {error ? <p className="text-sm text-danger">{error}</p> : null}
           <Button className="w-full" disabled={!kwacha || !phone} onClick={() => setStage("confirm")}>
-            Continue
+            {t("common.continue")}
           </Button>
         </div>
       ) : null}
@@ -942,7 +931,7 @@ function DepositModal({
           {error ? <p className="text-sm text-danger">{error}</p> : null}
           <div className="flex gap-2">
             <Button variant="secondary" className="flex-1" onClick={() => setStage("form")}>
-              Back
+              {t("common.back")}
             </Button>
             <Button className="flex-1" loading={busy} disabled={busy} onClick={() => void start()}>
               {busy ? t("dash.openingPaychangu") : t("dash.continuePaychangu")}
@@ -959,7 +948,7 @@ function DepositModal({
           </p>
           {error ? <p className="text-sm text-danger">{error}</p> : null}
           <Button className="w-full" loading={busy} disabled={busy} onClick={() => void approve()}>
-            {busy ? "Crediting vault…" : "I've approved the payment"}
+            {busy ? t("dash.creditingVault") : t("dash.approvedPayment")}
           </Button>
         </div>
       ) : null}
@@ -1031,7 +1020,7 @@ function SendModal({
       if (isAdmin) {
         const res = await adminLookupSendTarget({ data: { phone } });
         setRecipient({
-          fullName: res.fullName ?? (res.kind === "external" ? "External MoMo wallet" : "Unknown"),
+          fullName: res.fullName ?? (res.kind === "external" ? t("dash.externalMomo") : "Unknown"),
           phone: res.phone,
           kind: res.kind,
           operator: res.operator,
@@ -1100,7 +1089,7 @@ function SendModal({
           <>
             <p className="text-sm text-muted">
               {isAdmin
-                ? "Admin: send from your main balance to any Airtel or TNM number via PayChangu. The number does not need a NEXA account. Full amount leaves your vault (no platform send fee)."
+                ? t("dash.adminSendHint")
                 : "Send the full amount to another NEXA-SAVER account. A small fixed fee is charged from your balance; the recipient gets every kwacha you type."}
             </p>
             <div className="space-y-1.5">
@@ -1108,7 +1097,7 @@ function SendModal({
               <Input value={amount} inputMode="numeric" onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))} />
             </div>
             <div className="space-y-1.5">
-              <Label>{isAdmin ? "Recipient MoMo number" : "Their registered number"}</Label>
+              <Label>{isAdmin ? t("dash.recipientMomo") : "Their registered number"}</Label>
               <Input value={phone} inputMode="tel" placeholder="09… or 08…" onChange={(e) => setPhone(e.target.value)} />
             </div>
             {kwacha && !isAdmin ? (
@@ -1129,8 +1118,7 @@ function SendModal({
                     </span>
                   </span>
                 </label>
-                <p className="text-sm text-muted">
-                  Send fee: <span className="font-medium text-fg">{feeKwacha} kwacha</span>. They receive{" "}
+                <p className="text-sm text-muted">{t("dash.sendFeeLabel")}<span className="font-medium text-fg">{feeKwacha} kwacha</span>. They receive{" "}
                   <span className="font-medium text-fg">{kwacha + (coverBankFlat ? 700 : 0)} kwacha</span> in their
                   received bag. Total from your vault:{" "}
                   <span className="font-medium text-fg">{kwacha + feeKwacha + (coverBankFlat ? 700 : 0)} kwacha</span>.
@@ -1150,7 +1138,7 @@ function SendModal({
               </div>
             ) : null}
             <Button type="button" className="w-full" disabled={busy || !phone || !kwacha} onClick={() => void lookup()}>
-              {busy ? "Checking…" : isAdmin ? "Look up number" : "Look up account"}
+              {busy ? t("session.checking") : isAdmin ? t("dash.lookUpNumber") : "Look up account"}
             </Button>
           </>
         ) : null}
@@ -1158,7 +1146,7 @@ function SendModal({
         {stage === "confirm" && recipient ? (
           <>
             <p className="text-sm">
-              Send <span className="font-semibold tabular-nums">{kwacha} kwacha</span> to
+              {t("dash.send")} <span className="font-semibold tabular-nums">{kwacha} kwacha</span> to
             </p>
             <div className="rounded-xl border border-border bg-surface-2 p-3">
               <p className="font-medium text-fg">{recipient.fullName}</p>
@@ -1167,14 +1155,10 @@ function SendModal({
                 <p className="mt-1 text-xs text-muted">{recipient.operator}</p>
               ) : null}
               {isAdmin && recipient.kind === "external" ? (
-                <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                  Not on NEXA-SAVER. PayChangu cannot show the MoMo name before send — check the number carefully.
-                </p>
+                <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">{t("dash.offPlatformWarn")}</p>
               ) : null}
               {isAdmin && recipient.kind === "nexa" ? (
-                <p className="mt-2 text-xs text-muted">
-                  On NEXA, but this admin send pays out to their MoMo via PayChangu (not an in-app received bag).
-                </p>
+                <p className="mt-2 text-xs text-muted">{t("dash.adminSendMomo")}</p>
               ) : null}
             </div>
             {isAdmin && recipient.kind === "external" ? (
@@ -1185,7 +1169,7 @@ function SendModal({
                   checked={confirmExternal}
                   onChange={(e) => setConfirmExternal(e.target.checked)}
                 />
-                <span>I confirmed this number is correct and want to send off-platform.</span>
+                <span>{t("dash.confirmOffPlatform")}</span>
               </label>
             ) : null}
             {isAdmin ? (
@@ -1212,7 +1196,7 @@ function SendModal({
             )}
             <div className="flex gap-2">
               <Button type="button" variant="secondary" className="flex-1" onClick={() => setStage("form")}>
-                Back
+                {t("common.back")}
               </Button>
               <Button
                 type="button"
@@ -1220,7 +1204,7 @@ function SendModal({
                 disabled={isAdmin && recipient.kind === "external" && !confirmExternal}
                 onClick={() => setStage("pin")}
               >
-                Confirm recipient
+                {t("dash.confirmRecipient")}
               </Button>
             </div>
           </>
@@ -1240,10 +1224,10 @@ function SendModal({
               disabled={busy || pin.length !== 4}
               onClick={() => void send()}
             >
-              {busy ? "Sending…" : "Send now"}
+              {busy ? t("dash.sending") : "Send now"}
             </Button>
             <Button type="button" variant="secondary" className="w-full" onClick={() => setStage("confirm")}>
-              Back
+              {t("common.back")}
             </Button>
           </>
         ) : null}
@@ -1335,7 +1319,7 @@ function LoanPanel() {
         <div key={l.reference} className="rounded-xl border border-border bg-surface-2 p-3 text-sm space-y-1">
           <p className="font-medium">{l.reference}</p>
           <p>
-            Due now: <span className="tabular-nums font-semibold">{formatKwacha(l.balanceDueTambala)}</span>
+            {t("dash.dueNow")} <span className="tabular-nums font-semibold">{formatKwacha(l.balanceDueTambala)}</span>
           </p>
           <p className="text-muted">
             Principal {formatKwacha(l.principalTambala)} · mode {l.repaymentMode} · period ends{" "}
@@ -1345,10 +1329,10 @@ function LoanPanel() {
             <div className="space-y-2 pt-2">
               <PinPad value={pin} onChange={setPin} disabled={busy} />
               <Button type="button" className="w-full" disabled={busy || pin.length !== 4} onClick={() => void repay(l.reference)}>
-                {busy ? "Paying…" : "Confirm repay from vault"}
+                {busy ? t("dash.paying") : "Confirm repay from vault"}
               </Button>
               <Button type="button" variant="secondary" className="w-full" onClick={() => setRepayRef(null)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
             </div>
           ) : (
@@ -1394,7 +1378,7 @@ function LoanPanel() {
               {busy ? t("loan.taking") : t("loan.apply")}
             </Button>
             <Button type="button" variant="secondary" className="w-full" onClick={() => setOpen(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
           </div>
         ) : (
@@ -1444,7 +1428,7 @@ function AffiliatePanel() {
     setErr(null);
     try {
       const res = await becomeAffiliate({ data: { acceptTerms: true as const } });
-      setMsg(res.already ? "You are already an affiliate." : "Welcome — your invite link is ready.");
+      setMsg(res.already ? t("dash.alreadyAffiliate") : "Welcome — your invite link is ready.");
       refresh();
     } catch (e) {
       setErr(errMessage(e));
@@ -1503,16 +1487,13 @@ function AffiliatePanel() {
       {!st.isAffiliate ? (
         <div className="space-y-3">
           <p className="text-sm text-muted">
-            Earn {(st.rates.commissionRate * 100).toFixed(0)}% of a friend&apos;s <strong>first deposit only</strong>. After
+            Earn {(st.rates.commissionRate * 100).toFixed(0)}% of a friend&apos;s <strong>{t("dash.firstDepositOnly")}</strong>. After
             that, no further commission from them. Withdraw earnings from {st.rates.withdrawMinKwacha} kwacha (platform takes{" "}
             {(st.rates.withdrawFeeRate * 100).toFixed(0)}% on withdrawal).
           </p>
           <label className="flex items-start gap-2 text-sm">
             <input type="checkbox" className="mt-1" checked={accept} onChange={(e) => setAccept(e.target.checked)} />
-            <span>
-              I accept the affiliate terms: commission only on each referred user&apos;s first deposit; withdrawal fee
-              applies as shown.
-            </span>
+            <span>{t("dash.affiliateTermsAccept")}</span>
           </label>
           <Button
             type="button"
@@ -1525,12 +1506,12 @@ function AffiliatePanel() {
       ) : (
         <div className="space-y-3 text-sm">
           <p>
-            Your code: <span className="font-mono font-semibold">{st.code}</span>
+            {t("dash.yourCode")} <span className="font-mono font-semibold">{st.code}</span>
           </p>
           <p className="break-all text-muted">{link}</p>
           <div className="flex flex-wrap gap-2">
             <Button type="button" size="sm" onClick={() => void shareInvite()} disabled={!st.programEnabled}>
-              Share invite link
+              {t("dash.shareInvite")}
             </Button>
             <Button
               type="button"
@@ -1539,7 +1520,7 @@ function AffiliatePanel() {
               onClick={async () => {
                 try {
                   await navigator.clipboard.writeText(link);
-                  setMsg("Link copied.");
+                  setMsg(t("dash.linkCopied"));
                 } catch {
                   window.prompt("Copy:", link);
                 }
@@ -1565,10 +1546,10 @@ function AffiliatePanel() {
               </p>
               <PinPad value={pin} onChange={setPin} disabled={busy} />
               <Button type="button" disabled={busy || pin.length !== 4} onClick={() => void doWithdraw()}>
-                Confirm withdraw
+                {t("dash.confirmWithdraw")}
               </Button>
               <Button type="button" variant="secondary" onClick={() => setWithdrawOpen(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
             </div>
           ) : (
@@ -1578,7 +1559,7 @@ function AffiliatePanel() {
               disabled={st.wallet.balanceTambala < st.rates.withdrawMinKwacha * 100}
               onClick={() => setWithdrawOpen(true)}
             >
-              Withdraw referral earnings
+              {t("dash.withdrawReferral")}
             </Button>
           )}
           {st.earnings.length ? (
@@ -1690,7 +1671,7 @@ function WithdrawLockPanel() {
       });
       setMsg(
         res.free
-          ? "Lock cancelled free during cooling-off."
+          ? t("dash.lockCancelledFree")
           : `Lock removed. Early-unlock fee ${formatKwacha(res.feeTambala)} taken from your vault.`,
       );
       setPin("");
@@ -1709,9 +1690,7 @@ function WithdrawLockPanel() {
       <div className="space-y-3">
         <div>
           <h2 className="font-display text-lg font-semibold">{t("lock.panelTitle")}</h2>
-          <p className="text-sm text-muted">
-            Optional commitment: deposit anytime, no withdrawals until the date you set.
-          </p>
+          <p className="text-sm text-muted">{t("dash.lockOptional")}</p>
         </div>
         {!locked ? (
           <button
@@ -1729,11 +1708,11 @@ function WithdrawLockPanel() {
               setOpen((v) => !v);
             }}
           >
-            {open ? "Hide lock form" : "Set withdrawal lock"}
+            {open ? t("dash.hideLockForm") : "Set withdrawal lock"}
           </button>
         ) : (
           <p className="rounded-full bg-primary/15 px-3 py-2 text-center text-xs font-medium text-primary">
-            Lock active — use the section below to cancel or unlock
+            {t("dash.lockActiveHint")}
           </p>
         )}
       </div>
@@ -1757,7 +1736,7 @@ function WithdrawLockPanel() {
               target="_blank"
               rel="noreferrer"
             >
-              Contact admin on WhatsApp
+              {t("dash.contactAdminWa")}
             </a>
           ) : null}
         </div>
@@ -1811,7 +1790,7 @@ function WithdrawLockPanel() {
               }
               onClick={() => void unlock()}
             >
-              {busy ? "Working…" : status.inCoolingOff ? "Cancel lock free" : "Unlock early"}
+              {busy ? t("dash.working") : status.inCoolingOff ? t("dash.cancelLockFree") : "Unlock early"}
             </Button>
           </div>
         </div>
@@ -1825,7 +1804,7 @@ function WithdrawLockPanel() {
           </p>
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1.5">
-              <Label htmlFor="lock-period">Period</Label>
+              <Label htmlFor="lock-period">{t("dash.period")}</Label>
               <Input
                 id="lock-period"
                 inputMode="numeric"
@@ -1834,16 +1813,16 @@ function WithdrawLockPanel() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="lock-unit">Unit</Label>
+              <Label htmlFor="lock-unit">{t("dash.unit")}</Label>
               <select
                 id="lock-unit"
                 className="flex h-11 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm"
                 value={unit}
                 onChange={(e) => setUnit(e.target.value as "days" | "months" | "years")}
               >
-                <option value="days">Days</option>
-                <option value="months">Months</option>
-                <option value="years">Years</option>
+                <option value="days">{t("dash.days")}</option>
+                <option value="months">{t("dash.months")}</option>
+                <option value="years">{t("dash.years")}</option>
               </select>
             </div>
           </div>
@@ -1871,10 +1850,10 @@ function WithdrawLockPanel() {
             disabled={busy || pin.length !== 4 || !Number(amount) || (yearsApprox >= 2 && !confirmLong)}
             onClick={() => void applyLock()}
           >
-            {busy ? "Saving…" : "Lock withdrawals"}
+            {busy ? t("common.saving") : "Lock withdrawals"}
           </Button>
           <Button type="button" variant="secondary" className="w-full" disabled={busy} onClick={() => setOpen(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
         </div>
       ) : null}
@@ -2010,20 +1989,17 @@ function WithdrawModal({
         <div className="space-y-4">
           <p className="text-sm text-muted">{holdMessage}</p>
           <Button className="w-full" variant="secondary" onClick={onClose}>
-            Close
+            {t("common.close")}
           </Button>
         </div>
       ) : (
         <div className="space-y-4">
           {!revealed ? (
-            <p className="text-xs text-muted">
-              You can withdraw without revealing your balance. If the amount is more than you have (or over today’s
-              limit), the request is declined after you enter your PIN.
-            </p>
+            <p className="text-xs text-muted">{t("dash.withdrawNoReveal")}</p>
           ) : null}
           {receivedTambala > 0 ? (
             <div className="space-y-2">
-              <p className="text-xs font-medium text-muted">Withdraw from</p>
+              <p className="text-xs font-medium text-muted">{t("dash.withdrawFrom")}</p>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -2034,7 +2010,7 @@ function WithdrawModal({
                   }
                   onClick={() => setSource("main")}
                 >
-                  Main vault
+                  {t("dash.mainVault")}
                 </button>
                 <button
                   type="button"
@@ -2045,7 +2021,7 @@ function WithdrawModal({
                   }
                   onClick={() => setSource("received")}
                 >
-                  Received bag
+                  {t("dash.receivedBag")}
                 </button>
               </div>
               <p className="text-xs text-muted">
@@ -2066,7 +2042,7 @@ function WithdrawModal({
               }
               onClick={() => allowed.momo && setMethod("momo")}
             >
-              Mobile money
+              {t("dash.mobileMoney")}
             </button>
             <button
               type="button"
@@ -2078,7 +2054,7 @@ function WithdrawModal({
               }
               onClick={() => allowed.bank && setMethod("bank")}
             >
-              Bank
+              {t("dash.bank")}
             </button>
           </div>
           {!allowed.momo && !allowed.bank ? (
@@ -2099,10 +2075,7 @@ function WithdrawModal({
           ) : null}
 
           {method === "bank" && !hasBank ? (
-            <p className="text-sm text-muted">
-              Add bank payout details under Profile first. After saving, bank withdrawals stay on hold for 72
-              hours.
-            </p>
+            <p className="text-sm text-muted">{t("dash.bankHold72")}</p>
           ) : null}
 
           {method === "bank" && hasBank && bankOnHold ? (
@@ -2125,11 +2098,9 @@ function WithdrawModal({
               {method === "bank" ? (
                 <div className="space-y-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
                   <p className="font-medium text-fg">{t("tx.bankFlatFee")}</p>
-                  <p className="text-muted">
-                    Charged by the <span className="text-fg">bank / PayChangu rail</span>, not NEXA-SAVER. The 700 MWK
+                  <p className="text-muted">{t("dash.chargedByThe")}<span className="text-fg">{t("dash.bankRailName")}</span>, not NEXA-SAVER. The 700 MWK
                     is taken from the balance you withdraw. Example: request <span className="text-fg">10,000</span> →
-                    about <span className="text-fg">9,300</span> reaches the bank. MoMo has no 700 flat.
-                  </p>
+                    about <span className="text-fg">9,300</span>{t("dash.momoNoFlat")}</p>
                   <label className="flex items-start gap-2 text-sm">
                     <input
                       type="checkbox"
@@ -2137,10 +2108,7 @@ function WithdrawModal({
                       checked={bankFeeAccepted}
                       onChange={(e) => setBankFeeAccepted(e.target.checked)}
                     />
-                    <span>
-                      I understand 700 MWK will be taken from my requested amount by the bank channel, not by
-                      NEXA, and I want to continue.
-                    </span>
+                    <span>{t("dash.bank700Accept")}</span>
                   </label>
                 </div>
               ) : null}
@@ -2162,9 +2130,8 @@ function WithdrawModal({
                     </p>
                     {method === "bank" && netBankReceive != null ? (
                       <p className="text-sm text-fg">
-                        You request <span className="font-semibold">{kwacha}</span> · bank receives about{" "}
-                        <span className="font-semibold">{netBankReceive}</span> kwacha after 700 flat
-                      </p>
+                        {t("dash.youRequest")} <span className="font-semibold">{kwacha}</span> · bank receives about{" "}
+                        <span className="font-semibold">{netBankReceive}</span>{t("dash.kwachaAfter700")}</p>
                     ) : null}
                   </div>
 
@@ -2176,8 +2143,7 @@ function WithdrawModal({
                         checked={bankFinalAck}
                         onChange={(e) => setBankFinalAck(e.target.checked)}
                       />
-                      <span>
-                        Final check: I accept that <strong>700 MWK</strong> is deducted from this request by the
+                      <span>{t("dash.finalCheckAccept")}<strong>700 MWK</strong> is deducted from this request by the
                         bank channel so the account receives about{" "}
                         <strong>{netBankReceive ?? "—"} kwacha</strong>. This is not a NEXA fee.
                       </span>
@@ -2205,9 +2171,9 @@ function WithdrawModal({
                         onClick={() => void send()}
                       >
                         {busy
-                          ? "Sending withdrawal…"
+                          ? t("dash.sendingWithdrawal")
                           : method === "bank"
-                            ? "Withdraw to bank"
+                            ? t("dash.withdrawToBank")
                             : "Withdraw to mobile"}
                       </Button>
                     </>
@@ -2217,7 +2183,7 @@ function WithdrawModal({
             </>
           ) : (
             <Button className="w-full" variant="secondary" onClick={onClose}>
-              Close
+              {t("common.close")}
             </Button>
           )}
         </div>

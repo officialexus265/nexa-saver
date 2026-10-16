@@ -36,11 +36,11 @@ function ResetPasswordPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (password !== confirm) {
-      setError("Passwords do not match");
+      setError(t("auth.passwordsMismatch"));
       return;
     }
     if (password.length < 8) {
-      setError("Use at least 8 characters");
+      setError(t("auth.min8"));
       return;
     }
     setBusy(true);
@@ -58,7 +58,7 @@ function ResetPasswordPage() {
   if (state === "loading") {
     return (
       <AuthFrame>
-        <p className="text-sm text-muted">Checking reset link…</p>
+        <p className="text-sm text-muted">{t("auth.resetChecking")}</p>
       </AuthFrame>
     );
   }
@@ -66,10 +66,8 @@ function ResetPasswordPage() {
   if (state === "invalid") {
     return (
       <AuthFrame>
-        <h1 className="font-display text-2xl font-semibold">Link expired</h1>
-        <p className="mt-3 text-sm text-muted">
-          This password reset link is invalid or has already been used. Request a new one from the sign-in page.
-        </p>
+        <h1 className="font-display text-2xl font-semibold">{t("auth.linkExpired")}</h1>
+        <p className="mt-3 text-sm text-muted">{t("auth.invalidResetLink")}</p>
         <Link to="/" className="mt-6 inline-block text-sm text-primary">
           {t("auth.backToSignIn")}
         </Link>
@@ -80,12 +78,10 @@ function ResetPasswordPage() {
   if (state === "done") {
     return (
       <AuthFrame>
-        <h1 className="font-display text-2xl font-semibold">Password updated</h1>
-        <p className="mt-3 text-sm text-muted">
-          Your password was changed and all devices were signed out. Sign in with your new password.
-        </p>
+        <h1 className="font-display text-2xl font-semibold">{t("auth.passwordUpdated")}</h1>
+        <p className="mt-3 text-sm text-muted">{t("auth.passwordChangedAllOut")}</p>
         <Link to="/" className="mt-6 inline-block text-sm text-primary">
-          Sign in
+          {t("auth.signIn")}
         </Link>
       </AuthFrame>
     );
@@ -93,26 +89,26 @@ function ResetPasswordPage() {
 
   return (
     <AuthFrame>
-      <h1 className="font-display text-2xl font-semibold">Choose a new password</h1>
-      <p className="mt-2 text-sm text-muted">At least 8 characters. All open sessions will be signed out.</p>
+      <h1 className="font-display text-2xl font-semibold">{t("auth.chooseNewPassword")}</h1>
+      <p className="mt-2 text-sm text-muted">{t("auth.resetHintLong")}</p>
       <form onSubmit={(e) => void submit(e)} className="mt-6 space-y-4">
         <PasswordField
           id="new-pw"
-          label="New password"
+          label=t("auth.newPassword")
           value={password}
           onChange={setPassword}
           autoComplete="new-password"
         />
         <PasswordField
           id="confirm-pw"
-          label="Confirm new password"
+          label=t("auth.confirmNewPassword")
           value={confirm}
           onChange={setConfirm}
           autoComplete="new-password"
         />
         {error ? <p className="text-sm text-danger">{error}</p> : null}
         <Button type="submit" className="w-full" loading={busy} disabled={busy || password.length < 8}>
-          {busy ? "Updating password…" : "Update password"}
+          {busy ? t("auth.updatingPassword") : "Update password"}
         </Button>
       </form>
     </AuthFrame>

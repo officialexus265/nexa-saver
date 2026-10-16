@@ -131,26 +131,26 @@ function SignupPage() {
     setError(null);
     if (step === 0) {
       if (!form.firstName || !form.lastName || !form.dateOfBirth || !form.gender) {
-        setError("All identity fields are required");
+        setError(t("signup.needIdentity"));
         return;
       }
     }
     if (step === 1) {
       if (!form.email || !form.phone || !form.username) {
-        setError("Contact details are required");
+        setError(t("signup.needContact"));
         return;
       }
       const check = await checkHandle({ data: { username: form.username, phone: form.phone, email: form.email } });
       if (check.phoneInvalid) {
-        setError("Use a valid Malawi Airtel or TNM number");
+        setError(t("signup.badPhone"));
         return;
       }
       if (check.usernameTaken) {
-        setError("That username is taken");
+        setError(t("signup.usernameTaken"));
         return;
       }
       if (check.phoneTaken) {
-        setError("That phone number is already registered");
+        setError(t("signup.phoneTaken"));
         return;
       }
       if (check.emailTaken && !authed) {
@@ -160,7 +160,7 @@ function SignupPage() {
     }
     if (step === 2) {
       if ((!authed && form.password.length < 8) || form.pin.length !== 4 || !form.securityAnswer) {
-        setError("Set a password, a 4-digit PIN, and a security answer");
+        setError(t("signup.needSecurity"));
         return;
       }
     }
@@ -170,7 +170,7 @@ function SignupPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.acceptTerms || !form.acceptPrivacy) {
-      setError("Accept the terms and the privacy policy to continue");
+      setError(t("signup.needTerms"));
       return;
     }
     setBusy(true);
@@ -183,7 +183,7 @@ function SignupPage() {
           password: form.password,
           name: `${form.firstName} ${form.lastName}`,
         });
-        if (signed.error) throw new Error(signed.error.message ?? "Could not create account");
+        if (signed.error) throw new Error(signed.error.message ?? t("signup.createFailed"));
         // Verification email is sent by Better Auth (SMTP). User should confirm before moving money.
       }
       await completeProfile({
@@ -255,7 +255,7 @@ function SignupPage() {
                   required
                 >
                   <option value="" disabled>
-                    Select…
+                    {t("signup.select")}
                   </option>
                   {GENDER_OPTIONS.map((g) => (
                     <option key={g.value} value={g.value}>
@@ -268,7 +268,7 @@ function SignupPage() {
           ) : null}
           {step === 1 ? (
             <>
-              <h1 className="font-display text-2xl font-semibold">How we reach you</h1>
+              <h1 className="font-display text-2xl font-semibold">{t("signup.howWeReach")}</h1>
               <Field label={t("signup.email")} id="em">
                 <Input
                   id="em"
@@ -282,10 +282,10 @@ function SignupPage() {
               <Field label={t("signup.phone")} id="ph">
                 <Input id="ph" inputMode="tel" value={form.phone} onChange={(e) => patch("phone", e.target.value)} placeholder="0881 234 567" required />
               </Field>
-              <p className="text-xs text-muted">Withdrawals only go to this number. Deposits can use any Malawi mobile number.</p>
+              <p className="text-xs text-muted">{t("signup.withdrawPhoneHint")}</p>
               <Field label={t("signup.username")} id="un">
                 <Input id="un" value={form.username} onChange={(e) => patch("username", e.target.value)} required />
-                <p className="text-xs text-muted">Letters, numbers, underscores, and emojis are allowed (no spaces).</p>
+                <p className="text-xs text-muted">{t("signup.usernameRules")}</p>
               </Field>
               <Field label={t("signup.referralOptional")} id="refcode">
                 <Input
@@ -294,13 +294,13 @@ function SignupPage() {
                   onChange={(e) => patch("referralCode", e.target.value.toUpperCase())}
                   placeholder={t("signup.referralPlaceholder")}
                 />
-                <p className="text-xs text-muted">Filled automatically when you open an invite link.</p>
+                <p className="text-xs text-muted">{t("signup.referralFilled")}</p>
               </Field>
             </>
           ) : null}
           {step === 2 ? (
             <>
-              <h1 className="font-display text-2xl font-semibold">Lock it down</h1>
+              <h1 className="font-display text-2xl font-semibold">{t("signup.lockItDown")}</h1>
               {(!authed || !form.password) && (
                 <PasswordField
                   id="pw"
@@ -337,11 +337,8 @@ function SignupPage() {
           ) : null}
           {step === 3 ? (
             <>
-              <h1 className="font-display text-2xl font-semibold">Agreements</h1>
-              <p className="text-sm text-muted">
-                NEXA-SAVER keeps 6% of every deposit as a future withdrawal fee. 3% is platform profit. 3% covers the
-                payout rail. Deleted accounts cannot be recovered.
-              </p>
+              <h1 className="font-display text-2xl font-semibold">{t("signup.agreements")}</h1>
+              <p className="text-sm text-muted">{t("signup.feeDisclosure")}</p>
               <label className="flex items-start gap-3 text-sm">
                 <input
                   type="checkbox"
@@ -352,11 +349,11 @@ function SignupPage() {
                 <span>
                   I accept the{" "}
                   <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-primary">
-                    Terms of use
+                    {t("legal.terms")}
                   </Link>{" "}
                   and{" "}
                   <Link to="/conditions" className="text-primary">
-                    Terms and conditions
+                    {t("legal.conditions")}
                   </Link>
                   .
                 </span>
@@ -371,7 +368,7 @@ function SignupPage() {
                 <span>
                   I accept the{" "}
                   <Link to="/privacy" target="_blank" rel="noopener noreferrer" target="_blank" rel="noopener noreferrer" className="text-primary">
-                    Privacy policy
+                    {t("legal.privacy")}
                   </Link>
                   .
                 </span>
@@ -383,12 +380,12 @@ function SignupPage() {
         <div className="flex gap-2">
           {step > 0 ? (
             <Button type="button" variant="secondary" className="flex-1" onClick={() => setStep((s) => s - 1)}>
-              Back
+              {t("common.back")}
             </Button>
           ) : null}
           {step < 3 ? (
             <Button type="button" className="flex-1" onClick={() => void nextStep()}>
-              Continue
+              {t("common.continue")}
             </Button>
           ) : (
             <Button type="submit" className="flex-1" loading={busy} disabled={busy}>

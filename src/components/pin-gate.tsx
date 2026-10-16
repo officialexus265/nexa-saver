@@ -1,3 +1,4 @@
+import { useT } from "@/lib/i18n/client";
 import { useEffect, useState } from "react";
 import { PinPad } from "@/components/pin-pad";
 import { Button } from "@/components/ui/button";
@@ -9,7 +10,7 @@ import { getSecurityQuestion, resetPinWithQuestion, verifyPin } from "@/lib/nexa
 import { FocusTrap } from "@/components/focus-trap";
 
 export function PinGate({
-  title = "Confirm your PIN",
+  title,
   subtitle = "Five minutes of quiet and NEXA locks the vault.",
   onUnlocked,
 }: {
@@ -17,6 +18,7 @@ export function PinGate({
   subtitle?: string;
   onUnlocked: (balanceTambala?: number) => void;
 }) {
+  const { t } = useT();
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -73,20 +75,20 @@ export function PinGate({
   }
 
   return (
-    <FocusTrap label={forgot ? "Reset PIN" : title} className="grid place-items-center bg-bg p-5">
+    <FocusTrap label={forgot ? t("pin.resetTitle") : title} className="grid place-items-center bg-bg p-5">
       <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-6 stagger-in">
-        <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Locked</p>
-        <h2 className="mt-2 font-display text-2xl font-semibold">{forgot ? "Reset PIN" : title}</h2>
+        <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">{t("pin.locked")}</p>
+        <h2 className="mt-2 font-display text-2xl font-semibold">{forgot ? t("pin.resetTitle") : title}</h2>
         <p className="mt-2 text-sm text-muted">{forgot ? question || "Answer your security question." : subtitle}</p>
 
         {forgot ? (
           <form onSubmit={resetPin} className="mt-6 space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="sec-answer">Your answer</Label>
+              <Label htmlFor="sec-answer">{t("pin.yourAnswer")}</Label>
               <Input id="sec-answer" value={answer} onChange={(e) => setAnswer(e.target.value)} required />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="new-pin">New 4-digit PIN</Label>
+              <Label htmlFor="new-pin">{t("pin.newPin")}</Label>
               <Input
                 id="new-pin"
                 inputMode="numeric"
@@ -98,10 +100,10 @@ export function PinGate({
             </div>
             {error ? <p className="text-sm text-danger">{error}</p> : null}
             <Button type="submit" className="w-full" disabled={busy || newPin.length !== 4}>
-              {busy ? "Saving…" : "Save new PIN"}
+              {busy ? t("pin.saving") : t("pin.saveNew")}
             </Button>
             <Button type="button" variant="ghost" className="w-full" onClick={() => setForgot(false)}>
-              Back to PIN
+              {t("pin.backToPin")}
             </Button>
           </form>
         ) : (
@@ -110,10 +112,10 @@ export function PinGate({
               <PinPad value={pin} onChange={setPin} disabled={busy} error={Boolean(error)} />
             </div>
             {error ? <p className="mt-3 text-center text-sm text-danger">{error}</p> : null}
-            {busy ? <LoadingStatus label="Unlocking vault…" /> : null}
+            {busy ? <LoadingStatus label=t("pin.unlocking") /> : null}
             {!busy ? (
               <button type="button" onClick={loadQuestion} className="mt-4 w-full text-center text-sm text-muted">
-                Forgot PIN? Use security question
+                {t("pin.forgotUseQuestion")}
               </button>
             ) : null}
           </div>

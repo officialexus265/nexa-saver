@@ -162,10 +162,10 @@ export function SessionGate({
     return (
       <div className="nexa-shell grid min-h-dvh place-items-center p-6 text-center">
         <div className="max-w-sm space-y-4">
-          <h1 className="font-display text-xl font-semibold">Couldn’t load your vault</h1>
+          <h1 className="font-display text-xl font-semibold">{t("session.couldNotLoad")}</h1>
           <p className="text-sm text-muted">{loadError}</p>
           <Button className="w-full" onClick={() => void refresh()}>
-            Try again
+            {t("session.tryAgain")}
           </Button>
         </div>
       </div>
@@ -193,7 +193,7 @@ export function SessionGate({
     return (
       <I18nProvider><AppShell profile={me.profile}>
         <div className="mx-auto max-w-md space-y-4 p-6 text-center">
-          <h1 className="font-display text-2xl font-semibold">Account locked</h1>
+          <h1 className="font-display text-2xl font-semibold">{t("session.accountLocked")}</h1>
           <p className="text-sm text-muted">
             This account was locked by platform support
             {me.profile.adminLockReason ? `: ${me.profile.adminLockReason}` : "."} Contact support to
@@ -203,7 +203,7 @@ export function SessionGate({
             className="w-full"
             onClick={() => { try { sessionStorage.removeItem("nexa-admin-pin-ok"); } catch {} setLocked(false); void clientSignOut().then(() => { window.location.href = "/"; }); }}
           >
-            Sign out
+            {t("nav.signOut")}
           </Button>
         </div>
       </AppShell></I18nProvider>
@@ -242,19 +242,19 @@ export function SessionGate({
       })}
       
       {!me.needsProfile && me.profile.role === "admin" && me.needsAdminTotp ? (
-        <FocusTrap label="Admin verification" className="grid place-items-center bg-bg p-5">
+        <FocusTrap label={t("session.adminVerification")} className="grid place-items-center bg-bg p-5">
           {(() => {
             const showPasskey = Boolean(me.adminHasPasskey);
             const showTotp = Boolean(me.adminTotpEnabled);
             const title = showPasskey && !showTotp
-              ? "Security key"
+              ? t("session.securityKey")
               : showTotp && !showPasskey
-                ? "Authenticator code"
+                ? t("session.authenticatorCode")
                 : "Admin verification";
             const hint = showPasskey && showTotp
-              ? "Use a security key / passkey, or enter the 6-digit authenticator code (or a backup code)."
+              ? t("session.useKeyOrCode")
               : showPasskey
-                ? "Touch your security key or use your device passkey to continue."
+                ? t("session.touchKey")
                 : "Enter the 6-digit code from your authenticator app, or a one-time backup code.";
             return (
           <form
@@ -273,7 +273,7 @@ export function SessionGate({
                 .finally(() => setTotpBusy(false));
             }}
           >
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Admin 2FA</p>
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">{t("session.admin2fa")}</p>
             <h2 className="font-display text-2xl font-semibold">{title}</h2>
             <p className="text-sm text-muted">{hint}</p>
             {showPasskey ? (
@@ -304,7 +304,7 @@ export function SessionGate({
             ) : null}
             {showPasskey && showTotp ? (
             <div className="relative py-1 text-center text-xs text-muted">
-              <span className="bg-surface px-2">or authenticator code</span>
+              <span className="bg-surface px-2">{t("session.orAuthCode")}</span>
             </div>
             ) : null}
             {showTotp ? (
@@ -318,7 +318,7 @@ export function SessionGate({
               placeholder="000000"
             />
             <Button type="submit" className="w-full" disabled={totpBusy || totpCode.length < 6}>
-              {totpBusy ? "Checking…" : "Verify code"}
+              {totpBusy ? t("session.checking") : "Verify code"}
             </Button>
             </>
             ) : null}
@@ -329,7 +329,7 @@ export function SessionGate({
               className="w-full"
               onClick={() => { try { sessionStorage.removeItem("nexa-admin-pin-ok"); } catch {} setLocked(false); void clientSignOut().then(() => { window.location.href = "/"; }); }}
             >
-              Sign out
+              {t("nav.signOut")}
             </Button>
           </form>
             );
@@ -339,9 +339,9 @@ export function SessionGate({
 
       
       {!me.needsProfile && me.profile.role !== "admin" && me.needsUserPasskey ? (
-        <FocusTrap label="Passkey verification" className="grid place-items-center bg-bg p-5">
+        <FocusTrap label={t("session.passkeyVerification")} className="grid place-items-center bg-bg p-5">
           <div className="w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6">
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Extra security</p>
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">{t("session.extraSecurity")}</p>
             <h2 className="font-display text-2xl font-semibold">{t("passkey.challengeTitle")}</h2>
             <p className="text-sm text-muted">{t("passkey.challengeBody")}</p>
             {totpError ? <p className="text-sm text-danger">{totpError}</p> : null}
@@ -428,36 +428,36 @@ export function SessionGate({
               className="w-full"
               onClick={() => { try { sessionStorage.removeItem("nexa-admin-pin-ok"); } catch {} setLocked(false); void clientSignOut().then(() => { window.location.href = "/"; }); }}
             >
-              Sign out
+              {t("nav.signOut")}
             </Button>
           </div>
         </FocusTrap>
       ) : null}
 
       {profile.mustChangePassword ? (
-        <FocusTrap label="Set a new password" className="grid place-items-center bg-bg p-5">
+        <FocusTrap label={t("session.setNewPassword")} className="grid place-items-center bg-bg p-5">
           <form onSubmit={savePassword} className="w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6">
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">First login</p>
-            <h2 className="font-display text-2xl font-semibold">Change the default password</h2>
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">{t("session.firstLogin")}</p>
+            <h2 className="font-display text-2xl font-semibold">{t("session.changeDefaultPw")}</h2>
             <p className="text-sm text-muted">
-              Admin access starts with a throwaway password. Set a strong one before you continue.
+              {t("session.firstLoginPw")}
             </p>
             <PasswordField
               id="cur-pw"
-              label="Current password"
+              label={t("session.currentPassword")}
               value={pw.current}
               onChange={(v) => setPw((p) => ({ ...p, current: v }))}
             />
             <PasswordField
               id="new-pw"
-              label="New password"
+              label={t("session.newPassword")}
               value={pw.next}
               onChange={(v) => setPw((p) => ({ ...p, next: v }))}
               autoComplete="new-password"
             />
             {pwError ? <p className="text-sm text-danger">{pwError}</p> : null}
             <Button type="submit" className="w-full" loading={pwBusy} disabled={pwBusy || pw.next.length < 8}>
-              {pwBusy ? "Saving password…" : "Save password"}
+              {pwBusy ? t("session.savingPassword") : "Save password"}
             </Button>
           </form>
         </FocusTrap>
@@ -466,9 +466,9 @@ export function SessionGate({
         <PinGate
           subtitle={
             profile.lockMode === "instant"
-              ? "The vault locks when you leave the app."
+              ? t("session.lockOnLeave")
               : profile.lockMode === "off"
-                ? "Auto-lock is off. Balance still needs PIN to reveal."
+                ? t("session.autoLockOff")
                 : `After ${profile.lockIdleMinutes ?? 5} minute${(profile.lockIdleMinutes ?? 5) === 1 ? "" : "s"} of quiet, NEXA locks the vault.`
           }
           onUnlocked={() => {
@@ -485,8 +485,8 @@ function ShellSkeleton() {
   return (
     <div className="nexa-shell grid min-h-dvh place-items-center px-6">
       <div className="w-full max-w-sm space-y-4 text-center">
-        <p className="font-display text-lg font-semibold text-fg">Vault loading…</p>
-        <p className="text-sm text-muted">Checking your session</p>
+        <p className="font-display text-lg font-semibold text-fg">{t("session.vaultLoading")}</p>
+        <p className="text-sm text-muted">{t("session.checkingSession")}</p>
         <div className="h-2 overflow-hidden rounded-full bg-surface-2">
           <div className="vault-load-bar h-full rounded-full bg-primary" />
         </div>

@@ -122,7 +122,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
     try {
       await changePinFn({ data: { currentPin: pins.current, newPin: pins.next, password: pins.password } });
       setPins({ current: "", next: "", password: "" });
-      setMessage("Withdraw PIN updated");
+      setMessage(t("profile.pinUpdated"));
     } catch (err) {
       setError(errMessage(err));
     }
@@ -174,11 +174,11 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
         title={t("profile.identity")}
         summary={
           kycInfo?.kyc?.status === "verified"
-            ? "Verified"
+            ? t("profile.verified")
             : kycInfo?.kyc?.status === "pending"
-              ? "Under review"
+              ? t("profile.underReview")
               : kycInfo?.kyc?.status === "rejected"
-                ? "Needs update"
+                ? t("profile.needsUpdate")
                 : "Optional until large withdrawals"
         }
         openId={openSection}
@@ -219,7 +219,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
                 },
               })
                 .then(() => {
-                  setMessage("Identity details submitted for review.");
+                  setMessage(t("profile.kycSubmitted"));
                   return getMyKyc();
                 })
                 .then(setKycInfo)
@@ -228,7 +228,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
             }}
           >
             <div className="space-y-1">
-              <Label>ID type</Label>
+              <Label>{t("profile.idType")}</Label>
               <select
                 className="flex h-11 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm"
                 value={kycForm.idType}
@@ -246,13 +246,13 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
               </select>
             </div>
             <div className="space-y-1">
-              <Label>ID number</Label>
+              <Label>{t("profile.idNumber")}</Label>
               <Input
                 value={kycForm.idNumber}
                 onChange={(e) => setKycForm((f) => ({ ...f, idNumber: e.target.value }))}
                 required
                 minLength={4}
-                placeholder="As printed on the document"
+                placeholder=t("profile.asPrinted")
               />
             </div>
             <div className="space-y-1">
@@ -262,11 +262,11 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
                 onChange={(e) => setKycForm((f) => ({ ...f, idName: e.target.value }))}
                 required
                 minLength={2}
-                placeholder="Exactly as on the ID"
+                placeholder={t("profile.exactlyOnId")}
               />
             </div>
             <Button type="submit" disabled={kycBusy}>
-              {kycBusy ? "Submitting…" : "Submit for review"}
+              {kycBusy ? t("profile.submitting") : "Submit for review"}
             </Button>
           </form>
         ) : null}
@@ -289,10 +289,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
         openId={openSection}
         onToggle={setOpenSection}
       >
-        <p className="text-sm text-muted">
-          When a key is registered, sign-in asks for it after your password. To turn this off, remove every key below
-          (confirm with your withdraw PIN). You can also use email recovery on the passkey screen if you lost the device.
-        </p>
+        <p className="text-sm text-muted">{t("profile.passkeyHint")}</p>
         {passkeys.length === 0 ? (
           <p className="text-sm text-muted">{t("profile.noPasskeys")}</p>
         ) : (
@@ -313,20 +310,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
                     setError(null);
                     void userDeletePasskey({ data: { id: k.id, pin: passkeyPin } })
                       .then((r) => {
-                        setPasskeys((prev) => prev.filter((x) => x.id !== k.id));
-                        setMessage(
-                          r.stillHasPasskey
-                            ? "Key removed. Other keys still protect this account."
-                            : "All security keys removed. Passkey login is off.",
-                        );
-                        setPasskeyPin("");
-                      })
-                      .catch((err) => setError(errMessage(err)))
-                      .finally(() => setPasskeyBusy(false));
-                  }}
-                >
-                  Remove
-                </Button>
+                        setPasskeys((prev) => prev.filter((x) =>{t("profile.keyRemoved")}</Button>
               </li>
             ))}
           </ul>
@@ -377,10 +361,10 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
         onToggle={setOpenSection}
       >
         <form onSubmit={savePassword} className="space-y-3">
-          <PasswordField id="p-cur" label="Current password" value={pw.current} onChange={(v) => setPw((p) => ({ ...p, current: v }))} />
-          <PasswordField id="p-new" label="New password" value={pw.next} onChange={(v) => setPw((p) => ({ ...p, next: v }))} autoComplete="new-password" />
+          <PasswordField id="p-cur" label={t("profile.currentPassword")} value={pw.current} onChange={(v) => setPw((p) => ({ ...p, current: v }))} />
+          <PasswordField id="p-new" label={t("profile.newPassword")} value={pw.next} onChange={(v) => setPw((p) => ({ ...p, next: v }))} autoComplete="new-password" />
           <Button type="submit" disabled={pw.next.length < 8}>
-            Update password
+            {t("profile.updatePassword")}
           </Button>
         </form>
       </ProfileSection>
@@ -407,7 +391,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
           </div>
           <PasswordField
             id="pin-pw"
-            label="Confirm with password"
+            label=t("profile.confirmPassword")
             value={pins.password}
             onChange={(v) => setPins((p) => ({ ...p, password: v }))}
           />
@@ -415,7 +399,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
             type="submit"
             disabled={pins.current.length !== 4 || pins.next.length !== 4 || pins.password.length < 1}
           >
-            Update PIN
+            {t("profile.updatePin")}
           </Button>
         </form>
       </ProfileSection>
@@ -428,13 +412,10 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
         onToggle={setOpenSection}
       >
         <form onSubmit={savePhone} className="space-y-3">
-          <p className="text-sm text-muted">
-            Money is only paid to this number. Changing it requires your password and places a 72-hour hold on
-            withdrawals. Your balance stays safe.
-          </p>
+          <p className="text-sm text-muted">{t("profile.phoneChangeHint")}</p>
           <p className="text-sm">Current: {formatPhoneDisplay(profile.phone)}</p>
           <div className="space-y-1.5">
-            <Label htmlFor="new-phone">New Malawi mobile</Label>
+            <Label htmlFor="new-phone">{t("profile.newPhone")}</Label>
             <Input
               id="new-phone"
               inputMode="tel"
@@ -445,12 +426,12 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
           </div>
           <PasswordField
             id="phone-pw"
-            label="Confirm with password"
+            label=t("profile.confirmPassword")
             value={phoneForm.password}
             onChange={(v) => setPhoneForm((p) => ({ ...p, password: v }))}
           />
           <Button type="submit" disabled={phoneForm.phone.length < 8 || phoneForm.password.length < 1}>
-            Update number
+            {t("profile.updateNumber")}
           </Button>
         </form>
       </ProfileSection>
@@ -463,9 +444,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
         onToggle={setOpenSection}
       >
         <p className="text-sm text-muted">
-          Optional. Used only for withdrawals to bank — not for deposits. After you save, bank withdrawals are
-          held for 72 hours. The first successful bank payout marks the account verified.
-        </p>
+          {t("profile.bankOptionalHint")}</p>
         {profile.hasBankDetails ? (
           <p className="rounded-xl bg-surface-2 px-3 py-2 text-sm">
             Current: {profile.bankName} {profile.bankAccountNumberMasked}
@@ -568,7 +547,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
         {!emailVerified ? (
           <>
             <p className="text-sm text-muted">
-              Deposits and withdrawals need a verified email. Check your inbox for a link, or resend.
+              {t("profile.emailVerifyNeed")}
             </p>
             <Button
               type="button"
@@ -580,7 +559,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
                     const res = await resendVerificationEmailFn();
                     setMessage(
                       res.alreadyVerified
-                        ? "Your email is already verified. Pull to refresh or reopen Profile."
+                        ? t("profile.emailAlreadyVerified")
                         : "Verification email sent. Check your inbox (and spam).",
                     );
                   } catch (err) {
@@ -589,7 +568,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
                 })();
               }}
             >
-              Resend verification email
+              {t("profile.resendEmail")}
             </Button>
           </>
         ) : null}
@@ -602,14 +581,14 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
           profile.lockMode === "instant"
             ? t("profile.lockWhenLeave")
             : profile.lockMode === "off"
-              ? "Do not lock"
+              ? t("profile.doNotLock")
               : `Idle · ${profile.lockIdleMinutes ?? 5} min`
         }
         openId={openSection}
         onToggle={setOpenSection}
       >
         <p className="text-sm text-muted">
-          Choose when the PIN screen appears again after you unlock. Instant is safest on a shared phone.
+          {t("profile.lockHint")}
         </p>
         <div className="space-y-2">
           {LOCK_MODE_OPTIONS.map((opt) => (
@@ -650,9 +629,9 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
                 setLockMinutes(String(res.idleMinutes));
                 setMessage(
                   res.mode === "instant"
-                    ? "Vault will lock when you leave the app."
+                    ? t("profile.lockWhenLeaveApp")
                     : res.mode === "off"
-                      ? "Auto-lock is off. Your balance still needs PIN to reveal."
+                      ? t("profile.autoLockOffBalance")
                       : `Vault will lock after ${res.idleMinutes} minute${res.idleMinutes === 1 ? "" : "s"} of inactivity.`,
                 );
               } catch (err) {
@@ -661,22 +640,22 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
             })();
           }}
         >
-          Save lock setting
+          {t("profile.saveLock")}
         </Button>
       </ProfileSection>
 
       <ProfileSection
         id="sessions"
-        title="Sessions"
+        title={t("profile.sessions")}
         summary="Devices signed in to this account"
         openId={openSection}
         onToggle={setOpenSection}
       >
-        <p className="text-sm text-muted">Active sign-ins on this account. Sign out any device you do not recognise.</p>
+        <p className="text-sm text-muted">{t("profile.activeSessions")}</p>
         {sessions === null ? (
-          <p className="text-sm text-muted">Loading sessions…</p>
+          <p className="text-sm text-muted">{t("profile.loadingSessions")}</p>
         ) : sessions.length === 0 ? (
-          <p className="text-sm text-muted">No active sessions found.</p>
+          <p className="text-sm text-muted">{t("profile.noSessions")}</p>
         ) : (
           <ul className="space-y-2">
             {sessions.map((s) => (
@@ -686,7 +665,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
               >
                 <div className="min-w-0">
                   <p className="text-sm font-medium">
-                    {s.isCurrent ? "This device" : "Other device"}
+                    {s.isCurrent ? t("profile.thisDevice") : "Other device"}
                     {s.isCurrent ? (
                       <span className="ml-2 text-xs font-normal text-primary">current</span>
                     ) : null}
@@ -718,7 +697,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
                         }
                         await revokeSessionById({ data: { sessionId: s.id } });
                         setSessions((prev) => (prev ? prev.filter((x) => x.id !== s.id) : prev));
-                        setMessage("Device signed out.");
+                        setMessage(t("profile.deviceSignedOut"));
                       } catch (err) {
                         setError(errMessage(err));
                       } finally {
@@ -727,7 +706,7 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
                     })();
                   }}
                 >
-                  {s.isCurrent ? "Sign out" : "Sign out"}
+                  {t("profile.signOut")}
                 </Button>
               </li>
             ))}
@@ -749,14 +728,14 @@ function Settings({ profile, emailVerified }: { profile: { firstName: string; la
             })();
           }}
         >
-          Sign out all devices
+          {t("profile.signOutAll")}
         </Button>
       </ProfileSection>
 
       {profile.role !== "admin" ? (
         <ProfileSection
           id="delete"
-          title="Delete account"
+          title={t("profile.deleteAccount")}
           summary="Permanent · three confirmations"
           openId={openSection}
           onToggle={setOpenSection}
@@ -810,19 +789,16 @@ function AdminContactForm({
           .finally(() => setBusy(false));
       }}
     >
-      <p className="text-sm text-muted">
-        Seed default was admin@nexa-saver.app. Set a real email so alerts and recovery work. Confirm with your
-        password.
-      </p>
+      <p className="text-sm text-muted">{t("profile.adminEmailSeed")}</p>
       <div className="space-y-1.5">
-        <Label htmlFor="adm-email">Email</Label>
+        <Label htmlFor="adm-email">{t("profile.email")}</Label>
         <Input id="adm-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="adm-phone">Phone</Label>
+        <Label htmlFor="adm-phone">{t("profile.phone")}</Label>
         <Input id="adm-phone" value={phone} onChange={(e) => setPhone(e.target.value)} required />
       </div>
-      <PasswordField id="adm-pw" label="Confirm with password" value={password} onChange={setPassword} />
+      <PasswordField id="adm-pw" label=t("profile.confirmPassword") value={password} onChange={setPassword} />
       <Button type="submit" disabled={busy || password.length < 1}>
         {busy ? t("profile.saving") : t("profile.saveContact")}
       </Button>
@@ -862,19 +838,16 @@ function SecurityQuestionForm({
           .finally(() => setBusy(false));
       }}
     >
-      <p className="text-sm text-muted">
-        Default seed answer was &quot;nexa&quot;. Choose a question only you can answer. Requires password and PIN
-        (default PIN was 0000 if never changed).
-      </p>
+      <p className="text-sm text-muted">{t("profile.securitySeedHint")}</p>
       <div className="space-y-1.5">
-        <Label htmlFor="sq">Question</Label>
+        <Label htmlFor="sq">{t("profile.question")}</Label>
         <Input id="sq" value={question} onChange={(e) => setQuestion(e.target.value)} required />
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="sa">New answer</Label>
+        <Label htmlFor="sa">{t("profile.newAnswer")}</Label>
         <Input id="sa" value={answer} onChange={(e) => setAnswer(e.target.value)} required />
       </div>
-      <PasswordField id="sq-pw" label="Password" value={password} onChange={setPassword} />
+      <PasswordField id="sq-pw" label={t("profile.password")} value={password} onChange={setPassword} />
       <div className="space-y-1.5">
         <Label htmlFor="sq-pin">PIN</Label>
         <Input
@@ -886,7 +859,7 @@ function SecurityQuestionForm({
         />
       </div>
       <Button type="submit" disabled={busy || pin.length !== 4 || answer.length < 2}>
-        {busy ? "Saving…" : "Update security question"}
+        {busy ? t("profile.saving") : "Update security question"}
       </Button>
     </form>
   );
@@ -987,12 +960,12 @@ function DeleteAccount() {
 
   return (
     <div className="space-y-3">
-      <h2 className="font-display text-lg font-semibold text-danger">Delete account</h2>
+      <h2 className="font-display text-lg font-semibold text-danger">{t("profile.deleteAccount")}</h2>
       {layer === 0 ? (
         <>
-          <p className="mt-2 text-sm text-muted">Three confirmations. Each waits five seconds. Balance must be zero and no payment may be in progress. Personal details are removed; transaction records are kept for audits.</p>
+          <p className="mt-2 text-sm text-muted">{t("profile.deletionHint")}</p>
           <Button variant="danger" className="mt-4" onClick={() => setLayer(1)}>
-            Start deletion
+            {t("profile.startDeletion")}
           </Button>
         </>
       ) : (
@@ -1011,15 +984,15 @@ function DeleteAccount() {
           {error ? <p className="text-sm text-danger">{error}</p> : null}
           <div className="flex gap-2">
             <Button variant="secondary" className="flex-1" onClick={() => setLayer(0)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             {layer < 3 ? (
               <Button variant="danger" className="flex-1" disabled={wait} onClick={() => setLayer((n) => n + 1)}>
-                {wait ? "Wait 5 seconds…" : "Continue"}
+                {wait ? t("profile.wait5") : "Continue"}
               </Button>
             ) : (
               <Button variant="danger" className="flex-1" disabled={wait || pin.length !== 4} onClick={() => void finish()}>
-                {wait ? "Wait 5 seconds…" : "Delete forever"}
+                {wait ? t("profile.wait5") : "Delete forever"}
               </Button>
             )}
           </div>

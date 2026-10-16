@@ -59,14 +59,10 @@ function ForgotPasswordPage() {
   return (
     <AuthFrame>
       <h1 className="font-display text-2xl font-semibold">{t("auth.forgotTitle")}</h1>
-      <p className="mt-2 text-sm text-muted">
-        Enter the <strong className="font-medium text-fg">email</strong> or{" "}
-        <strong className="font-medium text-fg">Malawi mobile number</strong> on your account. We match it
-        against registered accounts. If more than one matches, you choose which one to reset.
-      </p>
+      <p className="mt-2 text-sm text-muted">{t("auth.forgotBodyFull")}</p>
       <form onSubmit={(e) => void submit(e)} className="mt-6 space-y-4">
         <div className="space-y-1.5">
-          <Label htmlFor="id">Email or phone</Label>
+          <Label htmlFor="id">{t("auth.emailOrPhone")}</Label>
           <Input
             id="id"
             value={identifier}
