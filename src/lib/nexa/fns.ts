@@ -917,6 +917,316 @@ export const verifyDeposit = createServerFn({ method: "POST" })
     return creditDeposit(data.reference);
   });
 
+
+/** Multi-use receive link: create shareable /pay/{token} for external payers. */
+export const createReceiveLink = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      label: z.string().max(80).optional(),
+      defaultAmountKwacha: z.number().int().min(100).max(5_000_000).optional(),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    const profile = await loadProfile(context.userId);
+    if (!profile) throw new Error("Complete your profile first");
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const token =
+      "r" +
+      Date.now().toString(36) +
+      Math.random().toString(36).slice(2, 10);
+    try {
+      await sql`
+        insert into receive_links (token, user_id, label, default_amount_kwacha, active)
+        values (
+          ${token},
+          ${context.userId},
+          ${data.label?.trim() || null},
+          ${data.defaultAmountKwacha ?? null},
+          ${true}
+        )
+      `;
+    } catch (err) {
+      throw new Error(
+        "Could not create receive link. Redeploy so migration 0032 runs, then try again. " +
+          String((err as Error).message ?? "").slice(0, 80),
+      );
+    }
+    return { token, path: `/pay/${token}` };
+  });
+
+export const listMyReceiveLinks = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    try {
+      const rows = await sql<{
+        token: string;
+        label: string | null;
+        default_amount_kwacha: number | null;
+        active: boolean;
+      }>`
+        select token, label, default_amount_kwacha, active
+        from receive_links
+        where user_id = ${context.userId}
+        order by created_at desc
+        limit 20
+      `;
+      return rows.map((r) => ({
+        token: r.token,
+        label: r.label,
+        defaultAmountKwacha: r.default_amount_kwacha,
+        active: Boolean(r.active),
+        path: `/pay/${r.token}`,
+      }));
+    } catch {
+      return [];
+    }
+  });
+
+export const getReceiveLinkPublic = createServerFn({ method: "POST" })
+  .validator(z.object({ token: z.string().min(6).max(80) }))
+  .handler(async ({ data }) => {
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    const rows = await sql<{
+      token: string;
+      label: string | null;
+      default_amount_kwacha: number | null;
+      active: boolean;
+      first_name: string;
+      last_name: string;
+      username: string;
+    }>`
+      select rl.token, rl.label, rl.default_amount_kwacha, rl.active,
+             p.first_name, p.last_name, p.username
+      from receive_links rl
+      inner join profiles p on p.user_id = rl.user_id
+      where rl.token = ${data.token}
+      limit 1
+    `;
+    if (!rows.length) throw new Error("Payment link not found.");
+    const r = rows[0]!;
+    const ownerName =
+      [r.first_name, r.last_name].filter(Boolean).join(" ").trim() || r.username;
+    return {
+      label: r.label,
+      ownerName,
+      active: Boolean(r.active),
+      defaultAmountKwacha: r.default_amount_kwacha,
+    };
+  });
+
+/**
+ * External payer on a receive link. Creates a NEW deposit tx (unique reference)
+ * for the link owner each time — multi-use by design.
+ */
+export const startPublicReceivePayment = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      token: z.string().min(6).max(80),
+      amountKwacha: z.number().positive(),
+      phone: z.string().min(8).max(24),
+      origin: z.string().url(),
+      idempotencyKey: z.string().min(8).max(128),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const amountErr = validateDepositAmount(data.amountKwacha);
+    if (amountErr) throw new Error(amountErr);
+
+    const phone = normalizeMwPhone(data.phone);
+    if (!phone) throw new Error("Enter a valid Malawi mobile number.");
+
+    const { getSql } = await import("@/lib/db");
+    const { newReference } = await import("./crypto");
+    const { paychanguConfigured, demoPaymentsEnabled, initiateHostedCheckout } = await import(
+      "./paychangu.server"
+    );
+    const { claimIdempotencyKey, storeIdempotencyResponse } = await import("./idempotency.server");
+    const { getFeePolicy } = await import("./fee-policy.server");
+
+    if (!paychanguConfigured() && !demoPaymentsEnabled()) {
+      throw new Error("Payments are not available right now.");
+    }
+
+    const sql = await getSql();
+    {
+      const { assertDepositsAllowedAsync } = await import("./kill-switch.server");
+      await assertDepositsAllowedAsync(sql);
+    }
+    {
+      const { assertRateLimit } = await import("./rate-limit.server");
+      await assertRateLimit(sql, {
+        bucket: `public-receive:${data.token}`,
+        limit: 40,
+        windowSeconds: 60 * 60,
+        message: "Too many payment attempts on this link. Try again later.",
+      });
+    }
+
+    const links = await sql<{
+      user_id: string;
+      active: boolean;
+      first_name: string;
+      last_name: string;
+      email: string;
+    }>`
+      select rl.user_id, rl.active, p.first_name, p.last_name, p.email
+      from receive_links rl
+      inner join profiles p on p.user_id = rl.user_id
+      where rl.token = ${data.token}
+      limit 1
+    `;
+    if (!links.length || !links[0]!.active) {
+      throw new Error("This receive link is not active.");
+    }
+    const owner = links[0]!;
+
+    const claim = await claimIdempotencyKey(sql, {
+      key: data.idempotencyKey,
+      userId: owner.user_id,
+      action: "public_receive",
+    });
+    if (claim.hit) {
+      return claim.response as { checkoutUrl: string; reference: string };
+    }
+
+    const gross = kwachaToTambala(data.amountKwacha);
+    const policy = await getFeePolicy(sql);
+    const split = splitDeposit(gross, {
+      depositFeeRate: policy.depositFeeRate,
+      platformProfitRate: policy.platformProfitRate,
+      payoutReserveRate: policy.payoutReserveRate,
+    });
+    const reference = newReference("DEP");
+
+    await sql`
+      insert into transactions (
+        user_id, kind, status, gross_tambala, credited_tambala,
+        platform_profit_tambala, payout_reserve_tambala, phone, reference, note
+      ) values (
+        ${owner.user_id}, ${"deposit"}, ${"pending"}, ${split.gross}, ${split.credited},
+        ${split.platformProfit}, ${split.reserve}, ${phone}, ${reference},
+        ${`Receive-link payment ${formatKwacha(split.gross)} (token ${data.token})`}
+      )
+    `;
+
+    let checkoutUrl = "";
+    try {
+      if (paychanguConfigured()) {
+        const site = await publicSiteOrigin(data.origin);
+        const checkout = await initiateHostedCheckout({
+          amountKwacha: data.amountKwacha,
+          email: owner.email || "pay@nexa.local",
+          firstName: owner.first_name || "Payer",
+          lastName: owner.last_name || "External",
+          txRef: reference,
+          callbackUrl: `${site}/api/paychangu/webhook`,
+          returnUrl: `${site}/deposit-return?ref=${encodeURIComponent(reference)}`,
+          description: `Payment to ${owner.first_name || "NEXA"}`,
+        });
+        checkoutUrl = checkout.checkoutUrl;
+      } else if (demoPaymentsEnabled()) {
+        const site = await publicSiteOrigin(data.origin);
+        checkoutUrl = `${site}/deposit-return?ref=${encodeURIComponent(reference)}&demo=1`;
+      } else {
+        throw new Error("Payouts are not configured");
+      }
+    } catch (err) {
+      await sql`
+        update transactions set status = ${"failed"}, note = ${"Receive-link checkout failed"}
+        where reference = ${reference}
+      `;
+      await sql`delete from idempotency_keys where key = ${data.idempotencyKey} and response_json is null`;
+      throw err;
+    }
+
+    const result = { checkoutUrl, reference };
+    await storeIdempotencyResponse(sql, data.idempotencyKey, result);
+    return result;
+  });
+
+/**
+ * Public success-screen verify (payer may not be logged in as the vault owner).
+ * Looks up by reference only, confirms PayChangu, credits owner vault.
+ */
+export const verifyDepositPublic = createServerFn({ method: "POST" })
+  .validator(z.object({ reference: z.string().min(4).max(80) }))
+  .handler(async ({ data }) => {
+    const { getSql } = await import("@/lib/db");
+    const { assertRateLimit } = await import("./rate-limit.server");
+    const sql = await getSql();
+    await assertRateLimit(sql, {
+      bucket: `verify-deposit-public:${data.reference}`,
+      limit: 60,
+      windowSeconds: 60 * 60,
+      message: "Too many checks for this reference. Wait and try again.",
+    });
+
+    const rows = await sql<{
+      id: number;
+      status: string;
+      gross_tambala: number;
+      credited_tambala: number;
+      kind: string;
+    }>`
+      select id, status, gross_tambala, credited_tambala, kind
+      from transactions
+      where reference = ${data.reference}
+      limit 1
+    `;
+    if (!rows.length) throw new Error("Payment not found");
+    const row = rows[0]!;
+    if (row.kind !== "deposit") throw new Error("Not a deposit payment");
+
+    if (row.status === "success") {
+      const gross = asInt(row.gross_tambala);
+      const credited = asInt(row.credited_tambala);
+      return {
+        already: true as const,
+        grossTambala: gross,
+        creditedTambala: credited,
+        feeTambala: Math.max(0, gross - credited),
+        reference: data.reference,
+      };
+    }
+
+    const { paychanguConfigured, demoPaymentsEnabled, verifyPayment } = await import(
+      "./paychangu.server"
+    );
+    if (!demoPaymentsEnabled()) {
+      if (!paychanguConfigured()) throw new Error("Payments are not available right now");
+      const result = await verifyPayment(data.reference);
+      if (!result.ok) {
+        throw new Error(
+          "Payment is not confirmed yet. If money left your mobile wallet, wait a minute or contact support with reference " +
+            data.reference,
+        );
+      }
+      const verifiedTambala = kwachaToTambala(result.amount);
+      if (verifiedTambala > 0 && verifiedTambala !== asInt(row.gross_tambala)) {
+        throw new Error("Payment amount does not match this deposit");
+      }
+    } else {
+      // Demo: allow public confirm of pending receive-link deposits
+    }
+
+    const { creditDeposit } = await import("./ledger.server");
+    const credited = await creditDeposit(data.reference);
+    const gross = asInt(credited.grossTambala);
+    const cred = asInt(credited.creditedTambala);
+    return {
+      already: false as const,
+      grossTambala: gross,
+      creditedTambala: cred,
+      feeTambala: Math.max(0, gross - cred),
+      reference: data.reference,
+    };
+  });
+
 export const startWithdraw = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   // email verified checked inside handler

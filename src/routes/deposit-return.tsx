@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { buttonVariants } from "@/components/ui/button";
 import { LoadingStatus } from "@/components/ui/spinner";
 import { errMessage } from "@/lib/nexa/errors";
-import { verifyDeposit } from "@/lib/nexa/fns";
+import { verifyDeposit, verifyDepositPublic } from "@/lib/nexa/fns";
 import { formatKwacha } from "@/lib/nexa/money";
 import { cn } from "@/lib/utils";
 
@@ -65,7 +65,11 @@ function DepositReturnPage() {
     let cancelled = false;
     setState("pending");
     setBody("Confirming your PayChangu payment…");
-    verifyDeposit({ data: { reference: ref } })
+
+    // Public verify first (works for external receive-link payers who are not the vault owner).
+    // Fall back to authenticated verify if the user is logged in as the owner.
+    void verifyDepositPublic({ data: { reference: ref } })
+      .catch(() => verifyDeposit({ data: { reference: ref } }))
       .then((res) => {
         if (cancelled) return;
         setState("ok");
@@ -76,7 +80,7 @@ function DepositReturnPage() {
           reference: ref,
         });
         setBody(
-          `You deposited ${formatKwacha(res.grossTambala)}. Fee reserved for withdrawals: ${formatKwacha(res.feeTambala)}. Credited to your vault: ${formatKwacha(res.creditedTambala)}.`,
+          `You deposited ${formatKwacha(res.grossTambala)}. Fee: ${formatKwacha(res.feeTambala)}. Credited: ${formatKwacha(res.creditedTambala)}.`,
         );
       })
       .catch((err) => {
@@ -85,7 +89,7 @@ function DepositReturnPage() {
         setBody(
           errMessage(
             err,
-            "Payment is not confirmed yet. If money left your mobile wallet, wait a minute and open the vault — or contact support with reference " +
+            "Payment is not confirmed yet. If money left your mobile wallet, wait a minute — or contact support with reference " +
               ref +
               ".",
           ),
@@ -137,7 +141,7 @@ function DepositReturnPage() {
               </div>
             </dl>
             <p className="text-center text-xs text-muted">
-              Keep the screenshot until the money shows in the vault Activity list. Share the reference with support if anything looks wrong.
+              Keep the screenshot. Share the reference with support if anything looks wrong.
             </p>
           </div>
         ) : null}

@@ -19,6 +19,8 @@ import {
   getBalance,
   listTransactions,
   startDeposit,
+  createReceiveLink,
+  listMyReceiveLinks,
   startWithdraw,
   getPayoutMethodsPublic,
   getWithdrawLockStatus,
@@ -293,6 +295,9 @@ function Vault({
           <span>Send</span>
         </Button>
       </div>
+
+
+      <ReceiveLinkPanel />
 
       <section>
         <WithdrawLockPanel />
@@ -710,6 +715,88 @@ function CheckBalanceModal({ open, onClose, onDone }: { open: boolean; onClose: 
       {error ? <p className="mt-3 text-center text-sm text-danger">{error}</p> : null}
 {busy ? <LoadingStatus label="Checking balance…" /> : null}
     </Modal>
+  );
+}
+
+
+function ReceiveLinkPanel() {
+  const [link, setLink] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+
+  async function create() {
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      const res = await createReceiveLink({ data: {} });
+      const full =
+        typeof window !== "undefined"
+          ? `${window.location.origin}${res.path}`
+          : res.path;
+      setLink(full);
+      setMsg("Link ready — share it with anyone who should pay you. Each payment gets its own reference.");
+      setOpen(true);
+    } catch (e) {
+      setErr(errMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy() {
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      setMsg("Link copied.");
+    } catch {
+      setMsg(link);
+    }
+  }
+
+  return (
+    <Card className="mt-3 space-y-3 p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h2 className="font-display text-base font-semibold">Receive payment link</h2>
+          <p className="text-xs text-muted">
+            Share a link so external people can pay into your vault via PayChangu. Reusable; every payment is a new ID.
+          </p>
+        </div>
+        <Button type="button" size="sm" variant="secondary" loading={busy} disabled={busy} onClick={() => void create()}>
+          {busy ? "Creating…" : "Create link"}
+        </Button>
+      </div>
+      {err ? <p className="text-sm text-danger">{err}</p> : null}
+      {msg ? <p className="text-sm text-primary">{msg}</p> : null}
+      {link ? (
+        <div className="space-y-2 rounded-xl border border-border bg-surface-2 p-3">
+          <p className="break-all font-mono text-xs text-fg">{link}</p>
+          <div className="flex gap-2">
+            <Button type="button" className="flex-1" size="sm" onClick={() => void copy()}>
+              Copy link
+            </Button>
+            <Button
+              type="button"
+              className="flex-1"
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                if (navigator.share) {
+                  void navigator.share({ title: "Pay me on NEXA-SAVER", url: link }).catch(() => undefined);
+                } else {
+                  void copy();
+                }
+              }}
+            >
+              Share
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </Card>
   );
 }
 
