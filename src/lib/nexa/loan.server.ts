@@ -100,7 +100,7 @@ export async function recordLoanInterestEarned(
       platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
     ) values (
       ${userId}, ${"fee"}, ${"success"}, ${interest}, ${0},
-      ${interest}, ${0}, ${loanRef + "_INT"},
+      ${interest}, ${0}, ${loanRef + "_INT_" + Date.now().toString(36)},
       ${"Loan interest"}, now()
     )
   `;
@@ -223,28 +223,34 @@ export async function processLoansForUser(sql: Sql, userId: string): Promise<voi
           where user_id = ${userId} and balance_tambala >= ${due}
         `;
         balance -= due;
+        const payRef = `${loan.reference}_PAY_${Date.now().toString(36)}`;
         await sql`
           insert into transactions (
             user_id, kind, status, gross_tambala, credited_tambala,
             platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
           ) values (
             ${userId}, ${"fee"}, ${"success"}, ${due}, ${0},
-            ${0}, ${0}, ${loan.reference + "_PAY"},
+            ${0}, ${0}, ${payRef},
             ${"Loan repayment (auto)"}, now()
           )
         `;
-        await recordLoanInterestEarned(
-          sql,
-          userId,
-          loan.reference,
-          Number(loan.principal_tambala),
-          due,
-          due,
-        );
+        // Requires CHECK (balance_due_tambala >= 0) — migration 0031
         await sql`
           update loans set status = ${"paid"}, closed_at = now(), balance_due_tambala = ${0}, updated_at = now()
-          where id = ${loan.id}
+          where id = ${loan.id} and status = ${"active"}
         `;
+        try {
+          await recordLoanInterestEarned(
+            sql,
+            userId,
+            loan.reference,
+            Number(loan.principal_tambala),
+            due,
+            due,
+          );
+        } catch (err) {
+          console.error("[loan auto-repay] interest book:", (err as Error).message);
+        }
         await logLoanEvent(sql, loan.id, "paid_auto", `Auto repaid ${due}`, 0);
         continue;
       }

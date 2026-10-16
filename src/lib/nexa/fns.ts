@@ -4973,7 +4973,8 @@ export const repayLoan = createServerFn({ method: "POST" })
     if (!(await verifySecret(profile.pin_hash, data.pin))) throw new Error("Incorrect PIN");
 
     const { getSql, withTransaction } = await import("@/lib/db");
-    const { logLoanEvent } = await import("./loan.server");
+    const { logLoanEvent, recordLoanInterestEarned } = await import("./loan.server");
+    const { formatKwacha } = await import("./money");
     const sql = await getSql();
     const rows = await sql<{
       id: number;
@@ -4984,40 +4985,70 @@ export const repayLoan = createServerFn({ method: "POST" })
     }>`
       select id, balance_due_tambala, principal_tambala, status, user_id from loans where reference = ${data.reference} limit 1
     `;
-    if (!rows.length || rows[0].user_id !== context.userId) throw new Error("Loan not found.");
-    if (rows[0].status !== "active") throw new Error("This loan is not active.");
-    const due = Number(rows[0].balance_due_tambala);
-    const principal = Number(rows[0].principal_tambala);
+    if (!rows.length || rows[0]!.user_id !== context.userId) throw new Error("Loan not found.");
+    if (rows[0]!.status !== "active") throw new Error("This loan is not active.");
+    const due = Number(rows[0]!.balance_due_tambala);
+    const principal = Number(rows[0]!.principal_tambala);
+    if (!Number.isFinite(due) || due <= 0) {
+      throw new Error("This loan has nothing left to repay.");
+    }
 
     await withTransaction(async (tx) => {
       const bal = await tx<{ balance_tambala: number }>`
         select balance_tambala from wallets where user_id = ${context.userId} for update
       `;
-      if (Number(bal[0]?.balance_tambala ?? 0) < due) {
-        throw new Error("Insufficient vault balance to repay the full amount due.");
+      const have = Number(bal[0]?.balance_tambala ?? 0);
+      if (have < due) {
+        throw new Error(
+          `Insufficient vault balance to repay in full. Due ${formatKwacha(due)}, you have ${formatKwacha(have)}. Deposit the difference, then try again.`,
+        );
       }
-      await tx`
-        update wallets set balance_tambala = balance_tambala - ${due}, updated_at = now()
-        where user_id = ${context.userId}
+      const updated = await tx`
+        update wallets
+        set balance_tambala = balance_tambala - ${due}, updated_at = now()
+        where user_id = ${context.userId} and balance_tambala >= ${due}
+        returning balance_tambala
       `;
+      if (!updated.length) {
+        throw new Error(
+          `Insufficient vault balance to repay in full. Due ${formatKwacha(due)}.`,
+        );
+      }
+
+      // Unique-ish pay reference (retry-safe)
+      const payRef = `${data.reference}_PAY_${Date.now().toString(36)}`;
       await tx`
         insert into transactions (
           user_id, kind, status, gross_tambala, credited_tambala,
           platform_profit_tambala, payout_reserve_tambala, reference, note, completed_at
         ) values (
           ${context.userId}, ${"fee"}, ${"success"}, ${due}, ${0},
-          ${0}, ${0}, ${data.reference + "_PAY"},
+          ${0}, ${0}, ${payRef},
           ${"Loan repayment (manual)"}, now()
         )
       `;
+      // Requires CHECK (balance_due_tambala >= 0) — see migration 0031
       await tx`
-        update loans set status = ${"paid"}, balance_due_tambala = ${0}, closed_at = now(), updated_at = now()
-        where id = ${rows[0].id}
+        update loans
+        set status = ${"paid"},
+            balance_due_tambala = ${0},
+            closed_at = now(),
+            updated_at = now()
+        where id = ${rows[0]!.id} and status = ${"active"}
       `;
     });
-    const { recordLoanInterestEarned } = await import("./loan.server");
-    await recordLoanInterestEarned(sql, context.userId, data.reference, principal, due, due);
-    await logLoanEvent(sql, Number(rows[0].id), "paid_manual", `Repaid ${due}`, 0);
+
+    // Interest bookkeeping after successful debit (non-fatal if already booked)
+    try {
+      await recordLoanInterestEarned(sql, context.userId, data.reference, principal, due, due);
+    } catch (err) {
+      console.error("[repayLoan] interest book:", (err as Error).message);
+    }
+    try {
+      await logLoanEvent(sql, Number(rows[0]!.id), "paid_manual", `Repaid ${due}`, 0);
+    } catch {
+      /* optional */
+    }
     return { ok: true as const, paidTambala: due };
   });
 
