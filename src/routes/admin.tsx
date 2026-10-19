@@ -47,6 +47,8 @@ import {
   adminAnalytics,
   adminGetPayoutMethods,
   adminSetPayoutMethods,
+  adminGetRailOutage,
+  adminSetRailOutage,
   adminGetFeePolicy,
   adminSetFeePolicy,
   adminGetSendFeeTiers,
@@ -208,6 +210,17 @@ function Console() {
   const [payoutMethods, setPayoutMethods] = useState<{ momo: boolean; bank: boolean } | null>(null);
   const [payoutMsg, setPayoutMsg] = useState<string | null>(null);
   const [payoutBusy, setPayoutBusy] = useState(false);
+  const [railOutage, setRailOutage] = useState<{
+    enabled: boolean;
+    airtelDown: boolean;
+    tnmDown: boolean;
+    bankDown: boolean;
+    bankNamesDown: string[];
+    message: string;
+  } | null>(null);
+  const [railBankNamesText, setRailBankNamesText] = useState("");
+  const [railMsg, setRailMsg] = useState<string | null>(null);
+  const [railBusy, setRailBusy] = useState(false);
   const [feeForm, setFeeForm] = useState({ deposit: "6", unlockBase: "3", unlockCap: "3" });
   const [feeMsg, setFeeMsg] = useState<string | null>(null);
   const [feeBusy, setFeeBusy] = useState(false);
@@ -421,6 +434,12 @@ function Console() {
         setSurveyStatus(sv);
         setAnalytics(an);
         setPayoutMethods(pm);
+        void adminGetRailOutage()
+          .then((r) => {
+            setRailOutage(r);
+            setRailBankNamesText((r.bankNamesDown || []).join(", "));
+          })
+          .catch(() => setRailOutage(null));
         if (fp) {
           setFeeForm({
             deposit: String(Math.round(fp.depositFeeRate * 1000) / 10),
@@ -2014,6 +2033,130 @@ function Console() {
           </Button>
         </div>
         {sendFeeMsg ? <p className="text-sm text-muted">{sendFeeMsg}</p> : null}
+      </Card>
+
+
+      <Card className="space-y-3 p-4">
+        <h2 className="font-display text-lg font-semibold">Provider outage notices</h2>
+        <p className="text-sm text-muted">
+          When MoMo or bank rails jam, turn on a notice. Savers see a templated message and blocked
+          withdrawals on the down rail. Leave the master toggle off for normal service.
+        </p>
+        {railOutage ? (
+          <div className="space-y-3">
+            <label className="flex items-center gap-3 text-sm font-medium">
+              <input
+                type="checkbox"
+                className="size-4"
+                checked={railOutage.enabled}
+                onChange={(e) =>
+                  setRailOutage((r) => (r ? { ...r, enabled: e.target.checked } : r))
+                }
+              />
+              Show outage notice (master)
+            </label>
+            <label className="flex items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                className="size-4"
+                checked={railOutage.airtelDown}
+                onChange={(e) =>
+                  setRailOutage((r) => (r ? { ...r, airtelDown: e.target.checked } : r))
+                }
+              />
+              Airtel Money down — suggest TNM + bank
+            </label>
+            <label className="flex items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                className="size-4"
+                checked={railOutage.tnmDown}
+                onChange={(e) =>
+                  setRailOutage((r) => (r ? { ...r, tnmDown: e.target.checked } : r))
+                }
+              />
+              TNM Mpamba down — suggest Airtel + bank
+            </label>
+            <label className="flex items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                className="size-4"
+                checked={railOutage.bankDown}
+                onChange={(e) =>
+                  setRailOutage((r) => (r ? { ...r, bankDown: e.target.checked } : r))
+                }
+              />
+              All bank withdrawals down — suggest MoMo
+            </label>
+            <div className="space-y-1">
+              <Label htmlFor="rail-banks">Specific banks down (comma-separated names)</Label>
+              <Input
+                id="rail-banks"
+                value={railBankNamesText}
+                onChange={(e) => setRailBankNamesText(e.target.value)}
+                placeholder="e.g. National Bank, Standard Bank"
+              />
+              <p className="text-xs text-muted">
+                Savers on those banks are told to use another bank or MoMo.
+              </p>
+            </div>
+            {railOutage.enabled && (railOutage.airtelDown || railOutage.tnmDown || railOutage.bankDown || railBankNamesText.trim()) ? (
+              <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-fg">
+                Preview:{" "}
+                {[
+                  railOutage.airtelDown && railOutage.tnmDown
+                    ? "Airtel Money and TNM Mpamba are temporarily unavailable due to network issues. Please withdraw to bank if you can."
+                    : railOutage.airtelDown
+                      ? "Airtel Money is temporarily unavailable due to network issues. Please use TNM Mpamba or bank transfer."
+                      : railOutage.tnmDown
+                        ? "TNM Mpamba is temporarily unavailable due to network issues. Please use Airtel Money or bank transfer."
+                        : "",
+                  railOutage.bankDown
+                    ? "Bank withdrawals are temporarily unavailable due to network issues. Please use mobile money if it is available."
+                    : railBankNamesText.trim()
+                      ? `${railBankNamesText.trim()} temporarily unavailable. Please use another bank if possible, or mobile money.`
+                      : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              </p>
+            ) : null}
+            <Button
+              type="button"
+              className="w-full sm:w-auto"
+              disabled={railBusy}
+              onClick={() => {
+                setRailBusy(true);
+                setRailMsg(null);
+                const bankNamesDown = railBankNamesText
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean);
+                void adminSetRailOutage({
+                  data: {
+                    enabled: railOutage.enabled,
+                    airtelDown: railOutage.airtelDown,
+                    tnmDown: railOutage.tnmDown,
+                    bankDown: railOutage.bankDown,
+                    bankNamesDown,
+                  },
+                })
+                  .then((r) => {
+                    setRailOutage(r);
+                    setRailBankNamesText((r.bankNamesDown || []).join(", "));
+                    setRailMsg(r.enabled ? "Outage notice is ON." : "Outage notice is OFF.");
+                  })
+                  .catch((err) => setRailMsg(errMessage(err)))
+                  .finally(() => setRailBusy(false));
+              }}
+            >
+              {railBusy ? "Saving…" : "Save outage notice"}
+            </Button>
+            {railMsg ? <p className="text-sm text-muted">{railMsg}</p> : null}
+          </div>
+        ) : (
+          <p className="text-sm text-muted">Loading…</p>
+        )}
       </Card>
 
       <Card className="space-y-3 p-4">

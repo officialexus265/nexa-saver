@@ -23,6 +23,7 @@ import {
   listMyReceiveLinks,
   startWithdraw,
   getPayoutMethodsPublic,
+  getRailOutagePublic,
   getWithdrawLockStatus,
   setWithdrawTimeLock,
   cancelWithdrawTimeLock,
@@ -103,6 +104,7 @@ function Vault({
 
   const [selectedTx, setSelectedTx] = useState<PublicTx | null>(null);
   const [activityPage, setActivityPage] = useState(0);
+  const [railNotice, setRailNotice] = useState<string>("");
 
   const revealed = Boolean(balanceVisible && balance && !balance.locked);
 
@@ -110,6 +112,13 @@ function Vault({
     const [b, t] = await Promise.all([getBalance(), listTransactions().catch(() => [] as PublicTx[])]);
     setBalance(b);
     setTxs(t);
+  }, []);
+
+
+  useEffect(() => {
+    void getRailOutagePublic()
+      .then((r) => setRailNotice(r.enabled && r.message ? r.message : ""))
+      .catch(() => setRailNotice(""));
   }, []);
 
   // Activity + withdraw meta load without PIN; balance figure stays hidden until PIN reveal.
@@ -298,6 +307,14 @@ function Vault({
       <ReceiveLinkPanel />
 
       <section>
+        
+        {railNotice ? (
+          <div className="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-fg">
+            <p className="font-medium">Withdrawal notice</p>
+            <p className="mt-1 text-muted">{railNotice}</p>
+          </div>
+        ) : null}
+
         <WithdrawLockPanel />
         <LoanPanel />
         <AffiliatePanel />
