@@ -18,7 +18,7 @@ type Lang = { code: string; name: string; enabled: boolean; isDefault?: boolean 
 /**
  * Sequential phrase-by-phrase translation wizard.
  * 1) Pick or create language
- * 2) One English phrase at a time → translate → save & continue / draft / skip / finish
+ * 2) One phrase at a time → draft+continue / skip / save for now / publish
  */
 export function TranslationStudio() {
   const [step, setStep] = useState<"pick" | "translate">("pick");
@@ -101,18 +101,13 @@ export function TranslationStudio() {
     setValue(k ? (map[k] || "").trim() : "");
   }
 
-  async function persist(map: Record<string, string>, publish = false) {
-    if (!lang) return;
+  /** Save only the given entries (usually one key) to draft — does not re-upload the whole catalog. */
+  async function saveEntries(entries: Record<string, string>) {
+    if (!lang || !Object.keys(entries).length) return;
     setBusy(true);
     setErr(null);
     try {
-      if (publish) {
-        const r = await adminPublishTranslations({ data: { lang, entries: map, enable: true } });
-        setMsg(`Published ${r.published} phrases. Language enabled for users.`);
-      } else {
-        await adminSaveTranslationDraft({ data: { lang, entries: map } });
-        setMsg("Draft saved.");
-      }
+      await adminSaveTranslationDraft({ data: { lang, entries } });
     } catch (e) {
       setErr(errMessage(e));
       throw e;
@@ -121,46 +116,70 @@ export function TranslationStudio() {
     }
   }
 
-  async function saveAndContinue() {
+  /** Save current phrase to draft only, then advance. */
+  async function saveDraftAndContinue() {
     if (!lang || !currentKey) return;
-    const nextMap = { ...draft, [currentKey]: value.trim() };
+    const trimmed = value.trim();
+    const nextMap = { ...draft, [currentKey]: trimmed };
     setDraft(nextMap);
     try {
-      await persist(nextMap, false);
+      // Only this phrase — not every key again
+      await saveEntries({ [currentKey]: trimmed });
+      setMsg(null);
       if (index + 1 < total) goTo(index + 1, nextMap);
-      else setMsg("All phrases reviewed. Use Finish to publish or return home.");
-    } catch {
-      /* err set */
-    }
-  }
-
-  async function saveDraftOnly() {
-    if (!lang || !currentKey) return;
-    const nextMap = { ...draft, [currentKey]: value.trim() };
-    setDraft(nextMap);
-    try {
-      await persist(nextMap, false);
+      else setMsg("All phrases reviewed. Publish when ready, or Save for now.");
     } catch {
       /* err set */
     }
   }
 
   function skip() {
+    setMsg(null);
     if (index + 1 < total) goTo(index + 1);
-    else setMsg("End of list. Finish for now or go back.");
+    else setMsg("End of list. Publish when ready, or Save for now.");
   }
 
-  async function finish(publish: boolean) {
+  /** Save current phrase (if any), keep draft, leave studio. */
+  async function saveForNow() {
     if (!lang) return;
-    const nextMap = currentKey ? { ...draft, [currentKey]: value.trim() } : draft;
-    setDraft(nextMap);
     try {
-      await persist(nextMap, publish);
+      if (currentKey) {
+        const trimmed = value.trim();
+        const nextMap = { ...draft, [currentKey]: trimmed };
+        setDraft(nextMap);
+        await saveEntries({ [currentKey]: trimmed });
+      }
       setStep("pick");
       setLang(null);
-      setMsg(publish ? "Published and back to language list." : "Progress saved as draft.");
+      setMsg("Draft saved. You can continue later.");
     } catch {
       /* err set */
+    }
+  }
+
+  /** Publish all draft (plus current phrase) and enable language. */
+  async function publishNow() {
+    if (!lang) return;
+    const nextMap = currentKey ? { ...draft, [currentKey]: value.trim() } : { ...draft };
+    setDraft(nextMap);
+    setBusy(true);
+    setErr(null);
+    try {
+      // Include current phrase in this publish only
+      const entries =
+        currentKey && value.trim()
+          ? { [currentKey]: value.trim() }
+          : undefined;
+      const r = await adminPublishTranslations({
+        data: { lang, entries, enable: true },
+      });
+      setMsg(`Published ${r.published} phrases. Language is live.`);
+      setStep("pick");
+      setLang(null);
+    } catch (e) {
+      setErr(errMessage(e));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -246,8 +265,8 @@ export function TranslationStudio() {
             {currentKey ? ` · ${currentKey}` : ""}
           </p>
         </div>
-        <Button type="button" variant="secondary" className="h-8 shrink-0 text-xs" onClick={() => void finish(false)}>
-          Finish for now
+        <Button type="button" variant="secondary" className="h-8 shrink-0 text-xs" onClick={() => void saveForNow()}>
+          Save for now
         </Button>
       </div>
 
@@ -279,17 +298,23 @@ export function TranslationStudio() {
       {msg ? <p className="text-sm text-primary">{msg}</p> : null}
 
       <div className="grid grid-cols-2 gap-2">
-        <Button type="button" className="w-full" disabled={busy} loading={busy} onClick={() => void saveAndContinue()}>
-          Save and continue
-        </Button>
-        <Button type="button" variant="secondary" className="w-full" disabled={busy} onClick={() => void saveDraftOnly()}>
-          Save as draft
+        <Button
+          type="button"
+          className="w-full"
+          disabled={busy}
+          loading={busy}
+          onClick={() => void saveDraftAndContinue()}
+        >
+          Save as draft and continue
         </Button>
         <Button type="button" variant="secondary" className="w-full" disabled={busy} onClick={skip}>
           Skip
         </Button>
-        <Button type="button" variant="secondary" className="w-full" disabled={busy} onClick={() => void finish(true)}>
-          Publish & finish
+        <Button type="button" variant="secondary" className="w-full" disabled={busy} onClick={() => void saveForNow()}>
+          Save for now
+        </Button>
+        <Button type="button" className="w-full" disabled={busy} loading={busy} onClick={() => void publishNow()}>
+          Publish
         </Button>
       </div>
     </Card>
