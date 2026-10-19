@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils";
 import { lazy, Suspense, useEffect, useState, useRef } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { TranslationStudio } from "@/components/translation-studio";
@@ -94,6 +95,43 @@ import {
 } from "@/lib/nexa/fns";
 import { formatKwacha, tambalaToKwacha } from "@/lib/nexa/money";
 import type { AdminOverview, AdminUserRow, PublicTx } from "@/lib/nexa/types";
+
+
+/** Collapsed-by-default admin card. Pass defaultOpen for graph / support desk. */
+function AdminSection({
+  title,
+  defaultOpen = false,
+  badge,
+  children,
+  className,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  badge?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className={cn("overflow-hidden rounded-2xl border border-border bg-surface", className)}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-surface-2/60"
+      >
+        <span className="font-display text-lg font-semibold text-fg">{title}</span>
+        <span className="flex shrink-0 items-center gap-2">
+          {badge}
+          <span className="text-sm text-muted" aria-hidden>
+            {open ? "▾" : "▸"}
+          </span>
+        </span>
+      </button>
+      {open ? <div className="space-y-3 border-t border-border px-4 pb-4 pt-3">{children}</div> : null}
+    </div>
+  );
+}
+
 
 export const Route = createFileRoute("/admin")({ component: AdminPage });
 
@@ -667,10 +705,7 @@ function Console() {
         <Stat label="Savers" value={String(overview.userCount)} />
       </div>
 
-      <Card className="space-y-3 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="font-display text-lg font-semibold">Production readiness</h2>
-          {overview?.productionReadiness ? (
+<AdminSection title={"Production readiness"} badge={<>{overview?.productionReadiness ? (
             <span
               className={
                 overview.productionReadiness.allCriticalOk &&
@@ -683,9 +718,8 @@ function Console() {
               {overview.productionReadiness.isProduction ? "Production" : "Non-production"}
               {overview.productionReadiness.allCriticalOk ? " · config OK" : " · fix env"}
             </span>
-          ) : null}
-        </div>
-        <p className="text-sm text-muted">
+          ) : null}</>}>
+<p className="text-sm text-muted">
           Phase A checks. In production, deposits, withdrawals, and sends stay blocked until critical items are green.
           Secrets are never shown here — only whether they are set.
         </p>
@@ -731,11 +765,11 @@ function Console() {
         ) : (
           <p className="text-sm text-muted">Loading checklist…</p>
         )}
-      </Card>
+</AdminSection>
 
-      <Card className="space-y-3 p-4 border-primary/30">
-        <h2 className="font-display text-lg font-semibold">Admin authenticator (2FA)</h2>
-        <p className="text-sm text-muted">
+<AdminSection title={"Admin authenticator (2FA)"}>
+
+<p className="text-sm text-muted">
           Protect force-credit, user delete/lock, fee changes, treasury withdraw, and other sensitive actions.
           Use Google Authenticator, Authy, or any TOTP app. Save backup codes offline.
         </p>
@@ -905,11 +939,11 @@ function Console() {
             {totpBusy ? "Waiting for key…" : "Register security key / passkey"}
           </Button>
         </div>
-      </Card>
+</AdminSection>
 
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Treasury (platform profit)</h2>
-        <p className="text-sm text-muted">
+<AdminSection title={"Treasury (platform profit)"}>
+
+<p className="text-sm text-muted">
           Book profit is fee income from deposits. Saver balances are liabilities — never withdrawn here.
           Treasury cash-out uses deposit book profit, early-unlock fees, and loan interest collected from users, minus what you already paid out. ~1.8% applies on the mobile-money rail.
         </p>
@@ -1009,15 +1043,13 @@ function Console() {
             </div>
           ) : null}
         </div>
-
-      </Card>
-
+</AdminSection>
 
 
-      <Card className="space-y-4 p-5">
-        <div>
-          <h2 className="font-display text-lg font-semibold">Reverse false-success withdrawal</h2>
-          <p className="text-sm text-muted">
+
+<AdminSection title={"Reverse false-success withdrawal"}>
+<div>
+<p className="text-sm text-muted">
             Use when a withdrawal shows <span className="font-medium">success</span> but PayChangu never paid out.
             Enter transaction <span className="font-medium">ID</span> or <span className="font-medium">reference</span>.
             Refunds the user and marks the tx failed. Does not call PayChangu.
@@ -1099,12 +1131,11 @@ function Console() {
           </div>
         </div>
         {reverseWthMsg ? <p className="text-sm text-primary">{reverseWthMsg}</p> : null}
-      </Card>
+</AdminSection>
 
-      <Card className="space-y-4 p-5">
-        <div>
-          <h2 className="font-display text-lg font-semibold">Recalculate payout reserve (2%)</h2>
-          <p className="text-sm text-muted">
+<AdminSection title={"Recalculate payout reserve (2%)"}>
+<div>
+<p className="text-sm text-muted">
             Compares total user liabilities to the 2% withdrawal-reserve target. Shortfall is topped up from the
             profit bag; surplus reserve is moved back into the profit bag. Does not change user balances.
           </p>
@@ -1214,13 +1245,12 @@ function Console() {
             {reserveRecalcBusy ? "Working…" : "Recalculate (fill gap or release surplus)"}
           </Button>
         </div>
-      </Card>
+</AdminSection>
 
-      <Card className="space-y-3 p-4">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+<AdminSection title={"Funds audit"}>
+<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="font-display text-lg font-semibold">Funds audit</h2>
-            <p className="text-sm text-muted">
+<p className="text-sm text-muted">
               Operating money (user vaults + admin main + admin received) vs PayChangu main + collection. Profits
               excluded; remaining withdrawal reserve set aside; rail fees already paid added back.
             </p>
@@ -1564,7 +1594,7 @@ function Console() {
         ) : (
           <p className="text-sm text-muted">Press Run audit to compare NEXA books with live PayChangu balances.</p>
         )}
-      </Card>
+</AdminSection>
 
       <Modal
         open={!!restoreSuccess}
@@ -1637,9 +1667,9 @@ function Console() {
 
       {adminTab === "money" ? (
       <div className="space-y-5">
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Large-withdrawal support number</h2>
-        <p className="text-sm text-muted">
+<AdminSection title={"Large-withdrawal support number"}>
+
+<p className="text-sm text-muted">
           Shown to users who need more than the automatic daily limit (final tier 1,000,000 MWK). They contact
           this number for help. Use a Malawi mobile the platform monitors.
         </p>
@@ -1667,12 +1697,12 @@ function Console() {
           </Button>
         </form>
         {supportMsg ? <p className="text-sm text-muted">{supportMsg}</p> : null}
-      </Card>
+</AdminSection>
 
 
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Platform fees</h2>
-        <p className="text-sm text-muted">
+<AdminSection title={"Platform fees"}>
+
+<p className="text-sm text-muted">
           These percentages drive deposits, early unlock, Terms, and Privacy. Deposit fee is split half profit / half
           payout reserve for bookkeeping. Early unlock uses base × remaining fraction, capped at the max you set (default
           max 3%).
@@ -1727,15 +1757,15 @@ function Console() {
           {feeBusy ? "Saving…" : "Save fee policy"}
         </Button>
         {feeMsg ? <p className="text-sm text-muted">{feeMsg}</p> : null}
-      </Card>
+</AdminSection>
 
 
 
 
 
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Footer / developer credit</h2>
-        <p className="text-sm text-muted">
+<AdminSection title={"Footer / developer credit"}>
+
+<p className="text-sm text-muted">
           Shown on login and in the app as &quot;Developed by …&quot;. Link should be your official Facebook page (or any
           public page).
         </p>
@@ -1761,11 +1791,11 @@ function Console() {
           Save footer
         </Button>
         {footerMsg ? <p className="text-sm text-muted">{footerMsg}</p> : null}
-      </Card>
+</AdminSection>
 
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Signup explainer video</h2>
-        <p className="text-sm text-muted">
+<AdminSection title={"Signup explainer video"}>
+
+<p className="text-sm text-muted">
           YouTube link or video id shown when a new user is not familiar with the system. Leave empty to skip the video
           and send them straight to sign up.
         </p>
@@ -1795,11 +1825,11 @@ function Console() {
           Save explainer video
         </Button>
         {signupVideoMsg ? <p className="text-sm text-muted">{signupVideoMsg}</p> : null}
-      </Card>
+</AdminSection>
 
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Tutorial videos</h2>
-        <label className="flex items-center gap-2 text-sm">
+<AdminSection title={"Tutorial videos"}>
+
+<label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
             checked={tutorialsEnabled}
@@ -1888,11 +1918,11 @@ function Console() {
           </Button>
         </div>
         {tutorialsMsg ? <p className="text-sm text-muted">{tutorialsMsg}</p> : null}
-      </Card>
+</AdminSection>
 
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Referral program</h2>
-        <label className="flex items-center gap-2 text-sm">
+<AdminSection title={"Referral program"}>
+
+<label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={refEnabled} onChange={(e) => setRefEnabled(e.target.checked)} />
           Program enabled (off = no new affiliates / no new first-deposit commissions; withdrawals still allowed)
         </label>
@@ -2021,11 +2051,11 @@ function Console() {
           Save referral settings
         </Button>
         {refMsg ? <p className="text-sm text-muted">{refMsg}</p> : null}
-      </Card>
+</AdminSection>
 
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Loan policy</h2>
-        <p className="text-sm text-muted">
+<AdminSection title={"Loan policy"}>
+
+<p className="text-sm text-muted">
           Loans only against a voluntary withdrawal time-lock (not admin locks). LTV is % of locked balance. Interest is
           charged per full month period on the amount due.
         </p>
@@ -2060,11 +2090,11 @@ function Console() {
           Save loan policy
         </Button>
         {loanPolicyMsg ? <p className="text-sm text-muted">{loanPolicyMsg}</p> : null}
-      </Card>
+</AdminSection>
 
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Send money fees (fixed kwacha)</h2>
-        <p className="text-sm text-muted">
+<AdminSection title={"Send money fees (fixed kwacha)"}>
+
+<p className="text-sm text-muted">
           Charged from the sender&apos;s balance. Recipient always receives the full typed amount. Send is disabled when
           withdrawals are paused or locked.
         </p>
@@ -2133,12 +2163,12 @@ function Console() {
           </Button>
         </div>
         {sendFeeMsg ? <p className="text-sm text-muted">{sendFeeMsg}</p> : null}
-      </Card>
+</AdminSection>
 
 
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Provider outage notices</h2>
-        <p className="text-sm text-muted">
+<AdminSection title={"Provider outage notices"}>
+
+<p className="text-sm text-muted">
           When MoMo or bank rails jam, turn on a notice. Savers see a templated message and blocked
           withdrawals on the down rail. Leave the master toggle off for normal service.
         </p>
@@ -2276,11 +2306,11 @@ function Console() {
         ) : (
           <p className="text-sm text-muted">Loading…</p>
         )}
-      </Card>
+</AdminSection>
 
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Payout methods</h2>
-        <p className="text-sm text-muted">
+<AdminSection title={"Payout methods"}>
+
+<p className="text-sm text-muted">
           Choose which ways savers can withdraw. At least one method must stay on. Bank withdrawals show a 700
           MWK rail flat fee to the user (not a NEXA charge).
         </p>
@@ -2328,16 +2358,16 @@ function Console() {
         ) : (
           <p className="text-sm text-muted">Loading…</p>
         )}
-      </Card>
+</AdminSection>
 
       </div>
       ) : null}
 
       {adminTab === "tools" ? (
       <div className="space-y-5">
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Security survey</h2>
-        <p className="text-sm text-muted">
+<AdminSection title={"Security survey"}>
+
+<p className="text-sm text-muted">
           Launch a mandatory check on every saver&apos;s dashboard. Users must confirm email, withdrawal number,
           and security question before they can continue. Starting a new survey creates a new campaign so
           everyone is asked again.
@@ -2430,12 +2460,12 @@ function Console() {
             Stop survey
           </Button>
         </div>
-      </Card>
+</AdminSection>
 
 
-      <Card className="space-y-3 p-4">
-        <h2 className="font-display text-lg font-semibold">Usage analytics</h2>
-        {analytics ? (
+<AdminSection title={"Usage analytics"}>
+
+{analytics ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <SurveyStat label="Visits today" value={String(analytics.todayVisits)} />
@@ -2492,7 +2522,7 @@ function Console() {
         ) : (
           <p className="text-sm text-muted">Loading analytics…</p>
         )}
-      </Card>
+</AdminSection>
 
         <HelpLinesManager />
       </div>
@@ -2989,9 +3019,9 @@ function Console() {
 
       {adminTab === "reversals" ? (
       <div className="space-y-5">
-        <Card className="space-y-3 p-4">
-          <h2 className="font-display text-lg font-semibold">Look up transfer ID</h2>
-          <p className="text-sm text-muted">
+<AdminSection title={"Look up transfer ID"}>
+
+<p className="text-sm text-muted">
             When a user reports a wrong send, take their transaction ID, freeze the transfer (2 days), and email the
             recipient. Then reverse or release after review.
           </p>
@@ -3065,11 +3095,11 @@ function Console() {
             </Button>
           </div>
           {lookupMsg ? <p className="text-sm text-muted">{lookupMsg}</p> : null}
-        </Card>
+</AdminSection>
 
-        <Card className="space-y-3 p-4">
-          <h2 className="font-display text-lg font-semibold">Reversal requests</h2>
-          {!reversals.length ? (
+<AdminSection title={"Reversal requests"}>
+
+{!reversals.length ? (
             <p className="text-sm text-muted">No requests yet.</p>
           ) : (
             <ul className="space-y-2 text-sm">
@@ -3094,7 +3124,7 @@ function Console() {
               ))}
             </ul>
           )}
-        </Card>
+</AdminSection>
       </div>
       ) : null}
 
@@ -3106,9 +3136,9 @@ function Console() {
 
       {adminTab === "legal" ? (
       <div className="space-y-5">
-        <Card className="space-y-3 p-4">
-          <h2 className="font-display text-lg font-semibold">Terms &amp; Privacy</h2>
-          <p className="text-sm text-muted">
+<AdminSection title={"Terms & Privacy"}>
+
+<p className="text-sm text-muted">
             Edit the public documents users accept at sign-up. Insert live figures with the buttons below
             (for example deposit fee %). When you change fees in Money settings, those placeholders update
             automatically on the public pages — you do not need to rewrite every number by hand.
@@ -3196,17 +3226,16 @@ function Console() {
             Save {legalKind === "terms" ? "terms" : "privacy"}
           </Button>
           {legalMsg ? <p className="text-sm text-muted">{legalMsg}</p> : null}
-        </Card>
+</AdminSection>
       </div>
       ) : null}
 
       
       {adminTab === "ops" ? (
         <div className="space-y-5">
-          <Card className="space-y-3 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="font-display text-lg font-semibold">Security checklist</h2>
-              <Button
+<AdminSection title={"Security checklist"}>
+<div className="flex flex-wrap items-center justify-between gap-2">
+<Button
                 type="button"
                 variant="secondary"
                 size="sm"
@@ -3256,11 +3285,11 @@ function Console() {
                 <li>Cross-site form post from another origin (should 403)</li>
               </ul>
             </div>
-          </Card>
+</AdminSection>
 
-          <Card className="space-y-3 p-4">
-            <h2 className="font-display text-lg font-semibold">Launch &amp; beta</h2>
-            <p className="text-sm text-muted">
+<AdminSection title={"Launch & beta"}>
+
+<p className="text-sm text-muted">
               Pre-public controls: close sign-ups, mark private beta, cap deposits, and keep your incident playbook here.
             </p>
             <label className="flex items-center gap-2 text-sm">
@@ -3325,11 +3354,11 @@ function Console() {
                 <li>Health check: <code className="text-fg">/api/health</code></li>
               </ul>
             </div>
-          </Card>
+</AdminSection>
 
-          <Card className="space-y-3 p-4">
-            <h2 className="font-display text-lg font-semibold">Money pause (kill switch)</h2>
-            <p className="text-sm text-muted">
+<AdminSection title={"Money pause (kill switch)"}>
+
+<p className="text-sm text-muted">
               Pause deposits and/or withdrawals in seconds. Env flags NEXA_PAUSE_* still override if set on Vercel.
               {opsQueue?.pause.envOverride ? (
                 <span className="text-danger"> An environment pause is active — clear it in Vercel to resume fully.</span>
@@ -3384,12 +3413,11 @@ function Console() {
                 {opsQueue.pause.updatedBy ? ` · by ${opsQueue.pause.updatedBy.slice(0, 8)}…` : ""}
               </p>
             ) : null}
-          </Card>
+</AdminSection>
 
-          <Card className="space-y-3 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="font-display text-lg font-semibold">Reconciliation</h2>
-              <Button
+<AdminSection title={"Reconciliation"}>
+<div className="flex flex-wrap items-center justify-between gap-2">
+<Button
                 type="button"
                 disabled={opsBusy}
                 onClick={() => {
@@ -3448,11 +3476,11 @@ function Console() {
                 </table>
               </div>
             ) : null}
-          </Card>
+</AdminSection>
 
-          <Card className="space-y-3 p-4">
-            <h2 className="font-display text-lg font-semibold">Support queues</h2>
-            <p className="text-sm text-muted">
+<AdminSection title={"Support queues"}>
+
+<p className="text-sm text-muted">
               Pending deposits and withdrawals. Items older than 15 minutes are marked stuck — use Support desk
               below with the reference after confirming in PayChangu.
             </p>
@@ -3540,10 +3568,10 @@ function Console() {
               ))}
               {!opsQueue?.frozenTransfers.length ? <li className="text-muted">None</li> : null}
             </ul>
-          </Card>
-          <Card className="space-y-3 p-4">
-            <h2 className="font-display text-lg font-semibold">KYC queue (light)</h2>
-            <p className="text-sm text-muted">
+</AdminSection>
+<AdminSection title={"KYC queue (light)"}>
+
+<p className="text-sm text-muted">
               Users submit ID type, number, and name. Approving unlocks withdrawals at or above the threshold.
             </p>
             <div className="flex flex-wrap items-end gap-2">
@@ -3619,7 +3647,7 @@ function Console() {
               ))}
               {!kycQueue?.rows?.length ? <li className="text-muted">No KYC submissions yet.</li> : null}
             </ul>
-          </Card>
+</AdminSection>
 
           <Card className="space-y-2 p-4 text-sm text-muted">
             <h2 className="font-display text-lg font-semibold text-fg">Limits &amp; sessions</h2>
@@ -4137,9 +4165,9 @@ function HelpLinesManager() {
   }
 
   return (
-    <Card className="space-y-3 p-4">
-      <h2 className="font-display text-lg font-semibold">Help lines</h2>
-      <p className="text-sm text-muted">
+<AdminSection title={"Help lines"}>
+
+<p className="text-sm text-muted">
         These appear when a user taps the floating <strong className="text-fg">+</strong> on the dashboard
         (WhatsApp, call, SMS, Facebook). Leave empty to hide the button.
       </p>
@@ -4197,6 +4225,6 @@ function HelpLinesManager() {
         </Button>
       </form>
       {msg ? <p className="text-sm text-muted">{msg}</p> : null}
-    </Card>
+</AdminSection>
   );
 }
