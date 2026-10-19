@@ -201,6 +201,8 @@ function Console() {
   const [accountsPage, setAccountsPage] = useState(0);
   const [accountsShowAll, setAccountsShowAll] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [ledgerPage, setLedgerPage] = useState(0);
+  const [ledgerShowAll, setLedgerShowAll] = useState(false);
   const [analytics, setAnalytics] = useState<Awaited<ReturnType<typeof adminAnalytics>> | null>(null);
   const [userActionMsg, setUserActionMsg] = useState<string | null>(null);
   const [payoutMethods, setPayoutMethods] = useState<{ momo: boolean; bank: boolean } | null>(null);
@@ -2498,10 +2500,38 @@ function Console() {
         </section>
 
         <section>
-          <h2 className="mb-3 font-display text-lg font-semibold">Ledger</h2>
-          <p className="mb-2 text-xs text-muted">Latest 10 movements</p>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div>
+              <h2 className="font-display text-lg font-semibold">Ledger</h2>
+              <p className="text-xs text-muted">
+                {ledgerShowAll ? "All movements (5 per page)" : "Latest movements"}
+              </p>
+            </div>
+            {!ledgerShowAll && txs.length > 5 ? (
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-8 px-3 text-xs"
+                onClick={() => { setLedgerShowAll(true); setLedgerPage(0); }}
+              >
+                View all
+              </Button>
+            ) : null}
+            {ledgerShowAll ? (
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-8 px-3 text-xs"
+                onClick={() => { setLedgerShowAll(false); setLedgerPage(0); }}
+              >
+                Show less
+              </Button>
+            ) : null}
+          </div>
           <ul className="space-y-2">
-            {txs.slice(0, 10).map((tx) => (
+            {(ledgerShowAll ? txs : txs.slice(0, Math.min(5, txs.length)))
+              .slice(ledgerShowAll ? ledgerPage * 5 : 0, ledgerShowAll ? ledgerPage * 5 + 5 : 5)
+              .map((tx) => (
               <li
                 key={tx.id}
                 className="flex items-center justify-between rounded-xl border border-border bg-surface px-4 py-3 text-sm"
@@ -2519,6 +2549,34 @@ function Console() {
             ))}
             {!txs.length ? <li className="text-sm text-muted">No ledger rows yet.</li> : null}
           </ul>
+          {(ledgerShowAll ? txs.length : Math.min(5, txs.length)) > 0 && (ledgerShowAll ? txs.length > 5 : false) ? (
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-8 px-3 text-xs"
+                disabled={ledgerPage <= 0}
+                onClick={() => setLedgerPage((p) => Math.max(0, p - 1))}
+              >
+                Previous
+              </Button>
+              <p className="text-xs text-muted">
+                {ledgerPage + 1} / {Math.max(1, Math.ceil(txs.length / 5))}
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-8 px-3 text-xs"
+                disabled={(ledgerPage + 1) * 5 >= txs.length}
+                onClick={() => setLedgerPage((p) => p + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          ) : null}
+          {!ledgerShowAll && txs.length > 5 ? (
+            <p className="mt-2 text-center text-xs text-muted">Showing 5 of {txs.length}</p>
+          ) : null}
         </section>
       </div>
       ) : null}

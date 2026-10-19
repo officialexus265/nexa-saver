@@ -492,6 +492,10 @@ export const EN_CATALOG = {
   "profile.updateNumber": "Update number",
   "profile.updatePassword": "Update password",
   "common.saving": "Saving…",
+  "dash.viewAll": "View all",
+  "dash.activityAll": "All activity",
+  "dash.nextPage": "Next",
+  "dash.prevPage": "Previous",
 } as const;
 
 export type MessageKey = keyof typeof EN_CATALOG;

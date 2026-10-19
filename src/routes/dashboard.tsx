@@ -102,6 +102,7 @@ function Vault({
   const [depositFeeRate, setDepositFeeRate] = useState(DEPOSIT_FEE_RATE);
 
   const [selectedTx, setSelectedTx] = useState<PublicTx | null>(null);
+  const [activityPage, setActivityPage] = useState(0);
 
   const revealed = Boolean(balanceVisible && balance && !balance.locked);
 
@@ -301,50 +302,87 @@ function Vault({
         <LoanPanel />
         <AffiliatePanel />
 
-        <h2 className="mb-3 font-display text-lg font-semibold">{t("dash.activity")}</h2>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h2 className="font-display text-lg font-semibold">{t("dash.activity")}</h2>
+          {txs && txs.length > 0 ? (
+            <Link
+              to="/activity"
+              className="text-xs font-medium text-primary hover:underline"
+            >
+              {t("dash.viewAll")}
+            </Link>
+          ) : null}
+        </div>
         {txs === null ? (
           <p className="text-sm text-muted">{t("dash.loadingActivity")}</p>
         ) : !txs.length ? (
           <p className="text-sm text-muted">{t("dash.noActivity")}</p>
         ) : (
-          <ul className="space-y-2">
-            {txs.map((tx) => (
-              <li key={tx.id}>
-                <button
+          <>
+            <ul className="space-y-2">
+              {txs.slice(activityPage * 5, activityPage * 5 + 5).map((tx) => (
+                <li key={tx.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTx(tx)}
+                    className="flex w-full items-center justify-between rounded-xl border border-border bg-surface px-4 py-3 text-left transition hover:border-primary/40 hover:bg-surface-2"
+                  >
+                    <div>
+                      <p className="text-sm font-medium capitalize">
+                        {tx.kind === "transfer_out"
+                          ? "Sent"
+                          : tx.kind === "transfer_in"
+                            ? t("dash.received")
+                            : tx.kind.replace("_", " ")}
+                      </p>
+                      <p className="text-xs text-muted">
+                        {tx.status} · {new Date(tx.createdAt).toLocaleString()}
+                        {tx.kind === "transfer_out" && (tx.sendFeeTambala ?? 0) > 0
+                          ? ` · includes ${formatKwacha(tx.sendFeeTambala!, { compact: true })} fee`
+                          : ""}
+                      </p>
+                    </div>
+                    <p className="text-sm tabular-nums">
+                      {tx.kind === "deposit" || tx.kind === "transfer_in" ? "+" : "−"}
+                      {formatKwacha(
+                        tx.kind === "deposit" || tx.kind === "transfer_in"
+                          ? tx.creditedTambala || tx.grossTambala
+                          : tx.kind === "transfer_out"
+                            ? tx.grossTambala + (tx.sendFeeTambala ?? 0)
+                            : tx.grossTambala,
+                        { compact: true },
+                      )}
+                    </p>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {txs.length > 5 ? (
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <Button
                   type="button"
-                  onClick={() => setSelectedTx(tx)}
-                  className="flex w-full items-center justify-between rounded-xl border border-border bg-surface px-4 py-3 text-left transition hover:border-primary/40 hover:bg-surface-2"
+                  variant="secondary"
+                  className="h-8 px-3 text-xs"
+                  disabled={activityPage <= 0}
+                  onClick={() => setActivityPage((p) => Math.max(0, p - 1))}
                 >
-                  <div>
-                    <p className="text-sm font-medium capitalize">
-                      {tx.kind === "transfer_out"
-                        ? "Sent"
-                        : tx.kind === "transfer_in"
-                          ? t("dash.received")
-                          : tx.kind.replace("_", " ")}
-                    </p>
-                    <p className="text-xs text-muted">
-                      {tx.status} · {new Date(tx.createdAt).toLocaleString()}
-                      {tx.kind === "transfer_out" && (tx.sendFeeTambala ?? 0) > 0
-                        ? ` · includes ${formatKwacha(tx.sendFeeTambala!, { compact: true })} fee`
-                        : ""}
-                    </p>
-                  </div>
-                  <p className="text-sm tabular-nums">
-                    {tx.kind === "deposit" || tx.kind === "transfer_in" ? "+" : "−"}
-                    {formatKwacha(
-                      tx.kind === "deposit" || tx.kind === "transfer_in"
-                        ? tx.creditedTambala || tx.grossTambala
-                        : tx.kind === "transfer_out"
-                          ? tx.grossTambala + (tx.sendFeeTambala ?? 0)
-                          : tx.grossTambala,
-                      { compact: true },
-                    )}
-                  </p>
-                </button>
-              </li>
-            ))}
-          </ul>
+                  {t("dash.prevPage")}
+                </Button>
+                <p className="text-xs text-muted">
+                  {activityPage * 5 + 1}–{Math.min((activityPage + 1) * 5, txs.length)} / {txs.length}
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-8 px-3 text-xs"
+                  disabled={(activityPage + 1) * 5 >= txs.length}
+                  onClick={() => setActivityPage((p) => p + 1)}
+                >
+                  {t("dash.nextPage")}
+                </Button>
+              </div>
+            ) : null}
+          </>
         )}
       </section>
 
@@ -417,7 +455,8 @@ function Vault({
 
 
 
-function WithdrawHoldCountdown({ until }: { until: string | null }) {
+function WithdrawHoldCountdown({
+  until }: { until: string | null }) {
   const { t } = useT();
   const [label, setLabel] = useState<string | null>(null);
 
@@ -672,7 +711,8 @@ function EmailVerifyBanner() {
   );
 }
 
-function CheckBalanceModal({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
+function CheckBalanceModal({
+  open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
   const { t } = useT();
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
