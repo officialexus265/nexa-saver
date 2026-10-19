@@ -11,7 +11,7 @@ import {
   adminPublishTranslations,
   adminSaveTranslationDraft,
 } from "@/lib/nexa/fns";
-import { ALL_MESSAGE_KEYS, EN_CATALOG } from "@/lib/i18n/catalog-en";
+import { ALL_MESSAGE_KEYS, EN_CATALOG, keysSharingEnglish } from "@/lib/i18n/catalog-en";
 
 type Lang = { code: string; name: string; enabled: boolean; isDefault?: boolean };
 
@@ -116,15 +116,21 @@ export function TranslationStudio() {
     }
   }
 
-  /** Save current phrase to draft only, then advance. */
+  /** Save current phrase to draft only, then advance.
+   *  If the same English appears under several keys (e.g. Share), all of them get this translation. */
   async function saveDraftAndContinue() {
     if (!lang || !currentKey) return;
     const trimmed = value.trim();
-    const nextMap = { ...draft, [currentKey]: trimmed };
+    const shared = keysSharingEnglish(currentKey);
+    const nextMap = { ...draft };
+    const entries: Record<string, string> = {};
+    for (const k of shared) {
+      nextMap[k] = trimmed;
+      entries[k] = trimmed;
+    }
     setDraft(nextMap);
     try {
-      // Only this phrase — not every key again
-      await saveEntries({ [currentKey]: trimmed });
+      await saveEntries(entries);
       setMsg(null);
       if (index + 1 < total) goTo(index + 1, nextMap);
       else setMsg("All phrases reviewed. Publish when ready, or Save for now.");
@@ -144,15 +150,21 @@ export function TranslationStudio() {
     if (index > 0) goTo(index - 1);
   }
 
-  /** Save current phrase (if any), keep draft, leave studio. */
+  /** Save current phrase (if any), keep draft, leave studio. Shared English → all matching keys. */
   async function saveForNow() {
     if (!lang) return;
     try {
       if (currentKey) {
         const trimmed = value.trim();
-        const nextMap = { ...draft, [currentKey]: trimmed };
+        const shared = keysSharingEnglish(currentKey);
+        const nextMap = { ...draft };
+        const entries: Record<string, string> = {};
+        for (const k of shared) {
+          nextMap[k] = trimmed;
+          entries[k] = trimmed;
+        }
         setDraft(nextMap);
-        await saveEntries({ [currentKey]: trimmed });
+        await saveEntries(entries);
       }
       setStep("pick");
       setLang(null);
@@ -171,10 +183,13 @@ export function TranslationStudio() {
     setErr(null);
     try {
       // Include current phrase in this publish only
-      const entries =
-        currentKey && value.trim()
-          ? { [currentKey]: value.trim() }
-          : undefined;
+      let entries: Record<string, string> | undefined;
+      if (currentKey && value.trim()) {
+        entries = {};
+        for (const k of keysSharingEnglish(currentKey)) {
+          entries[k] = value.trim();
+        }
+      }
       const r = await adminPublishTranslations({
         data: { lang, entries, enable: true },
       });
@@ -285,6 +300,12 @@ export function TranslationStudio() {
       <div className="space-y-1 rounded-xl border border-border bg-surface-2 p-4">
         <p className="text-xs font-medium uppercase text-muted">English</p>
         <p className="text-sm text-fg">{source}</p>
+        {currentKey && keysSharingEnglish(currentKey).length > 1 ? (
+          <p className="text-xs text-muted">
+            Shared across the app ({keysSharingEnglish(currentKey).length} places) — one
+            translation updates all.
+          </p>
+        ) : null}
       </div>
 
       <div className="space-y-1.5">
