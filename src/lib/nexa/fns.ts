@@ -1342,6 +1342,17 @@ export const startWithdraw = createServerFn({ method: "POST" })
           );
         }
       }
+
+      // Provider outage notices (Airtel / TNM / bank) — admin toggles
+      {
+        const { getRailOutage, assertRailAllowsWithdraw } = await import("./rail-outage.server");
+        const rail = await getRailOutage(sql);
+        assertRailAllowsWithdraw(rail, method, {
+          phone: profile.phone,
+          bankName: profile.bank_name,
+        });
+      }
+
       const { assertWithdrawAllowed } = await import("./withdraw-limits.server");
       await assertWithdrawAllowed(sql, {
         userId: context.userId,
@@ -3622,6 +3633,53 @@ export const getPayoutMethodsPublic = createServerFn({ method: "GET" })
     return getPayoutMethods(sql);
   });
 
+
+
+/** Public: MoMo/bank outage notice for withdraw UI. */
+export const getRailOutagePublic = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async () => {
+    const { getSql } = await import("@/lib/db");
+    const { getRailOutagePublic: load } = await import("./rail-outage.server");
+    const sql = await getSql();
+    return load(sql);
+  });
+
+export const adminGetRailOutage = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await requireAdmin(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { getRailOutagePublic: load } = await import("./rail-outage.server");
+    const sql = await getSql();
+    return load(sql);
+  });
+
+export const adminSetRailOutage = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator(
+    z.object({
+      enabled: z.boolean(),
+      airtelDown: z.boolean(),
+      tnmDown: z.boolean(),
+      bankDown: z.boolean(),
+      bankNamesDown: z.array(z.string().max(80)).max(20),
+    }),
+  )
+  .handler(async ({ context, data }) => {
+    await requireAdminSensitive(context.userId);
+    const { getSql } = await import("@/lib/db");
+    const { setRailOutage, buildRailOutageMessage } = await import("./rail-outage.server");
+    const { writeAudit } = await import("./audit.server");
+    const sql = await getSql();
+    const saved = await setRailOutage(sql, data);
+    await writeAudit(sql, {
+      actorUserId: context.userId,
+      action: "rail_outage_set",
+      detail: `on=${data.enabled} airtel=${data.airtelDown} tnm=${data.tnmDown} bank=${data.bankDown} names=${data.bankNamesDown.join("|").slice(0, 80)}`,
+    });
+    return { ...saved, message: buildRailOutageMessage(saved) };
+  });
 
 /** Admin: update email (real inbox) and/or phone. Email is marked verified. */
 export const adminUpdateContact = createServerFn({ method: "POST" })
