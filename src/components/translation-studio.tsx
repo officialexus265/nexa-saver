@@ -139,6 +139,11 @@ export function TranslationStudio() {
     else setMsg("End of list. Publish when ready, or Save for now.");
   }
 
+  function goPrev() {
+    setMsg(null);
+    if (index > 0) goTo(index - 1);
+  }
+
   /** Save current phrase (if any), keep draft, leave studio. */
   async function saveForNow() {
     if (!lang) return;
@@ -310,8 +315,14 @@ export function TranslationStudio() {
         <Button type="button" variant="secondary" className="w-full" disabled={busy} onClick={skip}>
           Skip
         </Button>
-        <Button type="button" variant="secondary" className="w-full" disabled={busy} onClick={() => void saveForNow()}>
-          Save for now
+        <Button
+          type="button"
+          variant="secondary"
+          className="w-full"
+          disabled={busy || index <= 0}
+          onClick={goPrev}
+        >
+          Prev
         </Button>
         <Button type="button" className="w-full" disabled={busy} loading={busy} onClick={() => void publishNow()}>
           Publish
