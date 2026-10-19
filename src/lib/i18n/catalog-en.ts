@@ -922,3 +922,8 @@ export function keysSharingEnglish(key: string): MessageKey[] {
   );
   return list.length ? list : [key as MessageKey];
 }
+
+/** English lookup used by the i18n client fallback. */
+export function en(key: string): string {
+  return (EN_CATALOG as Record<string, string>)[key] ?? key;
+}
