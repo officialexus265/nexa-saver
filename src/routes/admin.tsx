@@ -346,6 +346,15 @@ function Console() {
 
 
   const [adminTab, setAdminTab] = useState<"overview" | "accounts" | "money" | "tools" | "ops" | "reversals" | "loans" | "translations" | "legal">("overview");
+  const [navGroupOpen, setNavGroupOpen] = useState<string | null>(null);
+  const navRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!navRef.current?.contains(e.target as Node)) setNavGroupOpen(null);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
 
 
 
@@ -503,17 +512,58 @@ function Console() {
     profit: tambalaToKwacha(row.profit),
   }));
 
-  const tabs = [
-    { id: "overview" as const, label: "Overview" },
-    { id: "accounts" as const, label: "Accounts" },
-    { id: "money" as const, label: "Fees & payouts" },
-    { id: "tools" as const, label: "Tools" },
-    { id: "ops" as const, label: "Ops" },
-    { id: "reversals" as const, label: "Send reversals" },
-    { id: "loans" as const, label: "Loans" },
-    { id: "translations" as const, label: "Translate" },
-    { id: "legal" as const, label: "Legal" },
+  type AdminTabId = typeof adminTab;
+  const tabGroups: Array<{
+    id: string;
+    label: string;
+    items: Array<{ id: AdminTabId; label: string }>;
+  }> = [
+    {
+      id: "home",
+      label: "Home",
+      items: [{ id: "overview", label: "Overview" }],
+    },
+    {
+      id: "users",
+      label: "Users",
+      items: [
+        { id: "accounts", label: "Accounts" },
+        { id: "loans", label: "Loans" },
+        { id: "reversals", label: "Send reversals" },
+      ],
+    },
+    {
+      id: "finance",
+      label: "Finance",
+      items: [{ id: "money", label: "Fees & payouts" }],
+    },
+    {
+      id: "platform",
+      label: "Platform",
+      items: [
+        { id: "tools", label: "Tools" },
+        { id: "ops", label: "Ops" },
+        { id: "legal", label: "Legal" },
+      ],
+    },
+    {
+      id: "content",
+      label: "Content",
+      items: [{ id: "translations", label: "Translate" }],
+    },
   ];
+
+  function groupActive(groupId: string) {
+    const g = tabGroups.find((x) => x.id === groupId);
+    return g ? g.items.some((i) => i.id === adminTab) : false;
+  }
+
+  function groupLabel(groupId: string) {
+    const g = tabGroups.find((x) => x.id === groupId);
+    if (!g) return "";
+    const active = g.items.find((i) => i.id === adminTab);
+    return active ? active.label : g.label;
+  }
 
   return (
     <div className="space-y-5">
@@ -524,35 +574,85 @@ function Console() {
           {overview.demoPayments ? (
             <p className="mt-1 text-sm text-warn">Demo payments are ON. No real money moves.</p>
           ) : null}
-
-
-
         </div>
-        <button
-          type="button"
-          onClick={() => setAdminTab("translations")}
-          className="group inline-flex h-10 items-center justify-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-5 text-sm font-semibold text-primary shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary hover:bg-primary hover:text-primary-fg hover:shadow-md active:translate-y-0"
-        >
-          <span aria-hidden className="text-base leading-none transition-transform duration-200 group-hover:scale-110">文A</span>
-          Translate
-        </button>
       </div>
 
-      <div className="flex gap-1 overflow-x-auto rounded-2xl border border-border bg-surface-2 p-1">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setAdminTab(tab.id)}
-            className={
-              adminTab === tab.id
-                ? "shrink-0 rounded-xl bg-surface px-4 py-2.5 text-sm font-medium text-fg shadow-sm"
-                : "shrink-0 rounded-xl px-4 py-2.5 text-sm text-muted"
-            }
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div
+        ref={navRef}
+        className="flex flex-wrap gap-1 rounded-2xl border border-border bg-surface-2 p-1"
+      >
+        {tabGroups.map((group) => {
+          const single = group.items.length === 1;
+          const open = navGroupOpen === group.id;
+          const active = groupActive(group.id);
+
+          if (single) {
+            const only = group.items[0]!;
+            return (
+              <button
+                key={group.id}
+                type="button"
+                onClick={() => {
+                  setAdminTab(only.id);
+                  setNavGroupOpen(null);
+                }}
+                className={
+                  adminTab === only.id
+                    ? "rounded-xl bg-surface px-4 py-2.5 text-sm font-medium text-fg shadow-sm"
+                    : "rounded-xl px-4 py-2.5 text-sm text-muted hover:text-fg"
+                }
+              >
+                {only.label}
+              </button>
+            );
+          }
+
+          return (
+            <div key={group.id} className="relative">
+              <button
+                type="button"
+                onClick={() => setNavGroupOpen(open ? null : group.id)}
+                className={
+                  active
+                    ? "inline-flex items-center gap-1.5 rounded-xl bg-surface px-4 py-2.5 text-sm font-medium text-fg shadow-sm"
+                    : "inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-sm text-muted hover:text-fg"
+                }
+                aria-expanded={open}
+                aria-haspopup="menu"
+              >
+                {groupLabel(group.id)}
+                <span className="text-xs opacity-70" aria-hidden>
+                  ▾
+                </span>
+              </button>
+              {open ? (
+                <div
+                  role="menu"
+                  className="absolute left-0 top-full z-30 mt-1 min-w-[11rem] overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-lg"
+                >
+                  {group.items.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAdminTab(item.id);
+                        setNavGroupOpen(null);
+                      }}
+                      className={
+                        adminTab === item.id
+                          ? "block w-full px-4 py-2.5 text-left text-sm font-medium text-primary"
+                          : "block w-full px-4 py-2.5 text-left text-sm text-fg hover:bg-surface-2"
+                      }
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
 
       {adminTab === "overview" ? (
