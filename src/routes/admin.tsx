@@ -26,6 +26,7 @@ import {
   adminReverseFalseWithdrawal,
   adminResolveStuckDeposits,
   adminResolvePendingDeposit,
+  adminMarkDepositFailed,
   adminSecurityChecklist,
   adminSetLaunchSettings,
   adminGetLaunchSettings,
@@ -4061,7 +4062,7 @@ function SupportDesk() {
               Recheck PayChangu (credit or clear)
             </Button>
           ) : null}
-          {result.tx.kind === "deposit" && result.tx.status === "pending" ? (
+          {result.tx.kind === "deposit" && (result.tx.status === "pending" || result.tx.status === "processing") ? (
             <div className="space-y-2 border-t border-border pt-3">
               <Label htmlFor="credit-reason">Credit reason (audit log)</Label>
               <Input
@@ -4073,6 +4074,34 @@ function SupportDesk() {
               <Button type="button" className="h-12 w-full sm:h-11" loading={busy} onClick={() => void forceCredit()}>
                 Credit deposit to wallet
               </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-12 w-full sm:h-11"
+                loading={busy}
+                onClick={() => {
+                  const why =
+                    reason.trim() ||
+                    "PayChangu payment link not found / user never paid — closed without credit";
+                  setBusy(true);
+                  setErr(null);
+                  setMsg(null);
+                  void adminMarkDepositFailed({ data: { reference: result.tx.reference, reason: why } })
+                    .then((r) => {
+                      setMsg(r.message);
+                      return adminLookupReference({ data: { reference: result.tx.reference } });
+                    })
+                    .then((look) => setResult(look))
+                    .catch((e) => setErr(errMessage(e)))
+                    .finally(() => setBusy(false));
+                }}
+              >
+                Mark failed (no credit)
+              </Button>
+              <p className="text-xs text-muted">
+                Use when PayChangu has no payment (link not found) or the user abandoned checkout. Clears stuck
+                pending without adding money to the wallet.
+              </p>
             </div>
           ) : null}
           <div className="space-y-2 border-t border-border pt-3">
