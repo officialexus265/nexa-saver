@@ -2044,17 +2044,36 @@ function Console() {
         </p>
         {railOutage ? (
           <div className="space-y-3">
-            <label className="flex items-center gap-3 text-sm font-medium">
-              <input
-                type="checkbox"
-                className="size-4"
-                checked={railOutage.enabled}
-                onChange={(e) =>
-                  setRailOutage((r) => (r ? { ...r, enabled: e.target.checked } : r))
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface-2 px-3 py-3">
+              <div>
+                <p className="text-sm font-medium">Outage notice</p>
+                <p className="text-xs text-muted">
+                  {railOutage.enabled
+                    ? "On — savers see the notice and blocked rails"
+                    : "Off — normal service"}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={railOutage.enabled}
+                aria-label="Toggle outage notice"
+                onClick={() =>
+                  setRailOutage((r) => (r ? { ...r, enabled: !r.enabled } : r))
                 }
-              />
-              Show outage notice (master)
-            </label>
+                className={
+                  "relative h-8 w-14 shrink-0 rounded-full transition-colors " +
+                  (railOutage.enabled ? "bg-primary" : "bg-muted/40")
+                }
+              >
+                <span
+                  className={
+                    "absolute top-1 size-6 rounded-full bg-white shadow transition-transform " +
+                    (railOutage.enabled ? "left-7" : "left-1")
+                  }
+                />
+              </button>
+            </div>
             <label className="flex items-center gap-3 text-sm">
               <input
                 type="checkbox"
