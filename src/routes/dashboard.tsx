@@ -158,6 +158,7 @@ function Vault({
               void (async () => {
                 try {
                   const opts = await userWebAuthnRegisterOptions();
+                  // @ts-expect-error package types resolved at runtime / may be missing in IDE
                   const { startRegistration } = await import("@simplewebauthn/browser");
                   const att = await startRegistration({ optionsJSON: opts });
                   await userWebAuthnRegisterVerify({
@@ -201,7 +202,7 @@ function Vault({
         <div className="mt-4 flex items-end justify-between gap-3">
           {revealed ? (
             <p className="balance-reveal font-display text-4xl font-semibold tabular-nums">
-              {formatKwacha(balance.balanceTambala)}
+              {formatKwacha(balance && !balance.locked ? balance.balanceTambala : 0)}
             </p>
           ) : (
             <p className="font-display text-4xl font-semibold tracking-widest text-faint">••••••</p>
@@ -322,12 +323,12 @@ function Vault({
         <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="font-display text-lg font-semibold">{t("dash.activity")}</h2>
           {txs && txs.length > 0 ? (
-            <Link
-              to="/activity"
+            <a
+              href="/activity"
               className="text-xs font-medium text-primary hover:underline"
             >
               {t("dash.viewAll")}
-            </Link>
+            </a>
           ) : null}
         </div>
         {txs === null ? (
@@ -410,7 +411,7 @@ function Vault({
       />
       <SendModal
         open={sendOpen}
-        isAdmin={profile.role === "admin"}
+        isAdmin={(profile as { role?: string }).role === "admin"}
         onClose={() => setSendOpen(false)}
         onSuccess={(title, body) => {
           setSendOpen(false);
@@ -451,9 +452,9 @@ function Vault({
             : null
         }
         bankHoldUntil={profile.bankHoldUntil ?? null}
-        maxTambala={balance?.balanceTambala ?? 0}
+        maxTambala={balance && !balance.locked ? balance.balanceTambala : 0}
         receivedTambala={(balance as { receivedBalanceTambala?: number })?.receivedBalanceTambala ?? 0}
-        dailyRemainingTambala={balance?.dailyRemainingTambala ?? balance?.balanceTambala ?? 0}
+        dailyRemainingTambala={balance ? balance.dailyWithdrawRemainingTambala : 0}
         holdMessage={balance?.withdrawHoldMessage ?? null}
         revealed={revealed}
         onClose={() => setWithdrawOpen(false)}
@@ -534,28 +535,30 @@ function ActivityDetailModal({
   }, []);
 
   if (!tx) return null;
+  // Narrow for nested functions (TS does not always carry control-flow into closures)
+  const detail = tx;
 
-  const when = new Date(tx.createdAt);
-  const feeTambala = tx.kind === "deposit" ? Math.max(0, tx.grossTambala - tx.creditedTambala) : 0;
+  const when = new Date(detail.createdAt);
+  const feeTambala = detail.kind === "deposit" ? Math.max(0, detail.grossTambala - detail.creditedTambala) : 0;
   const title =
-    tx.kind === "deposit"
+    detail.kind === "deposit"
       ? t("dash.depositDetails")
-      : tx.kind === "transfer_out"
+      : detail.kind === "transfer_out"
         ? t("dash.sendDetails")
-        : tx.kind === "transfer_in"
+        : detail.kind === "transfer_in"
           ? t("dash.receivedDetails")
-          : tx.kind === "fee"
+          : detail.kind === "fee"
             ? t("dash.feeDetails")
             : t("dash.withdrawDetails");
 
   async function copyRef() {
     try {
-      await navigator.clipboard.writeText(tx.reference);
+      await navigator.clipboard.writeText(detail.reference);
       setCopied(true);
       if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
       copyTimerRef.current = window.setTimeout(() => setCopied(false), 2000);
     } catch {
-      window.prompt("Copy reference:", tx.reference);
+      window.prompt("Copy reference:", detail.reference);
     }
   }
 
@@ -563,7 +566,7 @@ function ActivityDetailModal({
     setRevBusy(true);
     setRevMsg(null);
     try {
-      const res = await requestTransferReversal({ data: { reference: tx.reference } });
+      const res = await requestTransferReversal({ data: { reference: detail.reference } });
       setRevMsg(res.message);
       onReversalRequested?.();
     } catch (e) {
@@ -1130,9 +1133,7 @@ function SendModal({
         });
         onSuccess(
           "Sent",
-          `${formatKwacha(res.creditTambala ?? res.amountTambala)} credited to ${res.toName}'s received bag${
-            res.coverBankFlat ? " (includes 700 bank-flat cover)" : ""
-          }. Fee ${formatKwacha(res.feeTambala)} from your balance. Ref ${res.reference}`,
+          `${formatKwacha(res.amountTambala)} sent. Fee ${formatKwacha(res.feeTambala)} from your balance. Ref ${res.reference}`,
         );
       }
     } catch (e) {
