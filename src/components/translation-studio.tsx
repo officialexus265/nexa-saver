@@ -35,7 +35,18 @@ export function TranslationStudio() {
   const [newName, setNewName] = useState("");
   const [showCreate, setShowCreate] = useState(false);
 
-  const keys = useMemo(() => [...ALL_MESSAGE_KEYS], []);
+  const keys = useMemo(() => {
+    // Never show the same English twice (even if catalog list drifts)
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const k of ALL_MESSAGE_KEYS) {
+      const en = (EN_CATALOG as Record<string, string>)[k] ?? k;
+      if (seen.has(en)) continue;
+      seen.add(en);
+      out.push(k);
+    }
+    return out;
+  }, []);
   const total = keys.length;
   const currentKey = keys[index] ?? null;
   const source = currentKey ? english[currentKey] ?? (EN_CATALOG as Record<string, string>)[currentKey] ?? currentKey : "";
@@ -208,7 +219,7 @@ export function TranslationStudio() {
       <Card className="mx-auto max-w-lg space-y-4 p-5">
         <div>
           <h2 className="font-display text-lg font-semibold">Translate</h2>
-          <p className="text-sm text-muted">Choose a language, then translate one phrase at a time.</p>
+          <p className="text-sm text-muted">Choose a language, then translate one phrase at a time. Repeated words across the app appear only once.</p>
         </div>
         {err ? <p className="text-sm text-danger">{err}</p> : null}
         {msg ? <p className="text-sm text-primary">{msg}</p> : null}
@@ -281,7 +292,7 @@ export function TranslationStudio() {
           <p className="text-xs uppercase tracking-wide text-muted">{lang}</p>
           <h2 className="font-display text-lg font-semibold">Translate this phrase</h2>
           <p className="text-xs text-muted">
-            Phrase {index + 1} of {total}
+            Phrase {index + 1} of {total} unique
             {currentKey ? ` · ${currentKey}` : ""}
           </p>
         </div>
